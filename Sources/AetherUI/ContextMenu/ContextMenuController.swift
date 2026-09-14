@@ -966,7 +966,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             traitCollection: source.view?.traitCollection ?? UITraitCollection.current
         ).animationDuration
         UIView.animate(withDuration: dimDuration, delay: 0, options: [.curveEaseOut]) {
-            dim.alpha = 1.0
+            dim.alpha = self.usesLiquidPresentation && self.preview == nil ? 0.0 : 1.0
         }
         if let preview, let previewMenuHost {
             animateInPreview(previewMenuHost: previewMenuHost, lift: preview.lift)

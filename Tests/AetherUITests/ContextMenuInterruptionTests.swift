@@ -49,7 +49,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testOpeningReversesClosingForEverySurfaceAndAnchor() {
+    func testOpeningUsesOneBodyAndKeepsExactEndpointsForEveryAnchor() {
         for width: CGFloat in [44, 106, 160, 240] {
             for height: CGFloat in [160, 470] {
                 for unit in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0.5, y: 1)] {
@@ -68,26 +68,62 @@ final class ContextMenuInterruptionTests: XCTestCase {
                                 sourceRadius: 22, targetRadius: 27, anchor: anchor,
                                 direction: direction, rawProgress: raw, reduceMotion: false)
                         }
-                        XCTAssertEqual(sample(.opening), sample(.closing))
+                        let opening = sample(.opening)
+                        if frame == 0 || frame == 120 {
+                            XCTAssertEqual(opening, sample(.closing))
+                        } else {
+                            XCTAssertEqual(opening.headAlpha, 0)
+                            XCTAssertEqual(opening.bridgeRadius, 0)
+                            XCTAssertEqual(opening.bodyAlpha, 1)
+                            XCTAssertGreaterThan(opening.bodyFrame.width, 0)
+                            XCTAssertGreaterThan(opening.bodyFrame.height, 0)
+                            if raw < 0.3 { XCTAssertLessThanOrEqual(opening.bodyFrame.width, width) }
+                        }
                     }
                 }
             }
         }
     }
 
-    func testOpeningReversesRenderedContentWithoutIndependentGlyphZoom() throws {
-        for appearance in AetherAppearanceStyle.allCases {
-            let host = makeHost(appearance: appearance)
-            defer { host.tearDownGlassEffects() }
-            for frame in 0...60 {
-                let raw = CGFloat(frame) / 60
-                host.setProgress(raw, direction: .opening)
-                let views = try menuContentViews(in: host) + [host.sourceProxyContainer, host.finalMenuGlassSurfaceView]
-                let opening = views.map(ViewRendering.init)
-                host.setProgress(raw, direction: .closing)
-                for (view, expected) in zip(views, opening) { assertRendering(view, equals: expected) }
-            }
+    func testOpeningDoesNotRoundACustomSourceBeforeItsCaptionFades() {
+        let source = CGRect(x: 40, y: 70, width: 160, height: 44)
+        let target = CGRect(x: 40, y: 70, width: 255, height: 170)
+        for radius: CGFloat in [4, 12, 22] {
+            let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                outerFrame: source, outerCornerRadii: .uniform(radius),
+                sourceRadius: radius, targetRadius: 27, anchor: .detect(source: source, target: target),
+                direction: .opening, rawProgress: 0.1, reduceMotion: false)
+            XCTAssertEqual(sample.bodyFrame, source)
+            XCTAssertEqual(sample.bodyCornerRadii, .uniform(radius))
         }
+    }
+
+    func testSourceCaptionFadesBeforeOpeningShapeLeavesItsButton() {
+        let host = makeHost(appearance: .legacy, menuHeight: 160, sourceWidth: 160)
+        defer { host.tearDownGlassEffects() }
+        host.setProgress(0.15, direction: .opening)
+        XCTAssertLessThan(host.sourceProxyContainer.alpha, 0.25)
+        XCTAssertEqual(host.finalMenuGlassSurfaceView.bounds.size, CGSize(width: 160, height: 44))
+        host.setProgress(0.30, direction: .opening)
+        XCTAssertEqual(host.sourceProxyContainer.alpha, 0)
+        XCTAssertLessThan(host.finalMenuGlassSurfaceView.bounds.width, 80)
+    }
+
+    func testClosingOpticsFollowElapsedTimeInsteadOfAcceleratingWithGeometry() {
+        let host = makeHost(appearance: .legacy, menuHeight: 160, sourceWidth: 160)
+        defer { host.tearDownGlassEffects() }
+        host.setProgress(1)
+        host.animateCollapse(duration: 0.52, damping: 0.86)
+        host.advanceAnimation(to: 10)
+        var intermediateCaptionFrames = 0
+        for frame in 1...36 {
+            host.advanceAnimation(to: 10 + Double(frame) / 120)
+            let alpha = host.sourceProxyContainer.alpha
+            if alpha > 0.05 && alpha < 0.95 { intermediateCaptionFrames += 1 }
+        }
+        XCTAssertGreaterThanOrEqual(intermediateCaptionFrames, 8,
+            "Focusing the source must span more than a couple of display frames")
+        XCTAssertEqual(host.sourceProxyContainer.alpha, 1, accuracy: 0.001)
     }
 
     func testClosingContractionStartsOnTheFirstReferenceFrameAndReboundsFromSourceSizedEgg() {

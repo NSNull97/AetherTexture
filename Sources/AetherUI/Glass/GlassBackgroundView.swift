@@ -532,6 +532,18 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
     /// returns a copy on current SDKs, so pointer identity cannot prove that a
     /// transition retained one live native renderer.
     internal private(set) var nativeGlassEffectAssignmentCountForTesting = 0
+    var nativeDescriptorOptions = NativeGlassDescriptorOptions() {
+        didSet {
+            guard nativeDescriptorOptions != oldValue else { return }
+            params = nil
+            setNeedsLayout()
+        }
+    }
+    private var requestedNativeEffectStyle = 0
+    private var appliedNativeEffectStyle: Int?
+    private var appliedNativeDescriptorOptions: NativeGlassDescriptorOptions?
+    internal private(set) var nativeContentLensingApplied = false
+
 
     /// Opacity of the optical material only. Endpoint content hosted in
     /// `transitionContentView` is deliberately unaffected.
@@ -2540,6 +2552,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
         }
 
         let effect: UIGlassEffect
+        requestedNativeEffectStyle = 0
         switch tintColor.kind {
         case .panel:
             effect = UIGlassEffect(style: .regular)
@@ -2550,6 +2563,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
                 : UIColor(white: 1.0, alpha: style == .prominent ? 0.12 : 0.06)
 
         case .clear:
+            requestedNativeEffectStyle = 1
             effect = UIGlassEffect(style: .clear)
             effect.tintColor = isDark ? UIColor(white: 0.0, alpha: 0.18) : nil
 
@@ -2558,12 +2572,18 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
             case .default:
                 effect = UIGlassEffect(style: .regular)
             case .clear:
+                requestedNativeEffectStyle = 1
                 effect = UIGlassEffect(style: .clear)
             }
             effect.tintColor = color
         }
 
         effect.isInteractive = isInteractive
+        if let configured = NativeGlassDescriptorAdapter.applying(nativeDescriptorOptions, to: effect) {
+            nativeContentLensingApplied = nativeDescriptorOptions.contentLensing
+            return configured
+        }
+        nativeContentLensingApplied = false
         return effect
     }
 
@@ -2574,6 +2594,9 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
         transition: ContainedViewLayoutTransition
     ) {
         guard let desiredEffect else {
+            appliedNativeEffectStyle = nil
+            appliedNativeDescriptorOptions = nil
+            nativeContentLensingApplied = false
             guard nativeView.effect is UIGlassEffect else {
                 return
             }
@@ -2594,10 +2617,14 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
 
         if let current = nativeView.effect as? UIGlassEffect,
            current.tintColor == desiredEffect.tintColor,
-           current.isInteractive == desiredEffect.isInteractive {
+           current.isInteractive == desiredEffect.isInteractive,
+           appliedNativeEffectStyle == requestedNativeEffectStyle,
+           appliedNativeDescriptorOptions == nativeDescriptorOptions {
             return
         }
 
+        appliedNativeEffectStyle = requestedNativeEffectStyle
+        appliedNativeDescriptorOptions = nativeDescriptorOptions
         nativeGlassEffectAssignmentCountForTesting += 1
         if transition.isAnimated {
             transition.animateView { nativeView.effect = desiredEffect }

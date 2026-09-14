@@ -4,14 +4,14 @@ import UIKit
 
 final class AetherMotionTests: XCTestCase {
     func testShortMenuReturnsBlurredSourceBeforeGlassHasFinishedCollapsing() {
-        // Recording: source begins returning near 110ms, focuses near 210ms.
+        // Source optics use the 520 ms linear clock, independently of geometry.
         let early = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.110 / 0.32, direction: .closing, menuHeight: 160
+            rawProgress: 1 - 0.140 / 0.52, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(early.opacity, 0.001)
         XCTAssertGreaterThan(early.blurRadius, 4)
         let readable = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.215 / 0.32, direction: .closing, menuHeight: 160
+            rawProgress: 1 - 0.285 / 0.52, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(readable.opacity, 0.95)
         XCTAssertLessThan(readable.blurRadius, 0.5)
@@ -26,11 +26,11 @@ final class AetherMotionTests: XCTestCase {
     }
 
     func testShortMenuDoesNotHoldAnEmptyLensForAnother120Milliseconds() {
-        let rowProgress = contextMenuClosingContentProgress(rawProgress: 1 - 0.090 / 0.32, menuHeight: 160)
+        let rowProgress = contextMenuClosingContentProgress(rawProgress: 1 - 0.090 / 0.52, menuHeight: 160)
         let rows = contextMenuBloomClosingContentWeights(at: rowProgress)
         XCTAssertEqual(rows.live + rows.sharp + rows.blurred, 0, accuracy: 0.0001)
         let source = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.130 / 0.32, direction: .closing, menuHeight: 160
+            rawProgress: 1 - 0.175 / 0.52, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(source.opacity, 0.1)
     }
@@ -968,7 +968,7 @@ final class AetherMotionTests: XCTestCase {
                     XCTAssertGreaterThan(sample.neckBulbRadius, sample.bridgeRadius)
                 }
             }
-            XCTAssertTrue(sawActiveNeck, "Both directions must traverse the same connected neck")
+            XCTAssertEqual(sawActiveNeck, direction == .closing, "Only dismissal retains a separate connected source neck")
 
             let reducedSample = contextMenuGlassmorphicSample(
                 rawProgress: 0.5,

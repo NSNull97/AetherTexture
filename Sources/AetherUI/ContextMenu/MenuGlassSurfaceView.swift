@@ -184,6 +184,16 @@ public final class MenuGlassSurfaceView: UIView {
         setSurfaceCornerRadii(surfaceCornerRadii)
     }
 
+    /// Confined to the transition host; ordinary popup/legacy surfaces retain
+    /// their own material and shadow behavior.
+    func configureTransitionOptics(contentLensing: Bool, excludesShadow: Bool) {
+        surfaceView?.nativeDescriptorOptions = .init(contentLensing: contentLensing, excludesShadow: excludesShadow)
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    var usesNativeContentLensing: Bool { surfaceView?.nativeContentLensingApplied == true }
+
     func updateMaterialThickness(_ progress: CGFloat) {
         guard surfaceView?.usesLiquidGlassAppearance == true else {
             scatteringView.backgroundColor = .clear

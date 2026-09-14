@@ -13,7 +13,7 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
                                      direction: ContextMenuBloomDirection = .opening) -> (progress: CGFloat, rebound: CGFloat) {
     let t = max(0, min(1, fraction))
     if reduceMotion { return (t * t * (3 - 2 * t), 0) }
-    let progress = contextMenuBloomSample(times: [0, 0.20, 0.50, 0.72, 1],
+    let progress = direction == .opening ? t : contextMenuBloomSample(times: [0, 0.20, 0.50, 0.72, 1],
                                          values: [0, 0.10, 0.68, 0.99, 1], at: t)
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
@@ -25,7 +25,7 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
     return (progress, 0.014 * envelope)
 }
 
-/// Independent clocks measured from the first changing dismissal frame.
+/// Linear time samples (0 = source, 1 = menu), independent of eased geometry.
 /// The source becomes readable inside the still-collapsing surface; it must
 /// not wait for the tiny source lobe to finish growing back into a button.
 struct ContextMenuSourceMaterializationSample: Equatable {
@@ -41,28 +41,46 @@ func contextMenuSourceMaterializationSample(
 ) -> ContextMenuSourceMaterializationSample {
     let t = max(0.0, min(1.0, rawProgress))
     if direction == .opening {
-        let fade = contextMenuBloomSmoothRange(t, start: 0.02, end: 0.18)
+        let fade = contextMenuBloomSmoothRange(t, start: 0.02, end: 0.20)
         return .init(opacity: 1.0 - fade, blurRadius: 0.0)
     }
     let elapsed = 1.0 - t
     let heightFactor = max(0.0, min(1.0, (menuHeight - 180.0) / 220.0))
-    let revealStart = 0.30 + 0.08 * heightFactor
-    let reveal = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.68)
-    let focus = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.68)
+    let revealStart = 0.23 + 0.06 * heightFactor
+    let reveal = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.54 + 0.06 * heightFactor)
+    let focus = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.54 + 0.06 * heightFactor)
     return .init(
         opacity: reveal,
         blurRadius: reduceMotion ? 0.0 : 8.0 * (1.0 - focus)
     )
 }
 
-/// A short menu loses its rows in ~81 ms; a tall platter needs ~129 ms.
+/// At the 520 ms time clock, short/tall menus lose rows in ~79/~131 ms.
 /// Both finish before the source content returns. Heights are UIKit points,
 /// not screen-recording pixels, so the clock is stable across device scales.
 func contextMenuClosingContentProgress(rawProgress: CGFloat, menuHeight: CGFloat) -> CGFloat {
     let elapsed = 1.0 - max(0.0, min(1.0, rawProgress))
     let heightFactor = max(0.0, min(1.0, (menuHeight - 180.0) / 220.0))
-    let dissolveFraction = 0.30 + 0.18 * heightFactor
+    let dissolveFraction = 0.18 + 0.12 * heightFactor
     return max(0.0, 1.0 - elapsed / dissolveFraction)
+}
+
+/// The closing shape is eased, but text must retain its measured time windows.
+/// This inverse also gives deterministic optical samples when inspecting a
+/// frozen geometric state without a running display link.
+func contextMenuLiquidTime(forProgress progress: CGFloat) -> CGFloat {
+    let progress = max(0, min(1, progress))
+    if progress == 0 || progress == 1 { return progress }
+    var lower: CGFloat = 0
+    var upper: CGFloat = 1
+    for _ in 0..<24 {
+        let middle = (lower + upper) * 0.5
+        if contextMenuLiquidAnimationSample(fraction: middle, reduceMotion: false,
+                                            direction: .closing).progress < progress {
+            lower = middle
+        } else { upper = middle }
+    }
+    return (lower + upper) * 0.5
 }
 
 private func contextMenuOpeningLiquidProgress(_ rawProgress: CGFloat) -> CGFloat {
@@ -192,6 +210,35 @@ func contextMenuBloomAnchoredFrame(
         width: contentSize.width,
         height: contentSize.height
     )
+}
+
+/// Opening has one continuous body: the caption fades, the source pinches
+/// into a compact lens, then that lens expands. A returning shoulder belongs
+/// to dismissal and must not survive as a second lobe during presentation.
+private func contextMenuReferenceOpeningGeometry(
+    source: CGRect, target: CGRect, sourceRadius: CGFloat, targetRadius: CGFloat,
+    anchor: ContextMenuBloomAnchor, progress: CGFloat, reduceMotion: Bool
+) -> ContextMenuBloomGeometrySample {
+    let t = max(0, min(1, progress))
+    if t == 0 { return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0) }
+    if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
+    let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
+    let growth = contextMenuBloomSample(times: [0, 0.30, 0.40, 0.52, 0.66, 0.82, 1],
+                                       values: [0, 0, 0.19, 0.55, 0.90, 1, 1], at: t)
+    let expand = reduceMotion ? contextMenuBloomSmootherstep(t) : growth
+    let diameter = min(source.width * 0.72, source.height * 1.38)
+    let egg = CGRect(x: source.midX - diameter * 0.5,
+                     y: source.midY - source.height * 0.61 + (0.5 - anchor.unitPoint.y) * source.height * 0.7,
+                     width: diameter, height: source.height * 1.22)
+    func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b-a)*t }
+    let seed = CGRect(x: lerp(source.minX, egg.minX, pinch), y: lerp(source.minY, egg.minY, pinch),
+                      width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
+    let frame = CGRect(x: lerp(seed.minX, target.minX, expand), y: lerp(seed.minY, target.minY, expand),
+                       width: lerp(seed.width, target.width, expand), height: lerp(seed.height, target.height, expand))
+    let rounding = reduceMotion ? expand : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.84)
+    let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)
+    let radius = lerp(seedRadius, targetRadius, rounding)
+    return .init(frame: frame, cornerRadii: .uniform(radius), widthT: expand, heightT: expand, anchorTravelT: expand)
 }
 
 /// Pure geometry resolver shared by production and tests. `rawProgress` is
@@ -621,8 +668,9 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
     }
 }
 
-/// Both directions sample the same silhouette. Reversing the clock now
-/// reverses the actual liquid motion, including shoulder/neck ownership.
+/// Opening pulls one compact lens from the source; dismissal preserves the
+/// measured connected shoulder and lower lobe. Reversals capture the rendered
+/// shape before switching paths.
 func contextMenuGlassmorphicGeometrySample(
     source: CGRect, target: CGRect, outerFrame: CGRect,
     outerCornerRadii: ContextMenuBloomCornerRadii,
@@ -630,6 +678,15 @@ func contextMenuGlassmorphicGeometrySample(
     anchor: ContextMenuBloomAnchor, direction: ContextMenuBloomDirection,
     rawProgress: CGFloat, reduceMotion: Bool
 ) -> ContextMenuGlassmorphicGeometrySample {
+    if direction == .opening && rawProgress > 0 && rawProgress < 1 {
+        let geometry = contextMenuReferenceOpeningGeometry(source: source, target: target,
+            sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
+            progress: rawProgress, reduceMotion: reduceMotion)
+        return .init(headFrame: source, bodyFrame: geometry.frame, headRotation: 0, bodyRotation: 0,
+            headRadius: sourceRadius, bodyCornerRadii: geometry.cornerRadii,
+            bridgeStart: source.origin, bridgeEnd: source.origin, bridgeRadius: 0,
+            neckBulbCenter: source.origin, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
+    }
     let outer = contextMenuBloomGeometrySample(
         source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
         anchor: anchor, direction: .closing, rawProgress: rawProgress, reduceMotion: reduceMotion)
@@ -1451,6 +1508,11 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
         super.init(frame: .zero)
 
+        self.finalMenuGlassSurfaceView.configureTransitionOptics(contentLensing: true, excludesShadow: true)
+        self.sourceSeedGlassSurfaceView.configureTransitionOptics(contentLensing: true, excludesShadow: true)
+        self.bridgeGlassSurfaceView.configureTransitionOptics(contentLensing: true, excludesShadow: true)
+        self.bridgeContinuationGlassSurfaceView.configureTransitionOptics(contentLensing: true, excludesShadow: true)
+
         backgroundColor = .clear
         clipsToBounds = false
         layer.masksToBounds = false
@@ -1806,6 +1868,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 y: Self.lerp(state.sourceContentFrame.minY, startFrame.minY, t),
                 width: startFrame.width, height: startFrame.height
             )
+        } else if animationDirection >= 0 {
+            sourceProxyContainer.frame = startFrame
         } else {
             let attached = contextMenuBloomAnchoredFrame(
                 contentSize: startFrame.size,
@@ -1929,6 +1993,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             ))
             return Self.interpolate(state.sourceContentTransform, .identity, t)
         }
+        if animationDirection >= 0 { return .identity }
         var body = finalMenuGlassSurfaceView.convert(finalMenuGlassSurfaceView.bounds, to: self)
         if !sourceSeedGlassSurfaceView.isHidden {
             body = body.union(sourceSeedGlassSurfaceView.convert(sourceSeedGlassSurfaceView.bounds, to: self))
@@ -1971,8 +2036,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             )
         }
         return contextMenuSourceMaterializationSample(
-            rawProgress: rawT,
-            direction: .closing,
+            rawProgress: animationDirection >= 0 ? rawT : 1 - opticalElapsed(rawT: rawT),
+            direction: animationDirection >= 0 ? .opening : .closing,
             menuHeight: targetMenuFrameInOverlay.height,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
@@ -2138,6 +2203,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         contentRevealProgressChanged?(reveal)
     }
 
+    private func opticalElapsed(rawT: CGFloat) -> CGFloat {
+        if progressDisplayLink != nil && animationDuration > 0 {
+            return min(1, animationElapsed / animationDuration)
+        }
+        return contextMenuLiquidTime(forProgress: 1 - rawT)
+    }
+
     private func contentTimelineProgress(rawT: CGFloat) -> CGFloat {
         let t = max(0.0, min(1.0, rawT))
         if let interruptedCollapse {
@@ -2152,11 +2224,15 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 )
             )
         }
-        return contextMenuClosingContentProgress(rawProgress: t, menuHeight: targetMenuFrameInOverlay.height)
+        if animationDirection >= 0 {
+            return contextMenuBloomNormalize(t, start: 0.38, end: 0.82)
+        }
+        return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
 
     private func installContentDistortionFilterIfAvailable() {
-        guard usesOpticalDistortion, contentSDFFilter == nil else { return }
+        guard usesOpticalDistortion, contentSDFFilter == nil,
+              !finalMenuGlassSurfaceView.usesNativeContentLensing else { return }
         if #available(iOS 26.0, *), let filter = LensSDFFilter() {
             let size = targetMenuFrameInOverlay.size
             filter.install(
@@ -2240,6 +2316,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     private func updateContentSDFDistortion(rawT: CGFloat, liveMix: CGFloat, interruptionBlend: CGFloat? = nil) {
+        // The native descriptor may become active on the first sized layout.
+        // Remove a provisional fallback rather than refracting glyphs twice.
+        if finalMenuGlassSurfaceView.usesNativeContentLensing {
+            if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter { filter.uninstall() }
+            contentSDFFilter = nil
+            displayedContentDistortion = .zero
+            return
+        }
         if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter {
             guard !UIAccessibility.isReduceMotionEnabled else {
                 filter.setDisplacementHeight(0)
@@ -2264,7 +2348,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             let phase = Self.smootherstep(0.20, 0.90, t)
             let lensBell = sin(.pi * phase)
             let snapshotVisibility = max(0.0, min(1.0, snapshotContainer.alpha))
-            let liveDecay = 1.0 - Self.smootherstep(0.0, 0.08, liveMix)
+            let liveDecay = 1.0 - Self.smootherstep(0.35, 1.0, liveMix)
             let intensity = max(
                 0.0,
                 lensBell * sqrt(snapshotVisibility) * liveDecay
@@ -2341,6 +2425,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         if animationDirection < 0, let interruptedCollapse {
             return interruptedCollapseMetrics(rawT: rawT, state: interruptedCollapse)
         }
+        if animationDirection >= 0 {
+            let sample = contextMenuReferenceOpeningGeometry(source: startFrame, target: targetMenuFrameInOverlay,
+                sourceRadius: startCornerRadius, targetRadius: finalCornerRadius, anchor: bloomAnchor,
+                progress: rawT, reduceMotion: UIAccessibility.isReduceMotionEnabled)
+            return Metrics(frame: sample.frame, cornerRadii: sample.cornerRadii)
+        }
         let sample = contextMenuBloomGeometrySample(
             source: startFrame,
             target: targetMenuFrameInOverlay,
@@ -2395,7 +2485,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             sourceRadius: startCornerRadius,
             targetRadius: finalCornerRadius,
             anchor: bloomAnchor,
-            direction: .closing,
+            direction: animationDirection >= 0 ? .opening : .closing,
             rawProgress: rawT,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
