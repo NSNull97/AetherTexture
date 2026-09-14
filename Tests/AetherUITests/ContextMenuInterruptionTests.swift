@@ -49,7 +49,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testOpeningUsesOneBodyAndKeepsExactEndpointsForEveryAnchor() {
+    func testOpeningKeepsConnectedSeedAndExactEndpointsForEveryAnchor() {
         for width: CGFloat in [44, 106, 160, 240] {
             for height: CGFloat in [160, 470] {
                 for unit in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0.5, y: 1)] {
@@ -72,7 +72,10 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         if frame == 0 || frame == 120 {
                             XCTAssertEqual(opening, sample(.closing))
                         } else {
-                            XCTAssertEqual(opening.headAlpha, 0)
+                            if opening.headAlpha > 0 {
+                                XCTAssertTrue(opening.headFrame.intersects(opening.bodyFrame), "Seed fields must stay connected")
+                                XCTAssertTrue((0.18...0.38).contains(raw))
+                            }
                             XCTAssertEqual(opening.bridgeRadius, 0)
                             XCTAssertEqual(opening.bodyAlpha, 1)
                             XCTAssertGreaterThan(opening.bodyFrame.width, 0)
@@ -102,8 +105,11 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertLessThan(sample(.zero, 0.75).bodyFrame.minY, lens.bodyFrame.minY)
         XCTAssertEqual(lens.bodyRotation, 0, "Readable content must not turn with a rigid platter")
         let seed = sample(.zero, 0.28)
-        XCTAssertLessThan(seed.bodyRotation, 0)
-        XCTAssertEqual(seed.bodyRotation, -sample(CGPoint(x: 1, y: 0), 0.28).bodyRotation, accuracy: 0.001)
+        XCTAssertEqual(seed.bodyRotation, 0)
+        XCTAssertEqual(seed.headRotation, 0)
+        XCTAssertGreaterThan(seed.headAlpha, 0)
+        XCTAssertFalse(seed.bodyFrame.contains(seed.headFrame), "The early silhouette must deform, not just rotate a capsule")
+        XCTAssertEqual(sample(.zero, 0.40).headAlpha, 0, "The accepted later opening keeps one lens")
         XCTAssertEqual(sample(.zero, 0.28, reduceMotion: true).bodyRotation, 0)
         for height: CGFloat in [160, 470] {
             for frame in 0...120 {

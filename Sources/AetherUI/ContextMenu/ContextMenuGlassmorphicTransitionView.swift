@@ -714,26 +714,33 @@ func contextMenuGlassmorphicGeometrySample(
         let geometry = contextMenuReferenceOpeningGeometry(source: source, target: target,
             sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
             progress: rawProgress, reduceMotion: reduceMotion)
-        let flowX = target.midX - source.midX
-        let flowY = target.midY - source.midY
-        let inclination = -flowX / max(1, hypot(flowX, flowY)) * (flowY < 0 ? -0.16 : 0.16)
-        let pull = contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.28)
-            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.28, end: 0.44))
-        // Only the seed inclines. Rotating the readable platter looks like
-        // opening a rigid panel, rather than a changing liquid contour.
-        let rotation = reduceMotion ? 0 : inclination * pull
-        // Rotate around the anchored edge rather than letting the bounding
-        // box swing beyond the screen-side/top edge. This compensation is
-        // continuous with the inclination and needs no positional clamp.
-        let rotatedWidth = geometry.frame.width * abs(cos(rotation)) + geometry.frame.height * abs(sin(rotation))
-        let rotatedHeight = geometry.frame.height * abs(cos(rotation)) + geometry.frame.width * abs(sin(rotation))
-        let frame = geometry.frame.offsetBy(
-            dx: (0.5 - anchor.unitPoint.x) * (rotatedWidth - geometry.frame.width),
-            dy: (0.5 - anchor.unitPoint.y) * (rotatedHeight - geometry.frame.height))
-        return .init(headFrame: source, bodyFrame: frame, headRotation: 0, bodyRotation: rotation,
-            headRadius: sourceRadius, bodyCornerRadii: geometry.cornerRadii,
+        // Deform the source outline itself. Two heavily overlapping native
+        // glass fields exchange volume: the leading belly swells while a
+        // smaller trailing lobe is absorbed. Neither field rotates as a
+        // rigid button. The extra lobe starts/ends wholly inside the body.
+        let deformation = reduceMotion ? 0 : contextMenuBloomSmoothRange(rawProgress, start: 0.18, end: 0.25)
+            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.25, end: 0.38))
+        let base = geometry.frame
+        let directionX: CGFloat = target.midX >= source.midX ? 1 : -1
+        let directionY: CGFloat = anchor.unitPoint.y < 0.5 ? 1 : -1
+        let body = base.insetBy(dx: base.width * 0.18 * deformation, dy: -base.height * 0.10 * deformation)
+            .offsetBy(dx: directionX * base.width * 0.12 * deformation,
+                      dy: directionY * base.height * 0.10 * deformation)
+        let headWidth = min(base.width * 0.50, body.height * 0.92)
+        let headHeight = min(base.height * 0.70, headWidth * 0.90)
+        let head = CGRect(
+            x: base.midX - directionX * base.width * 0.25 * deformation - headWidth * 0.5,
+            y: base.midY - directionY * base.height * 0.18 * deformation - headHeight * 0.5,
+            width: headWidth, height: headHeight)
+        let dropRadius = min(body.width, body.height) * 0.5
+        func radius(_ value: CGFloat) -> CGFloat { value + (dropRadius - value) * deformation }
+        let radii = ContextMenuBloomCornerRadii(
+            topLeft: radius(geometry.cornerRadii.topLeft), topRight: radius(geometry.cornerRadii.topRight),
+            bottomLeft: radius(geometry.cornerRadii.bottomLeft), bottomRight: radius(geometry.cornerRadii.bottomRight))
+        return .init(headFrame: head, bodyFrame: body, headRotation: 0, bodyRotation: 0,
+            headRadius: min(headWidth, headHeight) * 0.5, bodyCornerRadii: radii,
             bridgeStart: source.origin, bridgeEnd: source.origin, bridgeRadius: 0,
-            neckBulbCenter: source.origin, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
+            neckBulbCenter: source.origin, neckBulbRadius: 0, headAlpha: deformation > 0 ? 1 : 0, bodyAlpha: 1)
     }
     let outer = contextMenuBloomGeometrySample(
         source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
