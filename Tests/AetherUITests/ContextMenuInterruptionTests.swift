@@ -113,6 +113,8 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(arriving.headAlpha, 0)
         XCTAssertEqual(arriving.bodyFrame.midX, source.minX + 255 * 0.5, accuracy: 0.0001,
             "The compact drop must reach the destination centre before most of the widening")
+        XCTAssertEqual(arriving.bodyFrame.midY, source.minY + 470 * 0.5, accuracy: 0.0001,
+            "Vertical arrival must use the same clock as horizontal arrival")
         XCTAssertLessThan(arriving.bodyFrame.width, 255 * 0.65)
         XCTAssertEqual(sample(.zero, 0.28, reduceMotion: true).bodyRotation, 0)
         for height: CGFloat in [160, 470] {
@@ -138,6 +140,16 @@ final class ContextMenuInterruptionTests: XCTestCase {
             let left = sample(.zero, t)
             let right = sample(CGPoint(x: 1, y: 0), t)
             let up = sample(CGPoint(x: 0, y: 1), t)
+            let horizontalTravel = (left.bodyFrame.midX - source.midX) / (167 * 0.5)
+            let verticalTravel = (left.bodyFrame.midY - source.midY) / (426 * 0.5)
+            XCTAssertGreaterThanOrEqual(verticalTravel + 0.0001, horizontalTravel,
+                "The drop must descend before completing its inward travel")
+            XCTAssertGreaterThan(horizontalTravel, 0)
+            XCTAssertGreaterThan(verticalTravel, 0)
+            if t >= 0.40 {
+                XCTAssertEqual(horizontalTravel, 1, accuracy: 0.0001)
+                XCTAssertEqual(verticalTravel, 1, accuracy: 0.0001)
+            }
             XCTAssertEqual(left.bodyFrame.width, right.bodyFrame.width, accuracy: 0.0001)
             XCTAssertEqual(left.bodyFrame.midX + right.bodyFrame.midX, 2 * source.midX, accuracy: 0.0001)
             XCTAssertEqual(left.bodyFrame.midY + up.bodyFrame.midY, 2 * source.midY, accuracy: 0.0001)

@@ -249,20 +249,17 @@ private func contextMenuReferenceOpeningGeometry(
                  min(target.height * 0.55, target.width * 0.48), lensHeight,
                  lerp(lensHeight, target.height, 0.65), target.height, target.height], at: t)
     let heightT = max(0, min(1, (height - seed.height) / max(1, target.height - seed.height)))
-    let unit = anchor.unitPoint
-    // Let the trailing edge leave the source and travel back as the lens
-    // fills out. Keeping it fixed makes even a soft curve read as a hinge.
-    let release = reduceMotion ? 0 : contextMenuBloomSample(
-        times: [0, 0.20, 0.34, 0.46, 0.62, 0.82, 1],
-        values: [0, 0, 0.65, 1, 0.62, 0, 0], at: t)
-    // The compact mass travels ahead of its widening edge. Anchoring width
-    // growth at the source made the menu unfold sideways before the drop had
-    // reached the destination's centre line.
+    // A single centre trajectory carries the compact drop into the menu.
+    // Deriving Y from an anchored growing rectangle while moving X ahead
+    // made the seed slide sideways; both axes must share the arrival clock.
     let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.40)
+    // Quadratic travel bends toward the destination: the vertical component
+    // leads while the compact body leaves the button, then the horizontal
+    // component catches up. Both arrive together, with zero end velocity.
+    let bend = reduceMotion ? 0 : 0.5 * centerTravel * (1 - centerTravel)
     let frame = CGRect(
-        x: lerp(source.midX, target.midX, centerTravel) - width * 0.5,
-        y: lerp(seed.minY + seed.height * unit.y, target.minY + target.height * unit.y, travel) - height * unit.y
-            + (1 - 2 * unit.y) * min(source.height * 0.72, target.height * 0.14) * release,
+        x: lerp(source.midX, target.midX, centerTravel - bend) - width * 0.5,
+        y: lerp(source.midY, target.midY, centerTravel + bend) - height * 0.5,
         width: width, height: height)
     let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.88)
     let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)

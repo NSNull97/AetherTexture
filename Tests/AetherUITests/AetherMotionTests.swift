@@ -220,8 +220,8 @@ final class AetherMotionTests: XCTestCase {
         XCTAssertEqual(AetherMotion.bottomBarAccessoryResize.dampingRatio, 0.80, accuracy: 0.001)
         XCTAssertEqual(AetherMotion.bottomBarAccessoryResize.initialVelocity, 0.10, accuracy: 0.001)
 
-        XCTAssertEqual(AetherMotion.contextMenu.presentation.duration, 0.468, accuracy: 0.001)
-        XCTAssertEqual(AetherMotion.contextMenu.dismissal.duration, 0.468, accuracy: 0.001)
+        XCTAssertEqual(AetherMotion.contextMenu.presentation.duration, 0.44, accuracy: 0.001)
+        XCTAssertEqual(AetherMotion.contextMenu.dismissal.duration, 0.44, accuracy: 0.001)
         XCTAssertEqual(
             AetherMotion.contextMenu.dismissal.duration,
             AetherMotion.contextMenu.presentation.duration
@@ -283,8 +283,8 @@ final class AetherMotionTests: XCTestCase {
 
     func testContextMenuGlassmorphicUsesReferenceTimingProfile() {
         let timing = ContextMenuController.glassmorphicTiming
-        XCTAssertEqual(timing.openDuration, 0.468, accuracy: 0.001)
-        XCTAssertEqual(timing.closeDuration, 0.468, accuracy: 0.001)
+        XCTAssertEqual(timing.openDuration, 0.44, accuracy: 0.001)
+        XCTAssertEqual(timing.closeDuration, 0.44, accuracy: 0.001)
         XCTAssertEqual(timing.closeDuration, timing.openDuration, accuracy: 0.001)
     }
 
