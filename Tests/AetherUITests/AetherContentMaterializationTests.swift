@@ -4,6 +4,31 @@ import UIKit
 
 @MainActor
 final class AetherContentMaterializationTests: XCTestCase {
+    func testMenuCapturePreservesCaptionOpacityWithoutChangingNavigationCapture() throws {
+        let caption = UILabel(frame: CGRect(x: 0, y: 0, width: 220, height: 44))
+        caption.text = "A very long menu title"
+        caption.font = .systemFont(ofSize: 17, weight: .medium)
+        caption.textColor = .black
+        for opacity: CGFloat in [0.3, 0.5, 1] {
+            caption.alpha = opacity
+            let leased = try XCTUnwrap(AetherContentMaterialization.captureContent(
+                of: caption, preservingRootOpacity: true))
+            let navigation = try XCTUnwrap(AetherContentMaterialization.captureContent(of: caption))
+            XCTAssertEqual(caption.alpha, opacity, accuracy: 0.001)
+            XCTAssertEqual(leased.size, caption.bounds.size)
+            let leasedPixels = try pixels(leased)
+            let navigationPixels = try pixels(navigation)
+            let leasedAlphas = stride(from: 3, to: leasedPixels.count, by: 4).map { leasedPixels[$0] }
+            let navigationAlphas = stride(from: 3, to: navigationPixels.count, by: 4).map { navigationPixels[$0] }
+            XCTAssertEqual(Double(leasedAlphas.max() ?? 0), Double(opacity * 255), accuracy: 2)
+            XCTAssertEqual(navigationAlphas.max(), 255)
+            // The same glyph pixels retain their coverage, not just the frame size.
+            for (leasedAlpha, navigationAlpha) in zip(leasedAlphas, navigationAlphas) {
+                XCTAssertEqual(Double(leasedAlpha), Double(navigationAlpha) * Double(opacity), accuracy: 2)
+            }
+        }
+    }
+
     private func image(scale: CGFloat = 3) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale

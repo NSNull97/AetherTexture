@@ -13,10 +13,13 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool) -> 
     let t = max(0, min(1, fraction))
     let travel = min(1, t / (reduceMotion ? 1 : 0.80))
     let progress = travel * travel * (3 - 2 * travel)
-    guard !reduceMotion, t > 0.70, t < 1 else { return (progress, 0) }
-    let settle = (t - 0.70) / 0.30
-    let wave = exp(-4 * settle) * sin(2 * .pi * settle) * pow(sin(.pi * settle), 2) / 0.19
-    return (progress, 0.020 * wave)
+    guard !reduceMotion, t > 0.66, t < 1 else { return (progress, 0) }
+    // One broad overscale followed by a monotone return. No counter-pulse:
+    // alternating X/Y compression made the last reference frames shiver.
+    let envelope = t < 0.80
+        ? contextMenuBloomSmoothRange(t, start: 0.66, end: 0.80)
+        : 1 - contextMenuBloomSmoothRange(t, start: 0.80, end: 1)
+    return (progress, 0.020 * envelope)
 }
 
 /// Independent clocks measured from the first changing dismissal frame.
@@ -631,9 +634,7 @@ func contextMenuGlassmorphicGeometrySample(
         source: source, target: target, outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
         sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
         direction: .closing, rawProgress: rawProgress, reduceMotion: reduceMotion)
-    let transform = contextMenuLiquidRecoilTransform(source: source, anchor: anchor,
-        rawProgress: rawProgress, reduceMotion: reduceMotion)
-    return sample.applying(transform)
+    return sample
 }
 
 extension ContextMenuGlassmorphicGeometrySample {
@@ -652,22 +653,6 @@ extension ContextMenuGlassmorphicGeometrySample {
             neckBulbCenter: self.neckBulbCenter.applying(transform), neckBulbRadius: self.neckBulbRadius * radiusScale,
             headAlpha: self.headAlpha, bodyAlpha: self.bodyAlpha)
     }
-}
-
-/// A small, area-preserving damped recoil. The sine window gives both ends
-/// zero displacement and velocity; it cannot snap on or move the anchor.
-func contextMenuLiquidRecoilTransform(source: CGRect, anchor: ContextMenuBloomAnchor,
-                                     rawProgress: CGFloat, reduceMotion: Bool) -> CGAffineTransform {
-    guard !reduceMotion else { return .identity }
-    let t = contextMenuBloomNormalize(1 - rawProgress, start: 0.38, end: 0.98)
-    guard t > 0, t < 1 else { return .identity }
-    let wave = exp(-2.5 * t) * sin(2.6 * .pi * t) * pow(sin(.pi * t), 2) / 0.22
-    let scaleY = 1 + 0.045 * wave
-    let scaleX = 1 / scaleY
-    let pivot = CGPoint(x: source.minX + source.width * anchor.unitPoint.x,
-                        y: source.minY + source.height * anchor.unitPoint.y)
-    return .init(a: scaleX, b: 0, c: 0, d: scaleY,
-                 tx: pivot.x * (1 - scaleX), ty: pivot.y * (1 - scaleY))
 }
 
 private func contextMenuClosingGlassmorphicGeometrySample(
@@ -2334,9 +2319,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                          targetMenuFrameInOverlay.minX + targetMenuFrameInOverlay.width * unit.x, t),
             y: Self.lerp(startFrame.minY + startFrame.height * unit.y,
                          targetMenuFrameInOverlay.minY + targetMenuFrameInOverlay.height * unit.y, t))
-        let y = 1 + animationDirection * animationSurfaceRebound
-        let x = 1 / y
-        return .init(a: x, b: 0, c: 0, d: y, tx: pivot.x * (1 - x), ty: pivot.y * (1 - y))
+        let scale = 1 + animationSurfaceRebound
+        return .init(a: scale, b: 0, c: 0, d: scale,
+                     tx: pivot.x * (1 - scale), ty: pivot.y * (1 - scale))
     }
 
     private func currentMetrics(rawT: CGFloat) -> Metrics {
@@ -2363,13 +2348,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             rawProgress: rawT,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
-        let recoil = contextMenuLiquidRecoilTransform(source: startFrame, anchor: bloomAnchor,
-            rawProgress: rawT, reduceMotion: UIAccessibility.isReduceMotionEnabled)
-        let radiusScale = min(recoil.a, recoil.d)
-        let r = sample.cornerRadii
-        return Metrics(frame: sample.frame.applying(recoil), cornerRadii: .init(
-            topLeft: r.topLeft * radiusScale, topRight: r.topRight * radiusScale,
-            bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale))
+        return Metrics(frame: sample.frame, cornerRadii: sample.cornerRadii)
     }
 
     private func currentGlassmorphicSample(metrics: Metrics, rawT: CGFloat) -> ContextMenuGlassmorphicGeometrySample {

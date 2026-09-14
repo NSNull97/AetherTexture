@@ -3,6 +3,35 @@ import UIKit
 @testable import AetherUI
 
 final class ContextMenuSourcePresentationLeaseTests: XCTestCase {
+    func testDisabledCaptionLeasePreservesSourceAndAncestorOpacity() throws {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let group = GlassControlGroup()
+        _ = group.update(items: [.init(id: "menu", content: .text("A very long menu title"), action: nil)], transition: .immediate)
+        root.addSubview(group)
+        group.layoutIfNeeded()
+        group.alpha = 0.8
+        let button = try XCTUnwrap(group.itemButton(id: "menu"))
+        XCTAssertEqual(button.alpha, 0.5)
+        let descriptor = try XCTUnwrap(ContextMenuSourceDescriptor(
+            sourceID: "menu", hitView: button, visualView: group, overlayView: root,
+            sourceCornerRadius: 22, sourceMode: .leasedGlassSource))
+        let proxy = descriptor.makeProxyView()
+        let imageView = try XCTUnwrap(proxy.subviews.first as? UIImageView)
+        XCTAssertEqual(imageView.alpha, 0.8, accuracy: 0.001)
+        let image = try XCTUnwrap(imageView.image?.cgImage)
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        pixels.withUnsafeMutableBytes { bytes in
+            let context = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        let maximumAlpha = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }.max() ?? 0
+        XCTAssertEqual(Double(maximumAlpha), 127.5, accuracy: 1)
+        XCTAssertEqual(button.alpha, 0.5)
+        XCTAssertEqual(group.alpha, 0.8, accuracy: 0.001)
+    }
+
     func testSingleItemGlassGroupKeepsWholeSourceGeometryButProxiesOnlyItemContent() throws {
         let rootView = UIView(frame: CGRect(x: 0.0, y: 0.0, width: 390.0, height: 844.0))
         let overlayView = UIView(frame: rootView.bounds)

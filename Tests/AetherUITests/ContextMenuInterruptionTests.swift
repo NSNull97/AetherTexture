@@ -75,28 +75,6 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testRecoilPreservesAreaAndAnchorWithSmoothRestingEndpoints() {
-        let source = CGRect(x: 220, y: 70, width: 160, height: 44)
-        let pivot = CGPoint(x: source.maxX, y: source.minY)
-        var minimum: CGFloat = 1
-        var maximum: CGFloat = 1
-        for frame in 0...1000 {
-            let raw = CGFloat(frame) / 1000
-            let transform = contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
-                rawProgress: raw, reduceMotion: false)
-            XCTAssertEqual(transform.a * transform.d, 1, accuracy: 0.000001)
-            XCTAssertEqual(pivot.applying(transform).x, pivot.x, accuracy: 0.000001)
-            XCTAssertEqual(pivot.applying(transform).y, pivot.y, accuracy: 0.000001)
-            XCTAssertLessThan(abs(transform.d - 1), 0.08)
-            minimum = min(minimum, transform.d); maximum = max(maximum, transform.d)
-            if raw < 0.02 || raw > 0.62 { XCTAssertEqual(transform, .identity) }
-            XCTAssertEqual(contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
-                rawProgress: raw, reduceMotion: true), .identity)
-        }
-        XCTAssertLessThan(minimum, 0.99)
-        XCTAssertGreaterThan(maximum, 1.01)
-    }
-
     func testOpeningReversesRenderedContentWithoutIndependentGlyphZoom() throws {
         for appearance in AetherAppearanceStyle.allCases {
             let host = makeHost(appearance: appearance)
@@ -204,10 +182,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 sourceRadius: 22.5, targetRadius: 27, anchor: .topTrailing, direction: .closing,
                 rawProgress: 1 - frame.elapsed, reduceMotion: false
             )
-            // Preserve the measured trajectory beneath the separately bounded recoil.
-            let recoil = contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
-                rawProgress: 1 - frame.elapsed, reduceMotion: false)
-            let measuredBody = shape.bodyFrame.applying(recoil.inverted())
+            let measuredBody = shape.bodyFrame
             XCTAssertEqual(measuredBody.width, frame.width * 255 / 378, accuracy: 3)
             XCTAssertEqual(measuredBody.height, frame.height * 378 / 577, accuracy: 3)
             XCTAssertEqual(measuredBody.minY - source.minY, frame.drop * 378 / 577, accuracy: 3)
@@ -353,7 +328,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
 
     func testFluidClockSettlesWithoutReversingMaterialization() {
         var previous: CGFloat = 0
-        var minimum: CGFloat = 0
+        var previousOverscale: CGFloat = 0
         var maximum: CGFloat = 0
         for frame in 0...1000 {
             let t = CGFloat(frame) / 1000
@@ -361,14 +336,19 @@ final class ContextMenuInterruptionTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(sample.progress, previous)
             XCTAssertLessThanOrEqual(sample.progress, 1)
             XCTAssertLessThan(abs(sample.rebound), 0.025)
-            if t <= 0.70 || t == 1 { XCTAssertEqual(sample.rebound, 0) }
-            minimum = min(minimum, sample.rebound)
+            if t <= 0.66 || t == 1 { XCTAssertEqual(sample.rebound, 0) }
+            XCTAssertGreaterThanOrEqual(sample.rebound, 0)
+            if t <= 0.80 {
+                XCTAssertGreaterThanOrEqual(sample.rebound, previousOverscale)
+            } else {
+                XCTAssertLessThanOrEqual(sample.rebound, previousOverscale)
+            }
+            previousOverscale = sample.rebound
             maximum = max(maximum, sample.rebound)
             previous = sample.progress
             XCTAssertEqual(contextMenuLiquidAnimationSample(fraction: t, reduceMotion: true).rebound, 0)
         }
         XCTAssertGreaterThan(maximum, 0.015)
-        XCTAssertLessThan(minimum, -0.003)
         // No velocity jump when the main travel hands off to the spring.
         let epsilon: CGFloat = 0.0001
         XCTAssertLessThan(contextMenuLiquidAnimationSample(fraction: epsilon, reduceMotion: false).progress / epsilon, 0.001)
@@ -404,8 +384,9 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         .compactMap { ($0 as? CAShapeLayer)?.path }
                     let outline = paths.reduce(CGRect.null) { $0.union($1.boundingBoxOfPath) }
                     XCTAssertGreaterThan(outline.width, 160)
-                    XCTAssertGreaterThan(outline.height, 43)
-                    XCTAssertLessThan(outline.height, 44)
+                    XCTAssertGreaterThan(outline.height, 44)
+                    XCTAssertLessThan(outline.height, 45)
+                    XCTAssertEqual(outline.width / 160, outline.height / 44, accuracy: 0.000001)
                 }
             }
             XCTAssertEqual(completions, 1)

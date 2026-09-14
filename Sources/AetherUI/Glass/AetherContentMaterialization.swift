@@ -152,7 +152,7 @@ enum AetherContentMaterialization {
         return result
     }
 
-    static func captureContent(of view: UIView) -> UIImage? {
+    static func captureContent(of view: UIView, preservingRootOpacity: Bool = false) -> UIImage? {
         guard view.bounds.width > 0, view.bounds.height > 0,
               view.bounds.width.isFinite, view.bounds.height.isFinite else { return nil }
         UIView.performWithoutAnimation {
@@ -170,7 +170,10 @@ enum AetherContentMaterialization {
         let originalHidden = layer.isHidden
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.opacity = 1
+        // Navigation materialization supplies its own opacity clock. A menu
+        // lease instead must capture exactly the caption currently on screen,
+        // including a disabled/custom-alpha source, before hiding its owner.
+        layer.opacity = preservingRootOpacity ? originalOpacity : 1
         layer.isHidden = false
         let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
             context.cgContext.translateBy(x: -view.bounds.minX, y: -view.bounds.minY)

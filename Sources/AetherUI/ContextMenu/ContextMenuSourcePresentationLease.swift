@@ -176,7 +176,7 @@ final class SourcePresentationLease {
         // A UIKit snapshot is a compositor replica; rendering its CALayer
         // again can produce an empty image on device. Capture pixels while
         // the real content is still present, before the lease suppresses it.
-        if let image = AetherContentMaterialization.captureContent(of: sourceView) {
+        if let image = AetherContentMaterialization.captureContent(of: sourceView, preservingRootOpacity: true) {
             let imageView = UIImageView(image: image)
             imageView.frame = CGRect(origin: .zero, size: sourceView.bounds.size)
             return imageView
@@ -202,6 +202,14 @@ final class SourcePresentationLease {
         proxy.clipsToBounds = false
 
         let contentProxy = makeProxyView(from: contentView)
+        // The content snapshot already contains its root opacity. Include
+        // the remaining source ancestors once; the overlay has none of them.
+        var ancestor = contentView.superview
+        while let view = ancestor {
+            contentProxy.alpha *= view.alpha
+            if view === visualView { break }
+            ancestor = view.superview
+        }
         let frameInVisualView = contentView.convert(contentView.bounds, to: visualView)
         contentProxy.frame = frameInVisualView.offsetBy(
             dx: -visualView.bounds.minX,
