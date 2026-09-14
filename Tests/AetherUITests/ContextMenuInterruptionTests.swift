@@ -85,27 +85,33 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testOpeningStretchesBeforeItsSidesCatchUpAndMirrorsItsInclination() {
+    func testOpeningFormsABroadLensBeforeTakingTheTallMenuShape() {
         let source = CGRect(x: 100, y: 100, width: 88, height: 44)
-        func sample(_ unit: CGPoint, _ progress: CGFloat, reduceMotion: Bool = false) -> ContextMenuGlassmorphicGeometrySample {
+        func sample(_ unit: CGPoint, _ progress: CGFloat, height: CGFloat = 470, reduceMotion: Bool = false) -> ContextMenuGlassmorphicGeometrySample {
             let target = CGRect(x: source.minX - (255 - source.width) * unit.x,
-                y: source.minY - (220 - source.height) * unit.y, width: 255, height: 220)
+                y: source.minY - (height - source.height) * unit.y, width: 255, height: height)
             return contextMenuGlassmorphicGeometrySample(source: source, target: target,
                 outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
                 anchor: .init(unitPoint: unit), direction: .opening, rawProgress: progress, reduceMotion: reduceMotion)
         }
-        let stretched = sample(.zero, 0.45)
-        let compactWidth: CGFloat = 44 * 1.38
-        let compactHeight: CGFloat = 44 * 1.22
-        let widthFraction = (stretched.bodyFrame.width - compactWidth) / (255 - compactWidth)
-        let heightFraction = (stretched.bodyFrame.height - compactHeight) / (220 - compactHeight)
-        XCTAssertGreaterThan(heightFraction - widthFraction, 0.15,
-            "The growing lens must stretch before expanding sideways, rather than scale uniformly")
-        XCTAssertLessThan(stretched.bodyRotation, -0.04)
-        XCTAssertEqual(stretched.bodyRotation, -sample(CGPoint(x: 1, y: 0), 0.45).bodyRotation, accuracy: 0.001)
-        XCTAssertEqual(stretched.bodyRotation, -sample(CGPoint(x: 0, y: 1), 0.45).bodyRotation, accuracy: 0.001)
-        XCTAssertEqual(sample(.zero, 0.90).bodyRotation, 0)
-        XCTAssertEqual(sample(.zero, 0.45, reduceMotion: true).bodyRotation, 0)
+        let lens = sample(.zero, 0.53)
+        XCTAssertGreaterThan(lens.bodyFrame.width, lens.bodyFrame.height,
+            "A tall menu should emerge from a broad lens, not an upright strip")
+        XCTAssertGreaterThan(lens.bodyFrame.minY, source.minY + 15,
+            "The trailing edge must travel away from the source instead of hinging on it")
+        XCTAssertLessThan(sample(.zero, 0.75).bodyFrame.minY, lens.bodyFrame.minY)
+        XCTAssertEqual(lens.bodyRotation, 0, "Readable content must not turn with a rigid platter")
+        let seed = sample(.zero, 0.28)
+        XCTAssertLessThan(seed.bodyRotation, 0)
+        XCTAssertEqual(seed.bodyRotation, -sample(CGPoint(x: 1, y: 0), 0.28).bodyRotation, accuracy: 0.001)
+        XCTAssertEqual(sample(.zero, 0.28, reduceMotion: true).bodyRotation, 0)
+        for height: CGFloat in [160, 470] {
+            for frame in 0...120 {
+                let value = sample(.zero, CGFloat(frame) / 120, height: height)
+                XCTAssertGreaterThan(value.bodyFrame.height, 0)
+                XCTAssertLessThanOrEqual(value.bodyFrame.height, height + 0.0001)
+            }
+        }
     }
 
     func testOpeningDoesNotRoundACustomSourceBeforeItsCaptionFades() {

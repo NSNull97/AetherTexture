@@ -223,14 +223,12 @@ private func contextMenuReferenceOpeningGeometry(
     if t == 0 { return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0) }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
     let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
-    // The leading edge stretches out first; the sides catch up while the
-    // trailing edge is still near the source. A single width/height clock
-    // makes this phase look like zooming an already formed menu.
-    let times: [CGFloat] = [0, 0.24, 0.34, 0.45, 0.58, 0.72, 0.88, 1]
+    // Grow a compact, broad lens before acquiring the menu's full height.
+    // Scaling height by the final (potentially very tall) platter made this
+    // phase a narrow strip unfolding from the source edge.
+    let times: [CGFloat] = [0, 0.28, 0.40, 0.53, 0.68, 0.84, 1]
     let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSample(
-        times: times, values: [0, 0, 0.07, 0.33, 0.74, 0.98, 1, 1], at: t)
-    let heightT = reduceMotion ? widthT : contextMenuBloomSample(
-        times: times, values: [0, 0, 0.24, 0.58, 0.86, 0.99, 1, 1], at: t)
+        times: times, values: [0, 0, 0.50, 0.86, 0.98, 1, 1], at: t)
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let diameter = min(source.width * 0.72, source.height * 1.38)
     let egg = CGRect(x: source.midX - diameter * 0.5,
@@ -240,18 +238,31 @@ private func contextMenuReferenceOpeningGeometry(
     let seed = CGRect(x: lerp(source.minX, egg.minX, pinch), y: lerp(source.minY, egg.minY, pinch),
                       width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
     let width = lerp(seed.width, target.width, widthT)
-    let height = lerp(seed.height, target.height, heightT)
+    let lensHeight = min(target.height * 0.82, target.width * 0.73)
+    let height = reduceMotion ? lerp(source.height, target.height, widthT) : contextMenuBloomSample(
+        times: times,
+        values: [seed.height, seed.height,
+                 min(target.height * 0.55, target.width * 0.48), lensHeight,
+                 lerp(lensHeight, target.height, 0.65), target.height, target.height], at: t)
+    let heightT = max(0, min(1, (height - seed.height) / max(1, target.height - seed.height)))
     let unit = anchor.unitPoint
+    // Let the trailing edge leave the source and travel back as the lens
+    // fills out. Keeping it fixed makes even a soft curve read as a hinge.
+    let release = reduceMotion ? 0 : contextMenuBloomSample(
+        times: [0, 0.20, 0.34, 0.46, 0.62, 0.82, 1],
+        values: [0, 0, 0.65, 1, 0.62, 0, 0], at: t)
     let frame = CGRect(
-        x: lerp(seed.minX + seed.width * unit.x, target.minX + target.width * unit.x, travel) - width * unit.x,
-        y: lerp(seed.minY + seed.height * unit.y, target.minY + target.height * unit.y, travel) - height * unit.y,
+        x: lerp(seed.minX + seed.width * unit.x, target.minX + target.width * unit.x, travel) - width * unit.x
+            + (1 - 2 * unit.x) * min(source.height * 0.28, target.width * 0.06) * release,
+        y: lerp(seed.minY + seed.height * unit.y, target.minY + target.height * unit.y, travel) - height * unit.y
+            + (1 - 2 * unit.y) * min(source.height * 0.72, target.height * 0.14) * release,
         width: width, height: height)
     let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.88)
     let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)
     let radius = lerp(seedRadius, targetRadius, rounding)
     // A slight directional tension follows the flow; it disappears into the
     // final corner configuration instead of adding a second settling pulse.
-    let tension = reduceMotion ? 0 : pinch * (1 - rounding) * 0.16
+    let tension = reduceMotion ? 0 : pinch * (1 - rounding) * 0.06
     let leading = radius * (1 + tension)
     let trailing = radius * (1 - tension)
     let radii = ContextMenuBloomCornerRadii(
@@ -705,9 +716,11 @@ func contextMenuGlassmorphicGeometrySample(
             progress: rawProgress, reduceMotion: reduceMotion)
         let flowX = target.midX - source.midX
         let flowY = target.midY - source.midY
-        let inclination = -flowX / max(1, hypot(flowX, flowY)) * (flowY < 0 ? -0.30 : 0.30)
-        let pull = contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.32)
-            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.36, end: 0.78))
+        let inclination = -flowX / max(1, hypot(flowX, flowY)) * (flowY < 0 ? -0.16 : 0.16)
+        let pull = contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.28)
+            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.28, end: 0.44))
+        // Only the seed inclines. Rotating the readable platter looks like
+        // opening a rigid panel, rather than a changing liquid contour.
         let rotation = reduceMotion ? 0 : inclination * pull
         // Rotate around the anchored edge rather than letting the bounding
         // box swing beyond the screen-side/top edge. This compensation is
