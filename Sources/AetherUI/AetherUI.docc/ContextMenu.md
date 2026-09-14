@@ -6,22 +6,13 @@ preview-режима.
 
 ## Overview
 
-``ContextMenuController`` — контроллер для отображения контекстного
-меню поверх любого view с одним из четырёх стилей презентации:
+``ContextMenuController`` отображает меню над исходным view. Контроллер
+выбирает внутренний режим по текущему appearance: Legacy и Liquid Glass
+сейчас используют общий движок перехода source → menu, сохраняя разные
+материалы. Публичного выбора стиля анимации нет.
 
-- **`.morph`** (default) — single-surface морф из source rect в menu
-  rect через прогресс-таймлайн. Visually source-кнопка «разворачивается»
-  в menu surface без cross-fade двух независимых view.
-- **`.preview`** — статический glass-menu + lifted snapshot source-view
-  над ним. Используется для long-press на cards/rows, где требуется
-  сохранить видимость source во время выбора action.
-- **`.fluidMorph`** — альтернативный fluid-morph с
-  `UIViewPropertyAnimator` + spring timing на frame, corner-anchored
-  content containers. Структурно гарантирует directional correctness
-  (правая кнопка раскрывается влево, левая — вправо).
-- **`.gooey(configuration:)`** — appearance-aware gooey transition. В Liquid
-  Glass используется временная morph surface, а Legacy до её allocation
-  выбирает обычный UIKit alpha/scale handoff.
+Для карточки или строки можно передать optional `preview`: lifted snapshot
+или собственный content остаётся над меню во время выбора действия.
 
 Items меню:
 
@@ -60,7 +51,7 @@ view.addGestureRecognizer(longPress)
                 action: { _, _ in /* delete */ }
             ))
         ],
-        presentationStyle: .preview()
+        preview: .init()
     )
     menu.present()
 }
@@ -98,33 +89,15 @@ public struct Source {
 |---|---|
 | `view` | Source view, относительно которого позиционируется меню. |
 | `cornerRadius` | Corner radius source view'а для морфа. `nil` → `view.layer.cornerRadius`. |
-| `hidesDuringPresentation` | При `true` source fade out при морфе и fade in при dismiss. По умолчанию `false`. |
+| `hidesDuringPresentation` | По умолчанию `true`. Обычное меню временно владеет визуальной копией source; оригинал восстанавливается при dismiss. В preview-режиме флаг управляет видимостью оригинала. |
 
-> Note: `hidesDuringPresentation = true` рекомендуется для nav-bar
-> кнопок и capsule cells: их собственный glass background читается как
-> дубликат morph'а. По умолчанию (`false`) source остаётся видимым,
-> что подходит для liquid-glass cards и list rows, где меню работает
-> как lens magnifying source.
+Обычное меню скрывает оригинал через source lease независимо от этого
+флага, чтобы в анимации не было двух копий стекла. Lease сохраняет alpha,
+transform и interaction исходного view и восстанавливает их при teardown.
 
-## PresentationStyle
+## Preview
 
-### `.morph`
-
-Single-surface morph через progress-driven timeline:
-
-```swift
-let menu = ContextMenuController(
-    source: .init(view: button),
-    items: items,
-    presentationStyle: .morph
-)
-```
-
-Источник fade out → glass droplet inflates → menu rows слайдят in →
-shadow утолщается. Всё привязано к одному `progress: 0…1`. Длительность
-~0.475с, spring damping 0.68 (~8% overshoot).
-
-### `.preview(verticalSpacing:lift:content:accessory:)`
+### ``ContextMenuController/Preview``
 
 Static glass menu + lifted snapshot source:
 
@@ -132,7 +105,7 @@ Static glass menu + lifted snapshot source:
 ContextMenuController(
     source: .init(view: cardView),
     items: items,
-    presentationStyle: .preview(verticalSpacing: 8.0, lift: 1.04)
+    preview: .init(verticalSpacing: 8.0, lift: 1.04)
 )
 ```
 
@@ -158,7 +131,7 @@ let reactions = ReactionStripView()
 ContextMenuController(
     source: .init(view: messageBubble, cornerRadius: 16),
     items: items,
-    presentationStyle: .preview(
+    preview: .init(
         accessory: .init(
             view: reactions,
             preferredSize: CGSize(width: 252, height: 48),
@@ -168,47 +141,7 @@ ContextMenuController(
 )
 ```
 
-### `.fluidMorph`
-
-Fresh fluid morph с `UIViewPropertyAnimator`:
-
-```swift
-ContextMenuController(
-    source: .init(view: button),
-    items: items,
-    presentationStyle: .fluidMorph
-)
-```
-
-Directional correctness гарантирована структурно:
-
-- `computeMenuFrame` фиксирует одну on-screen edge меню к source
-  (`menu.maxX == source.maxX` для right-aligned).
-- Frame spring сохраняет эту edge invariant: `frame.maxX(t) =
-  source.maxX` для всех `t`.
-- Content containers закреплены к anchor corner через
-  `autoresizingMask`, остаются stationary в screen coords пока glass
-  envelope grows around them.
-
-### `.gooey(configuration:)`
-
-```swift
-let configuration =
-    AetherGooeyContextMenuTransitionConfiguration.default(appearance: .legacy)
-
-ContextMenuController(
-    source: .init(view: button),
-    items: items,
-    presentationStyle: .gooey(configuration: configuration),
-    appearanceStyle: .legacy
-)
-```
-
-Legacy использует существующую поверхность на
-`UIBlurEffect.Style.systemChromeMaterial` и стандартную alpha/scale-анимацию.
-Проверка style выполняется до создания gooey overlay, source snapshot,
-Metal/SDF renderer и custom display link. Liquid Glass сохраняет прежнюю
-morph/connector механику. Подробнее: <doc:AetherGooeyContextMenuTransitionGuide>.
+Подробнее о переходе и воспроизводимом примере: <doc:ContextMenuMotionGuide>.
 
 ## Локальный appearance и public transition containers
 
@@ -219,12 +152,11 @@ runtime; non-`nil` закрепляет renderer для конкретного �
 let menu = ContextMenuController(
     source: .init(view: button),
     items: items,
-    presentationStyle: .gooey(),
     appearanceStyle: .legacy
 )
 ```
 
-Тот же hard gate доступен в низкоуровневом lens container:
+Низкоуровневый lens container также поддерживает локальный appearance:
 
 ```swift
 let lens = LensTransitionContainer(
@@ -424,7 +356,7 @@ press'а; конфигурация не требуется.
 
 | Свойство / метод | Назначение |
 |---|---|
-| `init(source:items:presentationStyle:appearanceStyle:onDismiss:)` | Создание; `appearanceStyle: nil` наследует runtime, explicit value закрепляет renderer. |
+| `init(source:items:preview:appearanceStyle:onDismiss:)` | Создание; `appearanceStyle: nil` наследует runtime, explicit value закрепляет renderer. |
 | `present()` | Презентация. |
 | `dismiss(animated:)` | Явное закрытие. |
 | `dimBlurRadius` (static) | Глобальный backdrop blur. |
@@ -433,20 +365,19 @@ press'а; конфигурация не требуется.
 
 См. таблицу свойств выше.
 
-### ``ContextMenuController/PresentationStyle``
+### ``ContextMenuController/Preview``
 
-| Style | Назначение |
+| Параметр | Назначение |
 |---|---|
-| `.morph` | Single-surface morph (default). |
-| `.preview(verticalSpacing:lift:content:accessory:)` | Static menu + lifted snapshot. |
-| `.fluidMorph` | UIViewPropertyAnimator-based fluid morph. |
-| `.gooey(configuration:)` | Liquid connector/morph либо hard-gated Legacy alpha/scale. |
+| `verticalSpacing` | Расстояние между preview и меню, по умолчанию 8 pt. |
+| `lift` | Масштаб lifted content, по умолчанию 1.04. |
+| `content` | Собственный content вместо snapshot source. |
+| `accessory` | Дополнительный view над preview. |
 
 ### Public transition primitives
 
 | Тип | Appearance contract в Legacy |
 |---|---|
-| ``AetherGooeyContextMenuTransition`` | Configuration фиксирует `.legacy`; нет overlay, Metal/SDF и custom display link. |
 | ``LensTransitionContainer`` | `appearanceStyle: nil` следует runtime, explicit `.legacy` закреплён; публичный system-Chrome blur и CA keyframes без SDF displacement. |
 | ``AetherSourceMorphController`` | `nil` следует runtime; Legacy popup использует alpha/scale без snapshot/display link. |
 | ``AetherAttachmentMenuController`` | Передаёт тот же optional override source-morph controller'у. |
@@ -482,13 +413,14 @@ press'а; конфигурация не требуется.
 - **Submenu с очень длинным content.** Submenu card sizing'ится по
   preferred content size; для очень длинных списков добавляется
   внутренний scroll view. Header chevron остаётся sticky на верху.
-- **`.fluidMorph` directional flip.** При размещении source view'а
+- **Размещение у края экрана.** При размещении source view'а
   около edge экрана (например, левый край) menu корректно flip'ится в
   правую сторону. Computed `menuFrame` выбирает edge с большим
   available space.
 - **Theme flip во время презентации.** При смене dark/light system mode
   во время open menu выполняется автоматический rebuild glass surface;
-  morph state preserved.
+  При смене поколения appearance активное inherited меню закрывается;
+  следующий `present()` использует новый renderer. Explicit override сохраняется.
 
 ## See Also
 

@@ -19,8 +19,10 @@ public final class NavigationBarItem {
     internal var searchBarControllerChanged: ((AetherSearchController?, AetherSearchController?) -> Void)?
     internal var topBarAccessoryChanged: ((NavigationBarContentView?, NavigationBarContentView?, ContainedViewLayoutTransition) -> Void)?
     internal var chromeContentDidChange: (() -> Void)?
+    internal private(set) var contentTransitionOverride: ContainedViewLayoutTransition?
 
     private var storedSubtitle: String?
+    private var storedBackButtonBadgeText: String?
     private var storedTitleViewStyle: NavigationBarTitleViewStyle = .regular
     private var storedSearchBarController: AetherSearchController?
     private var storedTopBarAccessory: NavigationBarContentView?
@@ -86,6 +88,27 @@ public final class NavigationBarItem {
             storedSubtitle = newValue
             notifyContentDidChange()
         }
+    }
+
+    /// Optional text inside the automatic glass back button's capsule.
+    /// `nil` and an empty string leave the chevron-only button. Uses the
+    /// navigation theme's existing badge colors. Assignment updates immediately;
+    /// use `setBackButtonBadgeText(_:transition:)` to animate an in-screen change.
+    public var backButtonBadgeText: String? {
+        get { storedBackButtonBadgeText }
+        set {
+            setBackButtonBadgeText(newValue, transition: .immediate)
+        }
+    }
+
+    public func setBackButtonBadgeText(_ text: String?, transition: ContainedViewLayoutTransition) {
+        let normalized = text?.isEmpty == false ? text : nil
+        guard storedBackButtonBadgeText != normalized else { return }
+        storedBackButtonBadgeText = normalized
+        let previousOverride = contentTransitionOverride
+        contentTransitionOverride = transition
+        defer { contentTransitionOverride = previousOverride }
+        notifyContentDidChange()
     }
 
     public var titleViewStyle: NavigationBarTitleViewStyle {

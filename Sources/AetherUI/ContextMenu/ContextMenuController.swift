@@ -1,11 +1,6 @@
 import UIKit
 import AsyncDisplayKit
 
-internal struct ContextMenuFluidMorphTiming: Equatable {
-    let openDuration: TimeInterval
-    let closeDuration: TimeInterval
-}
-
 /// Classic dimming host used by Legacy context menus. This deliberately uses
 /// only public UIKit material; it must never share the Liquid CAFilter/SDF
 /// backdrop implementation used by `ContextMenuDimBlurView`.
@@ -27,36 +22,14 @@ final class ContextMenuLegacyDimView: UIVisualEffectView {
 
 // MARK: - ContextMenuController
 
-/// Presents a `ContextMenuActionsView` as a glass-owned interaction. The
-/// default `.morph` path keeps the older rounded-rect morph, while
-/// `.fluidMorph` uses a source-to-platter bloom: one visible glass surface
-/// expands from the source frame through a soft bubble into the final menu.
-/// `.gooey` is the liquid connector transition path: it keeps the menu
-/// controller/action pipeline intact and adds a temporary source↔menu
-/// shell overlay with a metaball bridge and optical highlight while the real
-/// menu remains fixed at its final layout size.
-///
-/// Two presentation flavours:
-///   - `.morph`   (default) — uses `ContextMenuMorphHostView`.
-///   - `.preview` — static glass menu + a lifted snapshot of the source
-///                  above it; for long-press on cards where you want to
-///                  keep the source visible while choosing an action.
-///
-/// `LensTransitionContainer` and `LensSDFFilter` remain in the codebase.
-/// The SDF filter is installed on top of the morph host on iOS 26 for an
-/// extra refraction kick during the transition ("Premium" option from the
-/// architecture doc); it's optional polish and the morph reads fine on
-/// older systems without it.
+/// Presents an action menu that grows out of its source button. Presentation
+/// follows the resolved appearance automatically; both current generations
+/// share the glassmorphic transition engine. An optional preview keeps lifted
+/// source content above the menu instead of replacing the source surface.
 public final class ContextMenuController: AetherAppearanceConsumer {
     // MARK: - Animation constants
 
-    /// The older `.morph` keeps the public motion profile. `.fluidMorph` has
-    /// its own reference-derived clock: a compact seed response followed by
-    /// ~200 ms of platter growth and a short content settle. Dismissal is a
-    /// separate, firmer curve rather than a mathematical reverse.
-    private static let morphDuration: TimeInterval = AetherMotion.contextMenu.presentation.duration
-    private static let dismissDuration: TimeInterval = AetherMotion.contextMenu.dismissal.duration
-    internal static let fluidMorphTiming = ContextMenuFluidMorphTiming(
+    internal static let glassmorphicTiming = ContextMenuGlassmorphicTiming(
         openDuration: 0.32,
         closeDuration: 0.32
     )
@@ -65,18 +38,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     private static let previewDismissMenuScale: CGFloat = 0.82
     private static let previewDismissMenuOffsetY: CGFloat = 14.0
     private static let previewDismissAccessoryScale: CGFloat = 0.84
-    /// `damping` is the spring's damping ratio for the display-link solvers.
-    ///   1.0 = critically damped (no bounce, just glides in)
-    ///   0.7 = noticeable overshoot, ~one settle cycle — "fluid"
-    ///   0.5 = lots of wobble
-    /// 0.72 is the sweet spot for the older `.morph` host. `.fluidMorph`
-    /// opens at 0.65 so the platter bloom has a more visible liquid settle.
-    /// Close uses 0.84 — much firmer, just enough give to not feel
-    /// snap-to-invisibility.
-    private static let morphDamping: CGFloat = AetherMotion.contextMenu.presentation.dampingRatio
-    private static let fluidMorphDamping: CGFloat = AetherMotion.contextMenu.presentation.dampingRatio
     private static let previewDamping: CGFloat = 0.77
-    private static let dismissDamping: CGFloat = AetherMotion.contextMenu.dismissal.dampingRatio
+    private static let dismissDamping: CGFloat = 0.90
 
     private static func previewBezierTimingParameters() -> UICubicTimingParameters {
         UICubicTimingParameters(
@@ -98,30 +61,6 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         get { dimBlurRadius }
         set { dimBlurRadius = newValue }
     }
-    private static let menuCornerRadius: CGFloat = 34.0
-
-    // MARK: - Glass lift metrics
-    //
-    // "Glass lift" = the expressive press feedback on the menu surface
-    // (borrowed from Telegram's Display-framework `TouchEffect`). Three
-    // components:
-    //
-    //   1. Base lift — uniform scale up by `pressedSizeIncrease` on the
-    //      shorter axis, so the whole glass surface visibly rises on
-    //      press. For a 260×200 menu, 14pt on the short axis = +7%
-    //      scale — clearly visible without being cartoonish.
-    //   2. Anisotropic stretch — biased scale along the axis of the
-    //      finger's pull-direction (drag→right-bottom stretches Y and
-    //      slightly squishes X, etc.). Gives soft-body physics feel.
-    //   3. Translation — the surface shifts up to `stretchMaxOffset`
-    //      toward the finger, adding to the "drawn to the touch" feel.
-    //
-    // The old rubber-band (`stretchFollow = 0.06`, `pressScale = 1.012`)
-    // was too subtle to read as "glass lift" — it was more of a
-    // micro-nudge. Bumped to TouchEffect-style math for expressive
-    // iOS 26-style glass feedback.
-    private static let stretchPressedSizeIncrease: CGFloat = 14.0
-    private static let stretchMaxOffset: CGFloat = 20.0
 
     // MARK: - Self-retention
 
@@ -133,18 +72,18 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     public struct Source {
         public weak var view: UIView?
         public var cornerRadius: CGFloat?
-        /// Legacy opt-in for anchors that explicitly need the real source
-        /// hidden while the snapshot inside the morph surface replaces it.
-        /// Layout doesn't shift either way — we drive alpha, not `isHidden`.
+        /// Source menus always lease and suppress the original view while a
+        /// presentation proxy owns its appearance. This flag also describes
+        /// the source intent for custom presentation integrations.
         public var hidesDuringPresentation: Bool
 
-        public init(view: UIView, cornerRadius: CGFloat? = nil, hidesDuringPresentation: Bool = false) {
+        public init(view: UIView, cornerRadius: CGFloat? = nil, hidesDuringPresentation: Bool = true) {
             self.view = view
             self.cornerRadius = cornerRadius
             self.hidesDuringPresentation = hidesDuringPresentation
         }
 
-        public init(node: ASDisplayNode, cornerRadius: CGFloat? = nil, hidesDuringPresentation: Bool = false) {
+        public init(node: ASDisplayNode, cornerRadius: CGFloat? = nil, hidesDuringPresentation: Bool = true) {
             self.init(view: node.view, cornerRadius: cornerRadius, hidesDuringPresentation: hidesDuringPresentation)
         }
     }
@@ -179,36 +118,31 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         }
     }
 
-    /// Two presentation flavours.
-    ///   - `.morph` (default): the source view fades and the menu morphs
-    ///     out of its rect — ideal for nav-bar buttons and pills (Phase 1).
-    ///   - `.preview`: the source view stays as a "lifted" snapshot (a
-    ///     scaled-up copy with shadow) and the menu appears beneath it —
-    ///     ideal for long-press on cards / list rows where the user wants
-    ///     a peek of the source content while choosing an action.
-    public enum PresentationStyle {
-        case morph
-        case preview(
+    /// Optional lifted content shown above the action menu.
+    public struct Preview {
+        public var verticalSpacing: CGFloat
+        public var lift: CGFloat
+        public var content: PreviewContent?
+        public var accessory: PreviewAccessory?
+
+        public init(
             verticalSpacing: CGFloat = 8.0,
             lift: CGFloat = 1.04,
             content: PreviewContent? = nil,
             accessory: PreviewAccessory? = nil
-        )
-        /// Lens-bloom presentation. A small optical seed appears near the
-        /// future menu anchor, expands as a circular/oval lens, then rectifies
-        /// into the final rounded menu platter.
-        case fluidMorph
-        /// Gooey source→menu transition. Implemented as a visual transition
-        /// overlay around the existing menu surface; actions, gestures,
-        /// dismissal and accessibility remain owned by ContextMenuController.
-        case gooey(configuration: AetherGooeyContextMenuTransitionConfiguration? = nil)
+        ) {
+            self.verticalSpacing = verticalSpacing
+            self.lift = lift
+            self.content = content
+            self.accessory = accessory
+        }
     }
 
     // MARK: - State
 
     private let source: Source
     private let items: [ContextMenuItem]
-    private let presentationStyle: PresentationStyle
+    private let preview: Preview?
     /// Exact renderer generation for this presentation. `nil` inherits the
     /// runtime appearance at the moment `present()` is called.
     public let appearanceStyle: AetherAppearanceStyle?
@@ -222,34 +156,17 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     private weak var hostView: UIView?
     private var dimView: UIView?
-    /// For `.morph` style: the single-surface morph host — one view that
-    /// holds glass + shadow + source/destination content containers and
-    /// morphs between source-rect and menu-rect under `progress: 0…1`.
-    /// For `.preview` style: left `nil`; `sdfHost` is used as the outer
-    /// wrapper instead.
-    private var morphHost: ContextMenuMorphHostView?
-    /// For `.fluidMorph` style: source-to-platter bloom host. The host itself
-    /// is transparent; its single visible glass surface animates frame and
-    /// corner radius from source to menu.
-    private var platterBloomHost: ContextMenuSourcePlatterBloomTransitionView?
-    /// For `.gooey`: reusable transition primitive and final glass surface.
-    private var gooeyTransition: AetherGooeyContextMenuTransition?
-    private var gooeySurfaceView: MenuGlassSurfaceView?
-    /// For `.preview` style only: the outer wrapper holding the (static-
-    /// size) glass menu. Left `nil` for `.morph` — morphHost plays that role.
-    private var sdfHost: UIView?
-    private var sdfFilter: AnyObject?  // erased LensSDFFilter? for pre-iOS-26 build
+    private var glassmorphicHost: ContextMenuGlassmorphicTransitionView?
+    /// Outer wrapper for the fixed-size menu below lifted preview content.
+    private var previewMenuHost: UIView?
     private var menuContainer: MenuGlassSurfaceView?
     private var snapshotView: UIView?
     private var actionsView: ContextMenuActionsView?
     private var tapRecognizer: UITapGestureRecognizer?
     private var sourcePresentationLease: SourcePresentationLease?
-    /// The view that plays the role of "the glass surface hit-test target"
-    /// for submenu + stretch purposes. For `.morph` this is `morphHost`;
-    /// for `.fluidMorph` it's the platter bloom glass surface; for `.preview` it's
-    /// `sdfHost`. Collapsed into a single property so downstream wiring
-    /// code doesn't have to branch on presentation style.
-    private var surfaceView: UIView? { morphHost ?? platterBloomHost?.finalMenuGlassSurfaceView ?? gooeySurfaceView ?? sdfHost }
+    private var surfaceView: UIView? {
+        glassmorphicHost?.finalMenuGlassSurfaceView ?? previewMenuHost
+    }
     private var surfaceOverlayView: UIView? { surfaceView }
     /// Inline submenu overlay (Yandex Music style). When non-nil, the parent
     /// `actionsView` is dimmed + disabled and `submenuCard` is overlaid on
@@ -262,17 +179,14 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     /// instead of dismissing the entire menu.
     private var submenuCollapseHitView: UIView?
 
-    /// Lifted snapshot of the source view, only created in `.preview` style.
-    /// Lives in `host` next to `dim` and `sdfHost`; positioned at the source's
-    /// screen rect, scaled by `PresentationStyle.preview.lift`.
+    /// Lifted source content, positioned in the overlay and scaled by the
+    /// optional preview configuration.
     private var previewView: UIView?
     private var previewAccessoryContainer: UIView?
     private var previewInitialCenterInHost: CGPoint?
     private var previewFinalCenterInHost: CGPoint?
 
     private var menuFrameInHost: CGRect = .zero
-    private var sourceRectInHost: CGRect = .zero
-    private var sourceCornerRadius: CGFloat = 0
 
     private var isPresented: Bool = false
     /// Retains the idempotent teardown while an animated dismissal is in
@@ -280,22 +194,13 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     /// synchronously even though `isPresented` becomes false as soon as the
     /// dismiss animation starts.
     private var pendingCleanup: (() -> Void)?
-    /// Whether the glass-lift stretch is currently applied to the
-    /// surface (parent menu pressed). Tracked so the first touch-down
-    /// runs as a proper spring animation (identity → lifted pose) and
-    /// subsequent drag updates just snap the transform (hi-frequency
-    /// tracking needs no additional smoothing — the UIView animation
-    /// machinery would fight the finger otherwise).
-    private var isStretchActive: Bool = false
     private var dismissHandle: ContextMenuDismissHandle?
-    /// Original `source.layer.opacity` captured on present when
-    /// `Source.hidesDuringPresentation == true`, so dismiss can restore it.
+    /// Original source opacity retained while a lifted preview is visible.
     private var savedSourceOpacity: Float?
     /// Original source transform captured while the menu owns the source
     /// fade/scale. Restored on dismiss so anchors that already had a custom
     /// transform are not flattened to identity.
     private var savedSourceTransform: CGAffineTransform?
-    private var savedSourceIsUserInteractionEnabled: Bool?
     private var presentedAppearanceStyle: AetherAppearanceStyle?
 
     private var usesLiquidPresentation: Bool {
@@ -333,7 +238,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     public init(
         source: Source,
         items: [ContextMenuItem],
-        presentationStyle: PresentationStyle = .morph,
+        preview: Preview? = nil,
         appearanceStyle: AetherAppearanceStyle? = nil,
         catchTapsOutside: Bool = true,
         hasHapticFeedback: Bool = true,
@@ -345,7 +250,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     ) {
         self.source = source
         self.items = items
-        self.presentationStyle = presentationStyle
+        self.preview = preview
         self.appearanceStyle = appearanceStyle
         self.catchTapsOutside = catchTapsOutside
         self.hasHapticFeedback = hasHapticFeedback
@@ -357,14 +262,10 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         AetherAppearanceConsumerRegistry.register(self)
     }
 
-    private var usesLeasedSourcePresentation: Bool {
-        guard usesLiquidPresentation else { return false }
-        switch presentationStyle {
-        case .fluidMorph, .gooey:
-            return true
-        case .morph, .preview:
-            return false
-        }
+    private var usesLeasedSourcePresentation: Bool { preview == nil }
+
+    private var resolvedPresentationStyle: ContextMenuPresentationStyle {
+        resolvedAppearanceStyle.usesLiquidGlass ? .glassmorphic : .legacy
     }
 
     // MARK: - Public entry points
@@ -375,9 +276,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
               pendingCleanup == nil,
               let source = source.view,
               let window = source.window else { return }
-        // Resolve before creating the overlay/dim/surface hierarchy. In
-        // particular, a local Legacy override must branch to the classic
-        // path before any Liquid, SDF or Metal host is initialized.
+        // Resolve appearance before creating any material. Both internal
+        // presentation generations currently share one geometry engine.
         presentedAppearanceStyle = appearanceStyle ?? AetherAppearance.runtimeCurrent.style
         isPresented = true
         ContextMenuController.presentedControllers.insert(retainBox)
@@ -487,15 +387,15 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         }
         let previewLayout: PreviewLayout?
         let menuFrame: CGRect
-        if case let .preview(verticalSpacing, lift, content, accessory) = presentationStyle {
+        if let preview {
             let layout = computePreviewLayout(
                 sourceRect: sourceRectInHost,
                 menuSize: menuSize,
                 hostBounds: host.bounds,
-                verticalSpacing: verticalSpacing,
-                lift: lift,
-                content: content,
-                accessory: accessory
+                verticalSpacing: preview.verticalSpacing,
+                lift: preview.lift,
+                content: preview.content,
+                accessory: preview.accessory
             )
             previewLayout = layout
             menuFrame = layout.menuFrame
@@ -511,99 +411,12 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         }
         #endif
         self.menuFrameInHost = menuFrame
-        self.sourceRectInHost = sourceRectInHost
-        self.sourceCornerRadius = sourceCornerRadius
 
-        // Branch on style — they're different enough (morph = progress-
-        // driven single surface; preview = static glass + lifted snapshot)
-        // that a shared setup path stopped paying its way.
         let isDark = self.isDark ?? (source.traitCollection.userInterfaceStyle == .dark)
-        let snapshot: UIView?
-        if usesLeasedSourcePresentation {
-            snapshot = nil
-        } else if !usesLiquidPresentation,
-                  case .preview = presentationStyle {
-            snapshot = makeSourceSnapshot(source: source)
-        } else if !usesLiquidPresentation {
-            snapshot = nil
-        } else {
-            snapshot = makeSourceSnapshot(
-                source: source,
-                preferRenderedImage: {
-                    if #available(iOS 26.0, *) {
-                        switch presentationStyle {
-                        case .morph, .fluidMorph, .gooey:
-                            return true
-                        case .preview:
-                            return false
-                        }
-                    } else {
-                        return false
-                    }
-                }()
-            )
-        }
-        self.snapshotView = snapshot
-
-        if !usesLiquidPresentation {
-            switch presentationStyle {
-            case .preview:
-                guard let snapshot, let previewLayout else { return }
-                setupPreviewStyle(
-                    host: host,
-                    source: source,
-                    isDark: isDark,
-                    snapshot: snapshot,
-                    actionsView: actionsView,
-                    previewLayout: previewLayout
-                )
-            case .morph, .fluidMorph, .gooey:
-                setupLegacyStyle(
-                    host: host,
-                    isDark: isDark,
-                    actionsView: actionsView,
-                    menuFrame: menuFrame
-                )
-            }
-        } else {
-            switch presentationStyle {
-        case .morph:
-            guard let snapshot else { return }
-            setupMorphStyle(
-                host: host,
-                source: source,
-                isDark: isDark,
-                snapshot: snapshot,
-                actionsView: actionsView,
-                sourceRectInHost: sourceRectInHost,
-                sourceCornerRadius: sourceCornerRadius,
-                menuFrame: menuFrame
-            )
-        case .fluidMorph:
-            guard let sourceVisualMode else { return }
-            setupFluidMorphStyle(
-                host: host,
-                isDark: isDark,
-                sourceLease: activeSourceLease,
-                sourceMode: sourceVisualMode,
-                actionsView: actionsView,
-                sourceRectInHost: sourceRectInHost,
-                sourceCornerRadius: sourceCornerRadius,
-                menuFrame: menuFrame
-            )
-        case let .gooey(configuration):
-            setupGooeyStyle(
-                host: host,
-                isDark: isDark,
-                sourceLease: activeSourceLease,
-                actionsView: actionsView,
-                menuFrame: menuFrame,
-                configuration: configuration
-            )
-        case .preview:
-            guard let snapshot else { return }
-            guard let previewLayout else { return }
-            setupPreviewStyle(
+        if let previewLayout {
+            let snapshot = makeSourceSnapshot(source: source)
+            self.snapshotView = snapshot
+            setupPreview(
                 host: host,
                 source: source,
                 isDark: isDark,
@@ -611,7 +424,23 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                 actionsView: actionsView,
                 previewLayout: previewLayout
             )
-        }
+        } else {
+            guard let sourceVisualMode else { return }
+            // The legacy presentation intentionally delegates to the same
+            // engine for now; appearance still selects the actual material.
+            switch resolvedPresentationStyle {
+            case .legacy, .glassmorphic:
+                setupGlassmorphic(
+                    host: host,
+                    isDark: isDark,
+                    sourceLease: activeSourceLease,
+                    sourceMode: sourceVisualMode,
+                    actionsView: actionsView,
+                    sourceRectInHost: sourceRectInHost,
+                    sourceCornerRadius: sourceCornerRadius,
+                    menuFrame: menuFrame
+                )
+            }
         }
         self.actionsView = actionsView
 
@@ -622,23 +451,16 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             self.tapRecognizer = tap
         }
 
-        // Wire root actions view (callbacks + stretch hooks). `surfaceView`
-        // is the view that both stretch and submenu positioning anchor to
-        // — morphHost for .morph, sdfHost for .preview.
+        // Route action selection and submenu placement through the active surface.
         let handle = ContextMenuDismissHandle(dismiss: { [weak self] animated in self?.dismiss(animated: animated) })
         self.dismissHandle = handle
         if let surface = surfaceView {
             wireActionsView(actionsView, handle: handle, surfaceView: surface)
         }
 
-        // Haptic.
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-
-        // Preview hides the real source immediately because the lifted
-        // snapshot replaces it visually. Morph-style menus hide the source
-        // inside `animateInMorph`, in sync with the glass expansion, so the
-        // source does not sit there unchanged under the menu.
-        if case .preview = presentationStyle {
+        // Source menus already hold an exclusive lease. A lifted preview
+        // instead fades the original under its independently positioned copy.
+        if preview != nil {
             // Drive `UIView.alpha` (not `CALayer.opacity` directly) so
             // UIKit observers see the change — iOS 26's glass-effect
             // pipeline tracks alpha through the UIView setter, and a
@@ -649,7 +471,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             self.savedSourceOpacity = Float(source.alpha)
             self.savedSourceTransform = source.transform
             UIView.animate(
-                withDuration: ContextMenuController.morphDuration * 0.42,
+                withDuration: ContextMenuController.previewOpenDuration * 0.82,
                 delay: 0,
                 options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction]
             ) {
@@ -657,10 +479,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             }
         }
 
-        animateIn(
-            dim: dim,
-            sourceMinSide: min(sourceRectInHost.width, sourceRectInHost.height)
-        )
+        animateIn(dim: dim)
     }
 
     /// Context menus own generation-specific transition objects which cannot
@@ -685,13 +504,14 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     }
 
     internal var hasLiquidTransitionResourcesForTesting: Bool {
-        morphHost != nil
-            || platterBloomHost != nil
-            || gooeyTransition != nil
-            || gooeySurfaceView != nil
-            || sdfFilter != nil
-            || sourcePresentationLease != nil
+        menuContainer?.usesLiquidSurfaceRendererForTesting == true
             || dimView is ContextMenuDimBlurView
+    }
+
+    internal var hasGlassmorphicTransitionForTesting: Bool { glassmorphicHost != nil }
+    internal var usesSourcePresentationLeaseForTesting: Bool { sourcePresentationLease != nil }
+    internal var resolvedPresentationStyleForTesting: ContextMenuPresentationStyle {
+        resolvedPresentationStyle
     }
 
     internal var hasPresentationOverlayForTesting: Bool {
@@ -809,121 +629,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     // MARK: - Style-specific setup
 
-    /// Classic popup path selected before any lens/SDF/Metal host is
-    /// allocated. It preserves menu geometry and actions while using only
-    /// alpha/scale and the ordinary Legacy surface renderer.
-    private func setupLegacyStyle(
-        host: UIView,
-        isDark: Bool,
-        actionsView: ContextMenuActionsView,
-        menuFrame: CGRect
-    ) {
-        let popupHost = UIView(frame: menuFrame)
-        popupHost.layer.cornerRadius = resolvedMenuMetrics.cornerRadius
-        popupHost.layer.cornerCurve = .continuous
-        applyLegacyReferenceShadow(
-            to: popupHost,
-            cornerRadius: resolvedMenuMetrics.cornerRadius
-        )
-        host.addSubview(popupHost)
-        sdfHost = popupHost
-
-        let popup = MenuGlassSurfaceView(
-            isDark: isDark,
-            appearanceStyle: resolvedAppearanceStyle
-        )
-        popup.frame = popupHost.bounds
-        popup.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        popup.setSurfaceCornerRadius(resolvedMenuMetrics.cornerRadius)
-        popupHost.addSubview(popup)
-        menuContainer = popup
-
-        actionsView.frame = popup.contentView.bounds
-        actionsView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        actionsView.setRevealProgress(1)
-        popup.contentView.addSubview(actionsView)
-
-        popupHost.alpha = 0
-        popupHost.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
-    }
-
-    /// Wires up the `.morph` path: single-surface `ContextMenuMorphHostView`
-    /// starting at source-rect, morphing to menu-rect driven by `progress`.
-    /// Source snapshot lives inside `sourceContent`, actions view inside
-    /// `destinationContent` — the host owns all cross-fade / shadow / shape
-    /// choreography internally.
-    private func setupMorphStyle(
-        host: UIView,
-        source _: UIView,
-        isDark: Bool,
-        snapshot: UIView,
-        actionsView: ContextMenuActionsView,
-        sourceRectInHost: CGRect,
-        sourceCornerRadius: CGFloat,
-        menuFrame: CGRect
-    ) {
-        let morphHost = ContextMenuMorphHostView(
-            isDark: isDark,
-            appearanceStyle: resolvedAppearanceStyle
-        )
-        morphHost.frame = sourceRectInHost
-        host.addSubview(morphHost)
-
-        let collapsedCornerRadius: CGFloat = sourceCornerRadius > 0 ? sourceCornerRadius : min(sourceRectInHost.width, sourceRectInHost.height) / 2
-        morphHost.configure(metrics: ContextMenuMorphHostView.Metrics(
-            collapsedFrame: sourceRectInHost,
-            collapsedCornerRadius: collapsedCornerRadius,
-            expandedFrame: menuFrame,
-            expandedCornerRadius: resolvedMenuMetrics.cornerRadius
-        ))
-        morphHost.progress = 0
-
-        // Source snapshot is the visual seed: the user sees the tapped
-        // glass/source continue inside the morph surface immediately,
-        // then fade after the surface has started expanding.
-        snapshot.frame = morphHost.sourceContent.bounds
-        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        morphHost.sourceContent.addSubview(snapshot)
-
-        // Actions view: (0,0), expanded size. Morph host handles alpha
-        // + translateY per-progress internally.
-        actionsView.frame = CGRect(origin: .zero, size: menuFrame.size)
-        actionsView.autoresizingMask = []
-        actionsView.setRevealProgress(0)
-        morphHost.destinationContent.addSubview(actionsView)
-        morphHost.destinationRevealProgressChanged = { [weak actionsView] progress in
-            actionsView?.setRevealProgress(progress)
-        }
-
-        self.morphHost = morphHost
-        self.menuContainer = morphHost.glass
-
-        // SDF lens (iOS 26+) on the `lensContainer` layer — the
-        // known-working path. The prior attempt to locate the private
-        // `_UIVisualEffectBackdropView`'s `CABackdropLayer` and append
-        // our displacement filter to its chain silently produced no
-        // visible distortion on iOS 26.5 (Apple's private visual-
-        // effect pipeline seems to reject user-added filters). The
-        // plain-view `lensContainer` path reliably composites the SDF
-        // over the morph surface and lets `displacementMap` warp the
-        // backdrop + foreground content. Menu content does pick up
-        // the distortion mid-morph, but since the pulse decays to 0
-        // well before the morph settles (see
-        // `animateDisplacementPulse`), the action rows render crisp
-        // at rest.
-        if #available(iOS 26.0, *), let filter = LensSDFFilter() {
-            filter.install(
-                on: morphHost.lensContainer.layer,
-                size: sourceRectInHost.size,
-                cornerRadius: collapsedCornerRadius
-            )
-            self.sdfFilter = filter
-        }
-    }
-
-    /// Wires up the `.fluidMorph` path. One glass surface starts at the
-    /// source frame, blooms into a bubble, then settles as the menu platter.
-    private func setupFluidMorphStyle(
+    /// Connect the source lease and action content to the shared transition.
+    private func setupGlassmorphic(
         host: UIView,
         isDark: Bool,
         sourceLease: SourcePresentationLease?,
@@ -933,7 +640,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         sourceCornerRadius: CGFloat,
         menuFrame: CGRect
     ) {
-        let platterHost = ContextMenuSourcePlatterBloomTransitionView(
+        let platterHost = ContextMenuGlassmorphicTransitionView(
             sourceFrameInOverlay: sourceRectInHost,
             targetMenuFrameInOverlay: menuFrame,
             finalCornerRadius: resolvedMenuMetrics.cornerRadius,
@@ -950,6 +657,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         // glass and plain/content sources are represented by the leased proxy,
         // so the real source never remains visible/interactive underneath.
         sourceLease?.attachProxy(to: platterHost.sourceProxyContainer)
+        platterHost.prepareSourceContentSnapshots()
 
         // Destination content is laid out at its final menu rect from the
         // beginning. The lens mask reveals it as the bloom grows/sharpens.
@@ -963,50 +671,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             actionsView?.setRevealProgress(progress)
         }
 
-        self.platterBloomHost = platterHost
+        self.glassmorphicHost = platterHost
         self.menuContainer = platterHost.finalMenuGlassSurfaceView
-    }
-
-    /// Wires up the `.gooey` path. The final menu surface is pre-staged
-    /// invisible at its final frame; `AetherGooeyContextMenuTransition`
-    /// drives a temporary shell/bridge overlay so the real row hierarchy
-    /// never gets resized during the morph.
-    private func setupGooeyStyle(
-        host: UIView,
-        isDark: Bool,
-        sourceLease _: SourcePresentationLease?,
-        actionsView: ContextMenuActionsView,
-        menuFrame: CGRect,
-        configuration: AetherGooeyContextMenuTransitionConfiguration?
-    ) {
-        let menuSurface = MenuGlassSurfaceView(
-            isDark: isDark,
-            appearanceStyle: resolvedAppearanceStyle
-        )
-        menuSurface.frame = menuFrame
-        menuSurface.autoresizingMask = []
-        menuSurface.setForcesRoundedBoundsClip(true)
-        menuSurface.layer.allowsEdgeAntialiasing = true
-        menuSurface.setSurfaceCornerRadius(resolvedMenuMetrics.cornerRadius)
-        menuSurface.alpha = 0.0
-        menuSurface.isUserInteractionEnabled = false
-        host.addSubview(menuSurface)
-        menuSurface.setNeedsLayout()
-        menuSurface.layoutIfNeeded()
-
-        actionsView.frame = menuSurface.contentView.bounds
-        actionsView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        actionsView.setRevealProgress(0)
-        menuSurface.contentView.addSubview(actionsView)
-
-        let resolvedConfiguration = configuration ?? .default(
-            appearance: .preset(resolvedAppearanceStyle)
-        )
-        let transition = AetherGooeyContextMenuTransition(configuration: resolvedConfiguration)
-
-        self.gooeySurfaceView = menuSurface
-        self.menuContainer = menuSurface
-        self.gooeyTransition = transition
     }
 
     private struct PreviewLayout {
@@ -1018,10 +684,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let content: PreviewContent?
     }
 
-    /// Wires up the `.preview` path: static glass menu + a lifted snapshot
-    /// of the source above it. No morph — just a spring-in and the snapshot
-    /// scaling up by `lift`.
-    private func setupPreviewStyle(
+    /// Places the action menu below lifted source content.
+    private func setupPreview(
         host: UIView,
         source _: UIView,
         isDark: Bool,
@@ -1030,26 +694,26 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         previewLayout: PreviewLayout
     ) {
         let menuFrame = previewLayout.menuFrame
-        let sdfHost = UIView(frame: menuFrame)
-        sdfHost.applyCornerRadius(
+        let previewMenuHost = UIView(frame: menuFrame)
+        previewMenuHost.applyCornerRadius(
             resolvedMenuMetrics.cornerRadius,
             clipsChildren: false
         )
         applyLegacyReferenceShadow(
-            to: sdfHost,
+            to: previewMenuHost,
             cornerRadius: resolvedMenuMetrics.cornerRadius
         )
-        host.addSubview(sdfHost)
-        self.sdfHost = sdfHost
+        host.addSubview(previewMenuHost)
+        self.previewMenuHost = previewMenuHost
 
         let menuContainer = MenuGlassSurfaceView(
             isDark: isDark,
             appearanceStyle: resolvedAppearanceStyle
         )
-        menuContainer.frame = sdfHost.bounds
+        menuContainer.frame = previewMenuHost.bounds
         menuContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         menuContainer.setSurfaceCornerRadius(resolvedMenuMetrics.cornerRadius)
-        sdfHost.addSubview(menuContainer)
+        previewMenuHost.addSubview(menuContainer)
         self.menuContainer = menuContainer
 
         // Lifted snapshot: its own wrapper at source rect with a soft
@@ -1101,8 +765,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         menuContainer.contentView.addSubview(actionsView)
 
         // Pre-stage for spring-in.
-        sdfHost.alpha = 0.0
-        sdfHost.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+        previewMenuHost.alpha = 0.0
+        previewMenuHost.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
     }
 
     public func dismiss(animated: Bool = true) {
@@ -1116,15 +780,11 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
         let sourceRestoreAlpha = savedSourceOpacity.map(CGFloat.init) ?? 1.0
         let sourceRestoreTransform = savedSourceTransform ?? .identity
-        let sourceRestoreInteractionEnabled = savedSourceIsUserInteractionEnabled
 
         let host = hostView
         let dim = dimView
-        let morphHost = self.morphHost
-        let platterBloomHost = self.platterBloomHost
-        let gooeyTransition = self.gooeyTransition
-        let gooeySurfaceView = self.gooeySurfaceView
-        let sdfHost = self.sdfHost
+        let glassmorphicHost = self.glassmorphicHost
+        let previewMenuHost = self.previewMenuHost
         let container = menuContainer
         let snapshot = snapshotView
         let actionsView = self.actionsView
@@ -1138,15 +798,6 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             didClean = true
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            // Defensive: clear any mask the source might carry. Prior
-            // versions applied a transparent CALayer mask on `present`
-            // to hide the source; current version keeps it visible for
-            // SDF backdrop distortion and never sets a mask — this is
-            // a no-op on the current path but stays as a safety net for
-            // any future path that might re-introduce hiding.
-            if sourcePresentationLease == nil {
-                sourceView?.layer.mask = nil
-            }
             // Defensive: restore transform/alpha in case the dismiss
             // path was non-animated (animated: false) or interrupted
             // before the spring finished — otherwise the source would
@@ -1154,25 +805,16 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             if sourcePresentationLease == nil {
                 sourceView?.transform = sourceRestoreTransform
                 sourceView?.alpha = sourceRestoreAlpha
-                if let sourceRestoreInteractionEnabled {
-                    sourceView?.isUserInteractionEnabled = sourceRestoreInteractionEnabled
-                }
             }
             CATransaction.commit()
             self?.savedSourceOpacity = nil
             self?.savedSourceTransform = nil
-            self?.savedSourceIsUserInteractionEnabled = nil
             self?.presentedAppearanceStyle = nil
             self?.pendingCleanup = nil
             // Stop every progress driver before touching filters or removing
             // views. This is required for synchronous generation-boundary
             // dismissal, which can interrupt any opening/closing phase.
-            morphHost?.cancelAnimation()
-            platterBloomHost?.tearDownGlassEffects()
-            gooeyTransition?.cancel()
-            if #available(iOS 26.0, *), let filter = self?.sdfFilter as? LensSDFFilter {
-                filter.uninstall()
-            }
+            glassmorphicHost?.tearDownGlassEffects()
             // Restore the leased source while the bloom surface is still
             // present at the source frame. Removing the host first leaves a
             // one-frame hole where the original button flashes back late.
@@ -1189,14 +831,10 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             // we own deregisters cleanly.
             container?.tearDownGlassEffect()
             self?.submenuCard?.tearDownGlassEffect()
-            morphHost?.glass.tearDownGlassEffect()
-            gooeySurfaceView?.tearDownGlassEffect()
             self?.onWillRemoveOverlay?()
             dim?.removeFromSuperview()
-            morphHost?.removeFromSuperview()
-            platterBloomHost?.removeFromSuperview()
-            gooeySurfaceView?.removeFromSuperview()
-            sdfHost?.removeFromSuperview()
+            glassmorphicHost?.removeFromSuperview()
+            previewMenuHost?.removeFromSuperview()
             container?.removeFromSuperview()
             actionsView?.removeFromSuperview()
             snapshot?.removeFromSuperview()
@@ -1205,13 +843,9 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             host?.removeFromSuperview()
             self?.hostView = nil
             self?.dimView = nil
-            self?.morphHost = nil
-            self?.platterBloomHost = nil
-            self?.gooeyTransition = nil
-            self?.gooeySurfaceView = nil
+            self?.glassmorphicHost = nil
             self?.sourcePresentationLease = nil
-            self?.sdfHost = nil
-            self?.sdfFilter = nil
+            self?.previewMenuHost = nil
             self?.menuContainer = nil
             self?.snapshotView = nil
             self?.previewView = nil
@@ -1240,7 +874,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         // submenu's hit-target view is non-visual; nothing to animate there.
         if let submenuCard {
             UIView.animate(
-                withDuration: ContextMenuController.dismissDuration,
+                withDuration: ContextMenuController.glassmorphicTiming.closeDuration,
                 delay: 0,
                 usingSpringWithDamping: 0.95,
                 initialSpringVelocity: 0,
@@ -1253,162 +887,30 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             )
         }
 
-        if !usesLiquidPresentation {
-            if case .preview = presentationStyle, let sdfHost {
-                animateOutPreview(
-                    sdfHost: sdfHost,
-                    dim: dim,
-                    preview: previewView,
-                    accessory: previewAccessoryContainer,
-                    completion: cleanup
-                )
-            } else {
-                animateOutLegacy(dim: dim, cleanup: cleanup)
-            }
-            return
-        }
-
-        switch presentationStyle {
-        case .morph:
-            animateOutMorph(dim: dim, cleanup: cleanup)
-        case .fluidMorph:
-            animateOutFluidMorph(dim: dim, cleanup: cleanup)
-        case .gooey:
-            animateOutGooey(dim: dim, cleanup: cleanup)
-        case .preview:
-            if let sdfHost {
-                animateOutPreview(
-                    sdfHost: sdfHost,
-                    dim: dim,
-                    preview: previewView,
-                    accessory: previewAccessoryContainer,
-                    completion: cleanup
-                )
-            } else {
-                cleanup()
-            }
+        if let previewMenuHost {
+            animateOutPreview(
+                previewMenuHost: previewMenuHost,
+                dim: dim,
+                preview: previewView,
+                accessory: previewAccessoryContainer,
+                completion: cleanup
+            )
+        } else {
+            animateOutGlassmorphic(dim: dim, cleanup: cleanup)
         }
     }
 
-    /// Reverse the `.morph` presentation: drive `progress` back to 0 with
-    /// a shorter duration (per the rec: "closing should be quicker and
-    /// less elastic than opening"). The smoothstep windows inside the
-    /// morph host handle the asymmetry automatically — destination fades
-    /// out first (t drops past 0.42→0.28), source re-materialises only at
-    /// the tail (t past 0.16→0.02). No separate ab-symmetric animators.
-    private func animateOutMorph(
-        dim: UIView?,
-        cleanup: @escaping () -> Void
-    ) {
-        guard let morphHost else { cleanup(); return }
-
-        // Reset any active stretch transform instantly inside a
-        // disabled-actions transaction so it doesn't trigger an
-        // implicit 0.25 s animation that would race with the
-        // dismiss animator. Without this wrap, the implicit anim
-        // captured the previous `transform` value (e.g., last
-        // value of the open's end-bounce keyframe) and tried to
-        // animate to identity over its own timeline — which read
-        // as the morph "snapping" to a state and the dismiss
-        // animator running on top, perceived as instant by the
-        // user.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        morphHost.transform = .identity
-        CATransaction.commit()
-
-        // Suppress the droplet silhouette on close — per the design
-        // rec, the menu should just return to the button as a plain
-        // rounded-rect shrink while the content cross-fades back to
-        // the source snapshot. No droplet, no SDF lens.
-        morphHost.suppressBlob = true
-
-        UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseIn], animations: {
-            dim?.alpha = 0.0
-        })
-
-        let dismissDuration = ContextMenuController.dismissDuration
-
-        // Morph anchors fade/scale out on open. Restore them with a single
-        // UIKit animation instead of mutating the source from the morph
-        // display-link; that keeps the source view out of the hot path that
-        // also drives the SDF/filter layout.
-        let shouldRestoreSourceView = savedSourceOpacity != nil || savedSourceTransform != nil || source.hidesDuringPresentation
-        let sourceView = shouldRestoreSourceView ? source.view : nil
-        let sourceTargetAlpha = savedSourceOpacity.map(CGFloat.init) ?? 1.0
-        let sourceTargetTransform = savedSourceTransform ?? .identity
-        sourceView?.layer.removeAllAnimations()
-        if let sourceView {
-            UIView.animate(
-                withDuration: dismissDuration * 0.42,
-                delay: dismissDuration * 0.34,
-                usingSpringWithDamping: 0.9,
-                initialSpringVelocity: 0.0,
-                options: [.beginFromCurrentState, .allowUserInteraction],
-                animations: {
-                    sourceView.alpha = sourceTargetAlpha
-                    sourceView.transform = sourceTargetTransform
-                },
-                completion: nil
-            )
-        }
-
-        // CADisplayLink-driven progress: 1 → 0 over dismiss duration.
-        // The progress passed into `step` is the spring-eased value
-        // (== `progressValue`), which decreases 1 → 0 as the menu
-        // collapses. For the SOURCE RESTORE we want a 0 → 1 ramp,
-        // so we invert via `1 - progress`.
-        morphHost.animateProgress(
-            to: 0,
-            duration: dismissDuration,
-            damping: ContextMenuController.dismissDamping,
-            step: { [weak self] progress in
-                guard let self else { return }
-
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                defer { CATransaction.commit() }
-
-                if #available(iOS 26.0, *),
-                   let sdfFilter = self.sdfFilter as? LensSDFFilter {
-                    sdfFilter.updateLayout(
-                        size: morphHost.bounds.size,
-                        cornerRadius: morphHost.glass.layer.cornerRadius
-                    )
-                }
-            },
-            completion: { _ in cleanup() }
-        )
-
-        // SDF pulse on dismiss too — `reversed: true` makes the
-        // displacement rise from 0 → peak as the menu collapses
-        // (mirror of the open path's HOLD-then-DECAY shape). Same
-        // amplitude as the open so the lens reads symmetric on both
-        // halves of the morph cycle.
-        if #available(iOS 26.0, *), let filter = sdfFilter as? LensSDFFilter {
-            let menuMinSide: CGFloat = {
-                guard let metrics = morphHost.metrics else { return 1 }
-                return min(metrics.expandedFrame.width, metrics.expandedFrame.height)
-            }()
-            filter.animateDisplacementPulse(
-                peakHeight: menuMinSide * 0.16,
-                duration: dismissDuration,
-                reversed: true
-            )
-            filter.animateBlur(duration: dismissDuration)
-        }
-    }
-
-    /// Reverse the `.preview` presentation: lifted preview drops back to
+    /// Dismiss the lifted preview: its content drops back to
     /// identity scale; menu chrome scales/fades out.
     private func animateOutPreview(
-        sdfHost: UIView,
+        previewMenuHost: UIView,
         dim: UIView?,
         preview: UIView?,
         accessory: UIView?,
         completion: @escaping () -> Void
     ) {
         let sourceView = self.source.view
+        let sourceTargetAlpha = savedSourceOpacity.map(CGFloat.init) ?? 1.0
         let previewInitialCenter = self.previewInitialCenterInHost
         let menuDismissTransform = CGAffineTransform(
             translationX: 0,
@@ -1434,7 +936,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                 if let previewInitialCenter {
                     preview?.center = previewInitialCenter
                 }
-                sdfHost.transform = menuDismissTransform
+                previewMenuHost.transform = menuDismissTransform
                 preview?.transform = .identity
                 accessory?.transform = accessoryDismissTransform
             },
@@ -1447,10 +949,10 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             animations: {
                 // Delayed fade keeps the geometry visible long enough to
                 // read before the snapshot hands back to the real source.
-                sdfHost.alpha = 0.0
+                previewMenuHost.alpha = 0.0
                 preview?.alpha = 0.0
                 accessory?.alpha = 0.0
-                sourceView?.alpha = 1.0
+                sourceView?.alpha = sourceTargetAlpha
                 dim?.alpha = 0.0
             },
             completion: nil
@@ -1459,235 +961,58 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     // MARK: - Animate in
 
-    private func animateIn(
-        dim: UIView,
-        sourceMinSide: CGFloat
-    ) {
-        // Dim fades in either way. Shallow alpha per the rec ("very faint
-        // separation layer, not a modal black overlay").
-        let legacyTokens = AetherLegacySurfaceTokens.resolve(
+    private func animateIn(dim: UIView) {
+        let dimDuration = usesLiquidPresentation ? 0.18 : AetherLegacySurfaceTokens.resolve(
             role: .popup,
             traitCollection: source.view?.traitCollection ?? UITraitCollection.current
-        )
-        let dimDuration = usesLiquidPresentation ? 0.18 : legacyTokens.animationDuration
-        UIView.animate(withDuration: dimDuration, delay: 0, options: [.curveEaseOut], animations: {
+        ).animationDuration
+        UIView.animate(withDuration: dimDuration, delay: 0, options: [.curveEaseOut]) {
             dim.alpha = 1.0
-        })
-
-        if !usesLiquidPresentation {
-            if case let .preview(_, lift, _, _) = presentationStyle {
-                if let sdfHost { animateInPreview(sdfHost: sdfHost, lift: lift) }
-            } else {
-                animateInLegacy()
-            }
-            return
         }
-
-        switch presentationStyle {
-        case .morph:
-            animateInMorph(sourceMinSide: sourceMinSide)
-        case .fluidMorph:
-            animateInFluidMorph()
-        case .gooey:
-            animateInGooey()
-        case let .preview(_, lift, _, _):
-            if let sdfHost { animateInPreview(sdfHost: sdfHost, lift: lift) }
+        if let preview, let previewMenuHost {
+            animateInPreview(previewMenuHost: previewMenuHost, lift: preview.lift)
+        } else {
+            animateInGlassmorphic()
         }
     }
 
-    private func animateInLegacy() {
-        guard let popupHost = sdfHost else { return }
-        let tokens = AetherLegacySurfaceTokens.resolve(
-            role: .popup,
-            traitCollection: popupHost.traitCollection
-        )
-        UIView.animate(
-            withDuration: tokens.animationDuration,
-            delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
-        ) {
-            popupHost.alpha = 1
-            popupHost.transform = .identity
-        }
-    }
-
-    private func animateOutLegacy(dim: UIView?, cleanup: @escaping () -> Void) {
-        guard let popupHost = sdfHost else { cleanup(); return }
-        let tokens = AetherLegacySurfaceTokens.resolve(
-            role: .popup,
-            traitCollection: popupHost.traitCollection
-        )
-        UIView.animate(
-            withDuration: tokens.animationDuration,
-            delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseIn],
-            animations: {
-                popupHost.alpha = 0
-                popupHost.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
-                dim?.alpha = 0
-            },
-            completion: { _ in cleanup() }
-        )
-    }
-
-    /// Parallel open: the morph host owns all menu geometry. The real
-    /// source view is faded/scaled once with UIKit, outside the progress
-    /// display-link, so it visually disappears without becoming another
-    /// per-frame moving target.
-    private func animateInMorph(sourceMinSide: CGFloat) {
-        guard let morphHost else { return }
-
-        if source.hidesDuringPresentation, let sourceView = source.view {
-            if savedSourceOpacity == nil {
-                savedSourceOpacity = Float(sourceView.alpha)
-            }
-            if savedSourceTransform == nil {
-                savedSourceTransform = sourceView.transform
-            }
-            sourceView.layer.removeAllAnimations()
-            let baseTransform = savedSourceTransform ?? sourceView.transform
-            UIView.animate(
-                withDuration: ContextMenuController.morphDuration * 0.20,
-                delay: ContextMenuController.morphDuration * 0.08,
-                options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
-                animations: {
-                    sourceView.alpha = 0.0
-                    sourceView.transform = baseTransform.scaledBy(x: 0.985, y: 0.985)
-                },
-                completion: nil
-            )
-        }
-
-        // Menu expansion starts IMMEDIATELY at t=0. The display-link step
-        // is kept strictly to filter/layout updates; source animation runs
-        // on a separate UIKit animator above.
-        morphHost.alpha = 1
-        morphHost.animateProgress(
-            to: 1,
-            duration: ContextMenuController.morphDuration,
-            damping: ContextMenuController.morphDamping,
-            step: { [weak self] progress in
-                guard let self else { return }
-
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                defer { CATransaction.commit() }
-
-                if #available(iOS 26.0, *),
-                   let sdfFilter = self.sdfFilter as? LensSDFFilter {
-                    sdfFilter.updateLayout(
-                        size: morphHost.bounds.size,
-                        cornerRadius: morphHost.glass.layer.cornerRadius
-                    )
-                }
-            },
-            completion: nil
-        )
-
-        // SDF pulse runs over the full morph duration. The pulse is
-        // strongest in the first ~55 % and decays to 0 by ~88 %, so
-        // the settled menu has no residual distortion.
-        if #available(iOS 26.0, *), let filter = sdfFilter as? LensSDFFilter {
-            let menuMinSide: CGFloat = {
-                guard let metrics = morphHost.metrics else { return sourceMinSide }
-                return min(metrics.expandedFrame.width, metrics.expandedFrame.height)
-            }()
-            filter.animateDisplacementPulse(
-                peakHeight: menuMinSide * 0.16,
-                duration: ContextMenuController.morphDuration
-            )
-            filter.animateBlur(duration: ContextMenuController.morphDuration)
-        }
-    }
-
-    /// Drive the `.fluidMorph` host as one source-to-platter surface.
-    private func animateInFluidMorph() {
-        guard let platterBloomHost else { return }
-        platterBloomHost.animateExpand(
-            duration: ContextMenuController.fluidMorphTiming.openDuration,
-            damping: ContextMenuController.fluidMorphDamping,
+    /// Expand the shared source-to-menu surface.
+    private func animateInGlassmorphic() {
+        guard let glassmorphicHost else { return }
+        glassmorphicHost.animateExpand(
+            duration: ContextMenuController.glassmorphicTiming.openDuration,
+            damping: AetherMotion.contextMenu.presentation.dampingRatio,
             completion: nil
         )
     }
 
-    /// Drive the `.gooey` transition overlay from source proxy into the
-    /// already-created final menu surface.
-    private func animateInGooey() {
-        guard
-            let host = hostView,
-            let menuSurface = gooeySurfaceView,
-            let transition = gooeyTransition
-        else { return }
-
-        let sourceView = sourcePresentationLease?.proxyView ?? source.view
-        guard let sourceView else { return }
-
-        transition.animateOpen(
-            sourceView: sourceView,
-            menuView: menuSurface,
-            containerView: host,
-            placement: currentContextMenuPlacement(),
-            completion: { _ in }
-        )
-    }
-
-    /// Reverse of `animateInFluidMorph`: the menu platter shrinks back
+    /// Reverse of `animateInGlassmorphic`: the menu platter shrinks back
     /// through the bubble/source path before cleanup restores the source.
-    private func animateOutFluidMorph(
+    private func animateOutGlassmorphic(
         dim: UIView?,
         cleanup: @escaping () -> Void
     ) {
-        guard let platterBloomHost else { cleanup(); return }
+        guard let glassmorphicHost else { cleanup(); return }
 
         // Reset any active stretch transform first so the reverse morph
         // starts from identity, not from a press-release stretch left
         // over from the last touch.
-        platterBloomHost.finalMenuGlassSurfaceView.resetGlassInteractionTransform()
+        glassmorphicHost.finalMenuGlassSurfaceView.resetGlassInteractionTransform()
 
         UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseIn], animations: {
             dim?.alpha = 0.0
         })
 
-        platterBloomHost.animateCollapse(
-            duration: ContextMenuController.fluidMorphTiming.closeDuration,
+        glassmorphicHost.animateCollapse(
+            duration: ContextMenuController.glassmorphicTiming.closeDuration,
             damping: ContextMenuController.dismissDamping,
             completion: { cleanup() }
         )
     }
 
-    /// Reverse of `.gooey`: row content fades out, then the temporary shell
-    /// overlay collapses back toward the source proxy.
-    private func animateOutGooey(
-        dim: UIView?,
-        cleanup: @escaping () -> Void
-    ) {
-        guard
-            let host = hostView,
-            let menuSurface = gooeySurfaceView,
-            let transition = gooeyTransition
-        else {
-            cleanup()
-            return
-        }
-
-        menuSurface.resetGlassInteractionTransform()
-
-        UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseIn], animations: {
-            dim?.alpha = 0.0
-        })
-
-        transition.animateClose(
-            sourceView: sourcePresentationLease?.proxyView ?? source.view,
-            menuView: menuSurface,
-            containerView: host,
-            placement: currentContextMenuPlacement(),
-            completion: { _ in cleanup() }
-        )
-    }
-
     /// Lifted preview + below-source menu spring-in (no morph).
-    private func animateInPreview(sdfHost: UIView, lift: CGFloat) {
-        // sdfHost was pre-staged at scale 0.9 + alpha 0; spring it to
+    private func animateInPreview(previewMenuHost: UIView, lift: CGFloat) {
+        // previewMenuHost was pre-staged at scale 0.9 + alpha 0; spring it to
         // identity. Menu chrome reads as "appearing fresh below the lifted
         // preview".
         UIView.animate(
@@ -1697,7 +1022,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             initialSpringVelocity: 0,
             options: [.beginFromCurrentState, .allowUserInteraction],
             animations: {
-                sdfHost.transform = .identity
+                previewMenuHost.transform = .identity
             },
             completion: nil
         )
@@ -1705,7 +1030,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             duration: ContextMenuController.previewOpenDuration,
             delay: 0,
             animations: {
-                sdfHost.alpha = 1.0
+                previewMenuHost.alpha = 1.0
             },
             completion: nil
         )
@@ -1771,8 +1096,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     // MARK: - Source snapshot
 
-    private func makeSourceSnapshot(source: UIView, preferRenderedImage: Bool = false) -> UIView {
-        if !preferRenderedImage, let snap = source.snapshotView(afterScreenUpdates: false) {
+    private func makeSourceSnapshot(source: UIView) -> UIView {
+        if let snap = source.snapshotView(afterScreenUpdates: false) {
             snap.frame = CGRect(origin: .zero, size: source.bounds.size)
             return snap
         }
@@ -1794,22 +1119,13 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let safeBottom: CGFloat = max(window?.safeAreaInsets.bottom ?? hostView?.safeAreaInsets.bottom ?? 0.0, 12.0)
         let availableHeight = max(1.0, hostBounds.height - safeTop - safeBottom)
 
-        switch presentationStyle {
-        case .fluidMorph, .gooey:
-            return min(availableHeight, max(1.0, hostBounds.height * 0.74))
-        case .morph, .preview:
-            return availableHeight
-        }
+        return preview == nil
+            ? min(availableHeight, max(1.0, hostBounds.height * 0.74))
+            : availableHeight
     }
 
-    /// Non-preview menu placement. `.preview` uses `computePreviewLayout`
-    /// because it owns a full vertical stack: accessory, preview, menu.
-    ///
-    /// Two layouts depending on `presentationStyle`:
-    ///   - `.morph`: menu top-anchored to source.top — the lens visibly
-    ///     grows downward + outward FROM the button.
-    ///   - `.fluidMorph`: menu may cover the original trigger, matching
-    ///     UIKit's menu-platter behavior.
+    /// Source-menu placement preserves its attachment edge; lifted preview
+    /// content uses the separate stacked layout above.
     private func computeMenuFrame(sourceRect: CGRect, menuSize: CGSize, hostBounds: CGRect) -> CGRect {
         let window = source.view?.window
         let safeTop: CGFloat = max(window?.safeAreaInsets.top ?? hostView?.safeAreaInsets.top ?? 0.0, 12.0)
@@ -1817,10 +1133,9 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let x = computeMenuX(sourceRect: sourceRect, menuSize: menuSize, hostBounds: hostBounds)
 
         let initialY: CGFloat
-        switch presentationStyle {
-        case .morph:
-            initialY = sourceRect.minY
-        case .fluidMorph, .gooey:
+        if let preview {
+            initialY = sourceRect.maxY + preview.verticalSpacing
+        } else {
             // Lens bloom behaves like UIKit's menu platter: it may cover the
             // original trigger. Keeping a source gap makes the lens look like
             // a detached popover and also leaves the trigger awkwardly visible
@@ -1837,15 +1152,13 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                     hostBounds.maxY - safeBottom - menuSize.height
                 )
             }
-        case let .preview(spacing, _, _, _):
-            initialY = sourceRect.maxY + spacing
         }
 
         var y = initialY
         if y + menuSize.height > hostBounds.maxY - safeBottom {
             let upward: CGFloat
-            if case let .preview(spacing, _, _, _) = presentationStyle {
-                upward = sourceRect.minY - max(0.0, spacing) - menuSize.height
+            if let preview {
+                upward = sourceRect.minY - max(0.0, preview.verticalSpacing) - menuSize.height
             } else {
                 upward = sourceRect.maxY - menuSize.height
             }
@@ -1860,30 +1173,6 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         }
 
         return CGRect(x: x, y: y, width: menuSize.width, height: menuSize.height)
-    }
-
-    private func currentContextMenuPlacement() -> AetherContextMenuPlacement {
-        let sourceRect = sourceRectInHost
-        let menuFrame = menuFrameInHost
-        if menuFrame.minY >= sourceRect.maxY {
-            return .below
-        }
-        if menuFrame.maxY <= sourceRect.minY {
-            return .above
-        }
-        if menuFrame.minX >= sourceRect.maxX {
-            return .trailing
-        }
-        if menuFrame.maxX <= sourceRect.minX {
-            return .leading
-        }
-
-        let dx = menuFrame.midX - sourceRect.midX
-        let dy = menuFrame.midY - sourceRect.midY
-        if abs(dy) >= abs(dx) {
-            return dy >= 0.0 ? .below : .above
-        }
-        return dx >= 0.0 ? .trailing : .leading
     }
 
     private func computePreviewLayout(
@@ -2332,114 +1621,6 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         collapseInlineSubmenu()
     }
 
-    // MARK: - Rubber-band stretch
-
-    private func applyStretch(toContainer container: UIView, touchInActions point: CGPoint, actionsBounds: CGRect, animated _: Bool) {
-        let target = Self.computeStretchTransform(point: point, in: actionsBounds)
-
-        // First touch-down: animate the lift-in (identity → stretched)
-        // so the surface visibly rises into place. Subsequent drag
-        // updates snap the transform because the touch events already
-        // fire at ~60-120Hz — UIView.animate at each tick would fight
-        // the finger and introduce lag.
-        if !isStretchActive {
-            isStretchActive = true
-            UIView.animate(
-                withDuration: 0.28, delay: 0,
-                usingSpringWithDamping: 0.72, initialSpringVelocity: 0,
-                options: [.beginFromCurrentState, .allowUserInteraction],
-                animations: { self.setStretchTransform(target, on: container) },
-                completion: nil
-            )
-        } else {
-            setStretchTransform(target, on: container)
-        }
-    }
-
-    private func releaseStretch(onContainer container: UIView) {
-        isStretchActive = false
-        UIView.animate(
-            withDuration: 0.42, delay: 0,
-            usingSpringWithDamping: 0.7, initialSpringVelocity: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction],
-            animations: { self.setStretchTransform(.identity, on: container) },
-            completion: nil
-        )
-    }
-
-    private func setStretchTransform(_ transform: CGAffineTransform, on container: UIView) {
-        if let glassSurface = container as? MenuGlassSurfaceView {
-            glassSurface.setGlassInteractionTransform(transform)
-        } else {
-            container.transform = transform
-        }
-    }
-
-    // MARK: - Glass-lift transform math
-    //
-    // Port of Telegram Display framework's `TouchEffect.currentTransform`
-    // (see `GlassTouchEffect.swift`), adapted for the menu surface —
-    // smaller lift magnitude + translation offset because the menu is a
-    // much bigger surface than the buttons that math was tuned for.
-    //
-    // Given the finger's point in `actionsBounds` coords, returns the
-    // affine transform that positions the menu surface in its "lifted
-    // and stretched" pose:
-    //
-    //   • Base lift (uniform scale) — surface rises uniformly on press.
-    //   • Anisotropic bias along the drag direction — the side of the
-    //     surface the finger pulls gets scaled up, the perpendicular
-    //     side gets squished (soft-body physics feel).
-    //   • Translation offset up to `stretchMaxOffset` toward the
-    //     finger — surface shifts into the drag direction.
-    //
-    // Composition (read right-to-left per CGAffineTransform semantics):
-    // `translate(tx, ty) * scale(sx, sy)`. Matches the original
-    // CATransform3D stack `translate then scale`.
-    private static func computeStretchTransform(point: CGPoint, in bounds: CGRect) -> CGAffineTransform {
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let stretch = CGPoint(x: point.x - center.x, y: point.y - center.y)
-
-        let w = max(1.0, bounds.width)
-        let h = max(1.0, bounds.height)
-        let aspect = w / h
-        let shorterSide = min(w, h)
-        let baseScale = 1.0 + stretchPressedSizeIncrease / shorterSide
-
-        let adjustedX = stretch.x / aspect
-        let length = sqrt(adjustedX * adjustedX + stretch.y * stretch.y)
-
-        // No directional stretch if the finger's on centre — pure lift.
-        guard length > 0.5 else {
-            return CGAffineTransform(scaleX: baseScale, y: baseScale)
-        }
-
-        let normal = CGPoint(x: adjustedX / length, y: stretch.y / length)
-        // `k` tapers the stretch off the further the finger is pulled,
-        // so the surface doesn't infinitely distort on edge-drags.
-        let k: CGFloat = -1.0 / ((length / h) / (5.0 * aspect) + 1.0) + 1.0
-        let additionalMaxScale = (h + 16.0 / aspect) / h - 1.0
-        let t = additionalMaxScale * k * aspect
-
-        let scaleX: CGFloat
-        let scaleY: CGFloat
-        if abs(normal.x) > abs(normal.y) {
-            // Horizontal-dominant drag: X stretches, Y compresses.
-            let diff = abs(normal.x) - abs(normal.y)
-            scaleX = baseScale * (1.0 + t * diff)
-            scaleY = baseScale * (1.0 / (1.0 + t * diff))
-        } else {
-            // Vertical-dominant drag: Y stretches, X compresses.
-            let diff = abs(normal.y) - abs(normal.x)
-            scaleX = baseScale * (1.0 / (1.0 + t * diff))
-            scaleY = baseScale * (1.0 + t * diff)
-        }
-
-        return CGAffineTransform(
-            translationX: normal.x * stretchMaxOffset * k,
-            y: normal.y * stretchMaxOffset * k
-        ).scaledBy(x: scaleX, y: scaleY)
-    }
 }
 
 private final class PreviewAccessoryContainerView: UIView {
@@ -2534,7 +1715,7 @@ public extension ContextMenuController {
         source: UIView,
         cornerRadius: CGFloat? = nil,
         items: [ContextMenuItem],
-        presentationStyle: PresentationStyle = .morph,
+        preview: Preview? = nil,
         appearanceStyle: AetherAppearanceStyle? = nil,
         catchTapsOutside: Bool = true,
         hasHapticFeedback: Bool = true,
@@ -2547,7 +1728,7 @@ public extension ContextMenuController {
         let controller = ContextMenuController(
             source: Source(view: source, cornerRadius: cornerRadius),
             items: items,
-            presentationStyle: presentationStyle,
+            preview: preview,
             appearanceStyle: appearanceStyle,
             catchTapsOutside: catchTapsOutside,
             hasHapticFeedback: hasHapticFeedback,

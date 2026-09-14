@@ -7,6 +7,46 @@ enum ContextMenuBloomDirection: Equatable {
     case closing
 }
 
+/// Independent clocks measured from the first changing dismissal frame.
+/// The source becomes readable inside the still-collapsing surface; it must
+/// not wait for the tiny source lobe to finish growing back into a button.
+struct ContextMenuSourceMaterializationSample: Equatable {
+    let opacity: CGFloat
+    let blurRadius: CGFloat
+}
+
+func contextMenuSourceMaterializationSample(
+    rawProgress: CGFloat,
+    direction: ContextMenuBloomDirection,
+    menuHeight: CGFloat,
+    reduceMotion: Bool = false
+) -> ContextMenuSourceMaterializationSample {
+    let t = max(0.0, min(1.0, rawProgress))
+    if direction == .opening {
+        let fade = contextMenuBloomSmoothRange(t, start: 0.02, end: 0.18)
+        return .init(opacity: 1.0 - fade, blurRadius: 0.0)
+    }
+    let elapsed = 1.0 - t
+    let heightFactor = max(0.0, min(1.0, (menuHeight - 180.0) / 220.0))
+    let revealStart = 0.30 + 0.08 * heightFactor
+    let reveal = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.68)
+    let focus = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.68)
+    return .init(
+        opacity: reveal,
+        blurRadius: reduceMotion ? 0.0 : 8.0 * (1.0 - focus)
+    )
+}
+
+/// A short menu loses its rows in ~81 ms; a tall platter needs ~129 ms.
+/// Both finish before the source content returns. Heights are UIKit points,
+/// not screen-recording pixels, so the clock is stable across device scales.
+func contextMenuClosingContentProgress(rawProgress: CGFloat, menuHeight: CGFloat) -> CGFloat {
+    let elapsed = 1.0 - max(0.0, min(1.0, rawProgress))
+    let heightFactor = max(0.0, min(1.0, (menuHeight - 180.0) / 220.0))
+    let dissolveFraction = 0.30 + 0.18 * heightFactor
+    return max(0.0, 1.0 - elapsed / dissolveFraction)
+}
+
 private func contextMenuOpeningLiquidProgress(_ rawProgress: CGFloat) -> CGFloat {
     // The reference is emphatically non-linear in absolute time.  It spends
     // the first 80 ms pulling a compact egg from the button, accelerates
@@ -213,23 +253,48 @@ func contextMenuBloomGeometrySample(
 
     case .closing:
         let elapsed = 1.0 - raw
-        let localT = contextMenuBloomNormalize(elapsed, start: 0.20, end: 0.96)
         if reduceMotion {
+            let localT = contextMenuBloomNormalize(elapsed, start: 0.0, end: 0.78)
             let remaining = 1.0 - contextMenuBloomSmootherstep(localT)
             widthT = remaining
             heightT = remaining
         } else {
-            let times: [CGFloat] = [0.0, 0.06, 0.14, 0.32, 0.50, 0.68, 0.86, 1.0]
-            widthT = contextMenuBloomSample(
+            // Recording 4.183...4.483: contraction begins on the next
+            // 17 ms frame, reaches a compact egg at about 110 ms, then the
+            // narrow body rebounds to the source. These are elapsed-time
+            // samples, without the old ~98 ms normalization/plateau delay.
+            let times: [CGFloat] = [
+                0.0, 0.053125, 0.131250, 0.234375, 0.340625,
+                0.443750, 0.546875, 0.653125, 0.756250, 0.875, 1.0
+            ]
+            let contraction = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 1.008, 1.0, 0.72, 0.44, 0.21, 0.054, 0.0],
-                at: localT
+                values: [1.0, 0.72, 0.59, 0.37, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                at: elapsed
             )
-            heightT = contextMenuBloomSample(
+            let sourceCompression = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 1.012, 1.0, 0.84, 0.51, 0.24, 0.088, 0.0],
-                at: localT
+                values: [0.0, 0.0, 0.0, 0.0, 0.06, 0.25, 0.28, 0.14, 0.06, 0.0, 0.0],
+                at: elapsed
             )
+            let widthDifference = target.width - source.width
+            // Scale the undershoot to the trigger, not the menu: the same
+            // motion remains valid for a 44 pt icon and a wide text button.
+            let shortWidthT = widthDifference > 1.0
+                ? contraction - source.width / widthDifference * sourceCompression
+                : contraction
+            let shortHeightT = contextMenuBloomSample(
+                times: times,
+                values: [1.0, 0.90, 0.765, 0.72, 0.585, 0.36, 0.215, 0.08, 0.02, 0.0, 0.0],
+                at: elapsed
+            )
+            let tallness = contextMenuClosingTallness(target: target)
+            let tall = contextMenuTallClosingSample(elapsed: elapsed)
+            let tallBodyHeight = source.height + (target.height - source.height) * tall.bodyHeightT
+            let tallEnvelopeHeight = max(source.height, tallBodyHeight + target.height * tall.topOffset)
+            let tallHeightT = (tallEnvelopeHeight - source.height) / max(1.0, target.height - source.height)
+            widthT = shortWidthT + (tall.widthT - shortWidthT) * tallness
+            heightT = shortHeightT + (tallHeightT - shortHeightT) * tallness
         }
     }
 
@@ -313,6 +378,25 @@ func contextMenuBloomGeometrySample(
         widthT: widthT,
         heightT: heightT,
         anchorTravelT: anchorTravelT
+    )
+}
+
+private func contextMenuClosingTallness(target: CGRect) -> CGFloat {
+    contextMenuBloomSmoothRange(target.height / max(1.0, target.width), start: 0.90, end: 1.40)
+}
+
+private func contextMenuTallClosingSample(elapsed: CGFloat) -> (
+    widthT: CGFloat, bodyWidthT: CGFloat, bodyHeightT: CGFloat, topOffset: CGFloat
+) {
+    // Tall filter-menu reference 20.437...20.757. Unlike the short Edit
+    // platter, this body travels down while contracting and keeps enough
+    // width for a rounded lower lobe until the source/neck takes over.
+    let times: [CGFloat] = [0, 0.05, 0.156, 0.26, 0.363, 0.469, 0.572, 0.675, 0.781, 0.875, 1]
+    return (
+        contextMenuBloomSample(times: times, values: [1, 0.974, 0.787, 0.584, 0.377, 0.206, 0.077, 0.013, 0, 0, 0], at: elapsed),
+        contextMenuBloomSample(times: times, values: [1, 0.974, 0.787, 0.584, 0.377, 0.206, 0.068, -0.032, 0, 0, 0], at: elapsed),
+        contextMenuBloomSample(times: times, values: [1, 0.976, 0.758, 0.533, 0.338, 0.19, 0.079, -0.018, 0, 0, 0], at: elapsed),
+        contextMenuBloomSample(times: times, values: [0, 0.036, 0.153, 0.166, 0.140, 0.101, 0.078, 0.074, 0.03, 0, 0], at: elapsed)
     )
 }
 
@@ -452,7 +536,7 @@ private func contextMenuBloomRoundedPath(
 /// keeps the source/body/neck breakup needed for its longer return flow.
 /// Keeping both profiles in one value lets tests inspect the exact visible
 /// silhouette while production drives every surface from one display-link.
-struct ContextMenuGooeyMorphSample: Equatable {
+struct ContextMenuGlassmorphicGeometrySample: Equatable {
     let headFrame: CGRect
     let bodyFrame: CGRect
     let headRotation: CGFloat
@@ -468,10 +552,10 @@ struct ContextMenuGooeyMorphSample: Equatable {
     let bodyAlpha: CGFloat
 
     static func interpolated(
-        from: ContextMenuGooeyMorphSample,
-        to: ContextMenuGooeyMorphSample,
+        from: ContextMenuGlassmorphicGeometrySample,
+        to: ContextMenuGlassmorphicGeometrySample,
         progress: CGFloat
-    ) -> ContextMenuGooeyMorphSample {
+    ) -> ContextMenuGlassmorphicGeometrySample {
         let t = max(0.0, min(1.0, progress))
         if t == 0.0 { return from }
         if t == 1.0 { return to }
@@ -501,7 +585,7 @@ struct ContextMenuGooeyMorphSample: Equatable {
             )
         }
 
-        return ContextMenuGooeyMorphSample(
+        return ContextMenuGlassmorphicGeometrySample(
             headFrame: rect(from.headFrame, to.headFrame),
             bodyFrame: rect(from.bodyFrame, to.bodyFrame),
             headRotation: scalar(from.headRotation, to.headRotation),
@@ -531,7 +615,7 @@ private func contextMenuOpeningSingleMassMorphSample(
     sourceRadius: CGFloat,
     anchor: ContextMenuBloomAnchor,
     rawProgress: CGFloat
-) -> ContextMenuGooeyMorphSample {
+) -> ContextMenuGlassmorphicGeometrySample {
     let raw = max(0.0, min(1.0, rawProgress))
     let liquidT = contextMenuOpeningLiquidProgress(raw)
     let unit = CGPoint(
@@ -811,7 +895,7 @@ private func contextMenuOpeningSingleMassMorphSample(
         x: (seedCenter.x + bodyCenter.x) * 0.5,
         y: (seedCenter.y + bodyCenter.y) * 0.5
     )
-    return ContextMenuGooeyMorphSample(
+    return ContextMenuGlassmorphicGeometrySample(
         headFrame: seedFrame,
         bodyFrame: bodyFrame,
         headRotation: headRotation,
@@ -832,7 +916,7 @@ private func contextMenuOpeningSingleMassMorphSample(
 /// Opening becomes one connected seed/shoulder/carrier mass with guaranteed
 /// overlap; closing retains the source/body/neck composition used by its
 /// return flow.
-func contextMenuGooeyMorphSample(
+func contextMenuGlassmorphicGeometrySample(
     source: CGRect,
     target: CGRect,
     outerFrame: CGRect,
@@ -843,7 +927,7 @@ func contextMenuGooeyMorphSample(
     direction: ContextMenuBloomDirection,
     rawProgress: CGFloat,
     reduceMotion: Bool
-) -> ContextMenuGooeyMorphSample {
+) -> ContextMenuGlassmorphicGeometrySample {
     let raw = max(0.0, min(1.0, rawProgress))
     let unit = CGPoint(
         x: max(0.0, min(1.0, anchor.unitPoint.x)),
@@ -852,7 +936,7 @@ func contextMenuGooeyMorphSample(
     let sourceCenter = CGPoint(x: source.midX, y: source.midY)
 
     if raw <= 0.0 {
-        return ContextMenuGooeyMorphSample(
+        return ContextMenuGlassmorphicGeometrySample(
             headFrame: source,
             bodyFrame: source,
             headRotation: 0.0,
@@ -869,7 +953,7 @@ func contextMenuGooeyMorphSample(
         )
     }
     if raw >= 1.0 {
-        return ContextMenuGooeyMorphSample(
+        return ContextMenuGlassmorphicGeometrySample(
             headFrame: CGRect(
                 x: sourceCenter.x - 0.5,
                 y: sourceCenter.y - 0.5,
@@ -893,7 +977,7 @@ func contextMenuGooeyMorphSample(
 
     if reduceMotion {
         let headFade = 1.0 - contextMenuBloomSmootherstep(raw)
-        return ContextMenuGooeyMorphSample(
+        return ContextMenuGlassmorphicGeometrySample(
             headFrame: source,
             bodyFrame: outerFrame,
             headRotation: 0.0,
@@ -923,7 +1007,7 @@ func contextMenuGooeyMorphSample(
     }
 
     let phase: CGFloat
-    let gooeyStrength: CGFloat
+    let surfaceTensionStrength: CGFloat
     let headDeformationStrength: CGFloat
     let horizontalTension: CGFloat
     let verticalTension: CGFloat
@@ -942,14 +1026,14 @@ func contextMenuGooeyMorphSample(
             * (1.0 - contextMenuBloomSmoothRange(phase, start: 0.36, end: 0.70))
         verticalTension = contextMenuBloomSmoothRange(phase, start: 0.00, end: 0.20)
             * (1.0 - contextMenuBloomSmoothRange(phase, start: 0.48, end: 0.82))
-        gooeyStrength = max(horizontalTension, verticalTension)
+        surfaceTensionStrength = max(horizontalTension, verticalTension)
         // The button yields before the platter begins its gross size change.
         // This produces the reference's circle -> vertical egg -> descending
         // drop sequence instead of holding a static circle for 130 ms and
         // then scaling a menu out of it.
         let earlySeedYield = contextMenuBloomSmoothRange(raw, start: 0.08, end: 0.22)
             * (1.0 - contextMenuBloomSmoothRange(raw, start: 0.42, end: 0.60))
-        headDeformationStrength = max(gooeyStrength, earlySeedYield)
+        headDeformationStrength = max(surfaceTensionStrength, earlySeedYield)
         // Preserve a substantial source lobe while the waist is thick, then
         // swallow both together. Letting the head become tiny while a long
         // bridge remained produced the non-native antenna frame.
@@ -970,8 +1054,8 @@ func contextMenuGooeyMorphSample(
             * (1.0 - collapsed)
         verticalTension = contextMenuBloomSmoothRange(phase, start: 0.36, end: 0.56)
             * (1.0 - collapsed)
-        gooeyStrength = max(horizontalTension, verticalTension)
-        headDeformationStrength = gooeyStrength
+        surfaceTensionStrength = max(horizontalTension, verticalTension)
+        headDeformationStrength = surfaceTensionStrength
         headScale = 0.015 + 0.985 * contextMenuBloomSmoothRange(phase, start: 0.40, end: 0.74)
         headAlpha = contextMenuBloomSmoothRange(phase, start: 0.40, end: 0.64)
         bodyAlpha = 1.0 - contextMenuBloomSmoothRange(phase, start: 0.86, end: 1.0)
@@ -1031,6 +1115,27 @@ func contextMenuGooeyMorphSample(
         width: bodyWidth,
         height: bodyHeight
     )
+    if direction == .closing {
+        let tallness = contextMenuClosingTallness(target: target)
+        if tallness > 0 {
+            let tall = contextMenuTallClosingSample(elapsed: 1.0 - raw)
+            let width = max(1.0, (source.width + (target.width - source.width) * tall.bodyWidthT) * bodyAlpha)
+            let height = max(1.0, (source.height + (target.height - source.height) * tall.bodyHeightT) * bodyAlpha)
+            let topOffset = target.height * tall.topOffset
+            let tallFrame = CGRect(
+                x: outerFrame.minX + outerFrame.width * unit.x - width * unit.x,
+                y: unit.y <= 0.25 ? outerFrame.minY + topOffset
+                    : (unit.y >= 0.75 ? outerFrame.maxY - topOffset - height : outerFrame.midY - height * 0.5),
+                width: width, height: height
+            )
+            bodyFrame = CGRect(
+                x: bodyFrame.minX + (tallFrame.minX - bodyFrame.minX) * tallness,
+                y: bodyFrame.minY + (tallFrame.minY - bodyFrame.minY) * tallness,
+                width: bodyFrame.width + (tallFrame.width - bodyFrame.width) * tallness,
+                height: bodyFrame.height + (tallFrame.height - bodyFrame.height) * tallness
+            )
+        }
+    }
 
     var headWidth = max(1.0, source.width * headScale)
     var headHeight = max(1.0, source.height * headScale)
@@ -1110,11 +1215,13 @@ func contextMenuGooeyMorphSample(
                 end: 0.34
             )
     case .closing:
+        let compactBody = 1.0 - contextMenuBloomSmoothRange(
+            bodyFrame.width / max(1.0, source.width), start: 0.9, end: 2.2
+        )
         contactDepth = 0.30
-            + (0.78 - 0.30) * contextMenuBloomSmoothRange(
-                phase,
-                start: 0.66,
-                end: 0.90
+            + (0.78 - 0.30) * max(
+                compactBody,
+                contextMenuBloomSmoothRange(phase, start: 0.66, end: 0.90)
             )
     }
     var bodyContact = CGPoint(
@@ -1260,10 +1367,11 @@ func contextMenuGooeyMorphSample(
     let headEdgeDistance = ellipseDenominator > 0.001 ? 1.0 / ellipseDenominator : 0.0
     let overlapDistance = min(headEdgeDistance * 0.28, max(2.0, neckRadius * 0.36))
     let bridgeOriginDistance = max(0.0, headEdgeDistance - overlapDistance)
-    let bridgeOrigin = CGPoint(
+    let bridgeOrigin = clampBridgePoint(CGPoint(
         x: headCenter.x + semanticExit.x * bridgeOriginDistance,
         y: headCenter.y + semanticExit.y * bridgeOriginDistance
-    )
+    ))
+    bodyContact = clampBridgePoint(bodyContact)
 
     let bridgeDX = bodyContact.x - bridgeOrigin.x
     let bridgeDY = bodyContact.y - bridgeOrigin.y
@@ -1281,15 +1389,15 @@ func contextMenuGooeyMorphSample(
         // First tangent: almost vertical and away from the source. The body
         // endpoint then pulls the second half inward, producing a readable
         // spatial curve instead of two collinear capsules.
-        bridgeControl = CGPoint(
-            x: bridgeOrigin.x + controlHorizontalSign * bridgeDistance * 0.08,
+        bridgeControl = clampBridgePoint(CGPoint(
+            x: bridgeOrigin.x + controlHorizontalSign * min(bridgeDistance * 0.08, abs(bridgeDX) * 0.12),
             y: bridgeOrigin.y + controlVerticalSign * bridgeDistance * 0.62
-        )
+        ))
     } else {
-        bridgeControl = CGPoint(
+        bridgeControl = clampBridgePoint(CGPoint(
             x: bridgeOrigin.x + controlHorizontalSign * bridgeDistance * 0.62,
-            y: bridgeOrigin.y + controlVerticalSign * bridgeDistance * 0.08
-        )
+            y: bridgeOrigin.y + controlVerticalSign * min(bridgeDistance * 0.08, abs(bridgeDY) * 0.12)
+        ))
     }
 
     func pointAlongCurvedBridge(_ amount: CGFloat) -> CGPoint {
@@ -1307,7 +1415,7 @@ func contextMenuGooeyMorphSample(
     let bridgeKneeAmount: CGFloat = 0.46
     let neckBulbAmount: CGFloat = 0.96
 
-    return ContextMenuGooeyMorphSample(
+    return ContextMenuGlassmorphicGeometrySample(
         headFrame: headFrame,
         bodyFrame: bodyFrame,
         headRotation: 0.0,
@@ -1324,9 +1432,9 @@ func contextMenuGooeyMorphSample(
     )
 }
 
-private func contextMenuGooeySilhouettePath(
-    sample: ContextMenuGooeyMorphSample
-) -> CGPath {
+private func contextMenuGlassmorphicSilhouetteParts(
+    sample: ContextMenuGlassmorphicGeometrySample
+) -> [CGPath] {
     func rotationTransform(for frame: CGRect, angle: CGFloat) -> CGAffineTransform {
         guard abs(angle) > 0.0001 else { return .identity }
         return CGAffineTransform(translationX: frame.midX, y: frame.midY)
@@ -1334,9 +1442,13 @@ private func contextMenuGooeySilhouettePath(
             .translatedBy(x: -frame.midX, y: -frame.midY)
     }
 
-    let path = CGMutablePath()
+    var paths: [CGPath] = []
+    func append(_ path: CGPath, transform: CGAffineTransform = .identity) {
+        var transform = transform
+        paths.append(path.copy(using: &transform) ?? path)
+    }
     if sample.headAlpha > 0.001, sample.headFrame.width > 0.5, sample.headFrame.height > 0.5 {
-        path.addPath(contextMenuBloomRoundedPath(
+        append(contextMenuBloomRoundedPath(
             in: sample.headFrame,
             radii: .uniform(sample.headRadius)
         ), transform: rotationTransform(for: sample.headFrame, angle: sample.headRotation))
@@ -1345,7 +1457,7 @@ private func contextMenuGooeySilhouettePath(
         let sourceSegment = CGMutablePath()
         sourceSegment.move(to: sample.bridgeStart)
         sourceSegment.addLine(to: sample.bridgeEnd)
-        path.addPath(sourceSegment.copy(
+        append(sourceSegment.copy(
             strokingWithWidth: sample.bridgeRadius * 2.0,
             lineCap: .round,
             lineJoin: .round,
@@ -1355,7 +1467,7 @@ private func contextMenuGooeySilhouettePath(
             let continuation = CGMutablePath()
             continuation.move(to: sample.bridgeEnd)
             continuation.addLine(to: sample.neckBulbCenter)
-            path.addPath(continuation.copy(
+            append(continuation.copy(
                 strokingWithWidth: sample.neckBulbRadius * 2.0,
                 lineCap: .round,
                 lineJoin: .round,
@@ -1364,10 +1476,20 @@ private func contextMenuGooeySilhouettePath(
         }
     }
     if sample.bodyAlpha > 0.001, sample.bodyFrame.width > 0.5, sample.bodyFrame.height > 0.5 {
-        path.addPath(contextMenuBloomRoundedPath(
+        append(contextMenuBloomRoundedPath(
             in: sample.bodyFrame,
             radii: sample.bodyCornerRadii
         ), transform: rotationTransform(for: sample.bodyFrame, angle: sample.bodyRotation))
+    }
+    return paths
+}
+
+private func contextMenuGlassmorphicSilhouettePath(
+    sample: ContextMenuGlassmorphicGeometrySample
+) -> CGPath {
+    let path = CGMutablePath()
+    for part in contextMenuGlassmorphicSilhouetteParts(sample: sample) {
+        path.addPath(part)
     }
     return path
 }
@@ -1420,8 +1542,8 @@ func contextMenuBloomContentWeights(at progress: CGFloat) -> ContextMenuBloomCon
     )
 }
 
-/// Dismissal deliberately keeps the established, slower content dissolve.
-/// It is not the mathematical reverse of the reference-derived opening.
+/// Dismissal uses its own reveal curve and a size-aware clock; it is not a
+/// mathematical reversal of opening.
 func contextMenuBloomClosingContentWeights(at progress: CGFloat) -> ContextMenuBloomContentWeights {
     contextMenuBloomContentWeights(
         at: progress,
@@ -1450,7 +1572,7 @@ func contextMenuBloomRevealProgress(at progress: CGFloat) -> CGFloat {
     )
 }
 
-final class ContextMenuSourcePlatterBloomTransitionView: UIView {
+final class ContextMenuGlassmorphicTransitionView: UIView {
     static var debugFrozenProgress: CGFloat? = {
         #if DEBUG
         guard
@@ -1477,6 +1599,11 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
     private let sourceCornerRadius: CGFloat
     private let sourceMode: ContextMenuSourceVisualMode
     private let isDark: Bool
+    private let usesOpticalDistortion: Bool
+    private let sourceContentCarrier = UIView()
+    private let sourceContentMask = CALayer()
+    private var sourceContentMaskParts: [CAShapeLayer] = []
+    private var sourceMaterializationView: AetherMaterializationImageView?
 
     private let shadowView = UIView()
     private let ambientShadowLayer = CAShapeLayer()
@@ -1503,7 +1630,11 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
     private var animationCompletion: (() -> Void)?
     private var interruptedCollapse: InterruptedCollapse?
     private var lastAppliedProgress: CGFloat = 0
-    private var displayedGooeySample: ContextMenuGooeyMorphSample?
+    private var displayedGlassmorphicSample: ContextMenuGlassmorphicGeometrySample?
+    private var displayedContentReveal: CGFloat = 0
+    private var displayedContentDistortion = OpticalDistortion.zero
+    private var displayedSurfaceDistortion = OpticalDistortion.zero
+    private var displayedGlassSpacing: CGFloat = 0
 
     init(
         sourceFrameInOverlay: CGRect,
@@ -1520,6 +1651,7 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         self.sourceCornerRadius = sourceCornerRadius
         self.sourceMode = sourceMode
         self.isDark = isDark
+        self.usesOpticalDistortion = (appearanceStyle ?? AetherAppearance.runtimeCurrent.style).usesLiquidGlass
         self.glassMorphContainer = GlassBackgroundContainerView(
             spacing: 18.0,
             appearanceStyle: appearanceStyle
@@ -1624,8 +1756,14 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         finalMenuGlassSurfaceView.contentView.addSubview(liveMenuContentView)
 
         sourceProxyContainer.isUserInteractionEnabled = false
-        sourceProxyContainer.clipsToBounds = true
-        sourceSeedGlassSurfaceView.contentView.addSubview(sourceProxyContainer)
+        sourceProxyContainer.clipsToBounds = false
+        // The source label returns on the upper rim of the collapsing body
+        // before the source lobe grows back. Mask it by the complete surface,
+        // not the tiny (initially 1pt) lobe that used to hide it until the end.
+        sourceContentCarrier.isUserInteractionEnabled = false
+        sourceContentCarrier.layer.mask = sourceContentMask
+        addSubview(sourceContentCarrier)
+        sourceContentCarrier.addSubview(sourceProxyContainer)
 
         setProgress(0)
     }
@@ -1659,8 +1797,8 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         if finalMenuGlassSurfaceView.isUserInteractionEnabled {
             return finalMenuGlassSurfaceView.frame.contains(point)
         }
-        guard let displayedGooeySample else { return false }
-        let path = contextMenuGooeySilhouettePath(sample: displayedGooeySample)
+        guard let displayedGlassmorphicSample else { return false }
+        let path = contextMenuGlassmorphicSilhouettePath(sample: displayedGlassmorphicSample)
         if path.contains(point) { return true }
         // Native container spacing optically extends the merged neck beyond
         // the mathematical union. Swallow that transition-only halo so a
@@ -1691,10 +1829,10 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         finalMenuGlassSurfaceView.tearDownGlassEffect()
     }
 
-    func setProgress(_ progress: CGFloat) {
+    func setProgress(_ progress: CGFloat, direction: ContextMenuBloomDirection = .opening) {
         cancelAnimation()
         interruptedCollapse = nil
-        animationDirection = 1
+        animationDirection = direction == .opening ? 1 : -1
         self.progress = max(0, min(1, progress))
         updateGeometry(progress: self.progress)
     }
@@ -1725,6 +1863,22 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         sharpMenuSnapshotView.image = image
         blurredMenuSnapshotView.image = Self.blurredImage(from: image, radius: 18.0) ?? image
         updateContentFrames(for: finalMenuGlassSurfaceView.bounds)
+    }
+
+    func prepareSourceContentSnapshots() {
+        guard sourceMaterializationView == nil,
+              !sourceProxyContainer.subviews.isEmpty,
+              sourceProxyContainer.bounds.width > 0,
+              sourceProxyContainer.bounds.height > 0 else { return }
+        sourceProxyContainer.layoutIfNeeded()
+        Self.ensureTextureContentIsDisplayed(in: sourceProxyContainer)
+        let image = Self.renderImage(from: sourceProxyContainer)
+        sourceProxyContainer.subviews.forEach { $0.isHidden = true }
+        let content = AetherMaterializationImageView(image: image, maximumBlurRadius: 8.0)
+        content.frame = sourceProxyContainer.bounds
+        sourceProxyContainer.addSubview(content)
+        sourceMaterializationView = content
+        updateSourceProxy(rawT: progress)
     }
 
     func finishToFinalMenu() {
@@ -1786,27 +1940,36 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
 
     private func apply(metrics: Metrics, rawT: CGFloat) {
         lastAppliedProgress = rawT
-        let gooeySample = currentGooeySample(metrics: metrics, rawT: rawT)
-        displayedGooeySample = gooeySample
+        let glassSample = currentGlassmorphicSample(metrics: metrics, rawT: rawT)
+        displayedGlassmorphicSample = glassSample
 
-        let surfaceTension = max(0.0, min(1.0, gooeySample.bridgeRadius / 15.0))
+        let surfaceTension = max(0.0, min(1.0, glassSample.bridgeRadius / 15.0))
+        var glassSpacing: CGFloat
         if animationDirection >= 0.0, interruptedCollapse == nil {
             // Opening uses overlapping seed/shoulder/carrier fields. A wide
             // compositor reach would manufacture a detached halo outside that
             // intentionally connected mass.
-            glassMorphContainer.setSpacing(0.0)
+            glassSpacing = 0.0
         } else {
             // Closing intentionally keeps the longer measured neck.
-            glassMorphContainer.setSpacing(18.0 + 4.0 * surfaceTension)
+            glassSpacing = 18.0 + 4.0 * surfaceTension
         }
+        let interruptionBlend = interruptedCollapse.map {
+            Self.smootherstep(0.0, 0.35, interruptedCollapseRunProgress(rawT: rawT, startProgress: $0.rawProgress))
+        }
+        if let state = interruptedCollapse, let interruptionBlend {
+            glassSpacing = Self.lerp(state.glassSpacing, glassSpacing, interruptionBlend)
+        }
+        displayedGlassSpacing = glassSpacing
+        glassMorphContainer.setSpacing(glassSpacing)
 
         if glassMorphContainer.isUsingNativeContainerEffect {
             applySurfaceGeometry(
-                frame: gooeySample.bodyFrame,
-                rotation: gooeySample.bodyRotation,
+                frame: glassSample.bodyFrame,
+                rotation: glassSample.bodyRotation,
                 to: finalMenuGlassSurfaceView
             )
-            finalMenuGlassSurfaceView.setSurfaceCornerRadii(gooeySample.bodyCornerRadii)
+            finalMenuGlassSurfaceView.setSurfaceCornerRadii(glassSample.bodyCornerRadii)
         } else {
             // Older systems do not have a compositor capable of merging
             // sibling glass fields. Preserve the established single-platter
@@ -1821,68 +1984,99 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         let usesOpaqueNativeLobes = glassMorphContainer.isUsingNativeContainerEffect
             && !UIAccessibility.isReduceMotionEnabled
         if usesOpaqueNativeLobes {
-            finalMenuGlassSurfaceView.alpha = gooeySample.bodyAlpha <= 0.001 ? 0.0 : 1.0
+            finalMenuGlassSurfaceView.alpha = glassSample.bodyAlpha <= 0.001 ? 0.0 : 1.0
         } else {
-            finalMenuGlassSurfaceView.alpha = gooeySample.bodyAlpha
+            finalMenuGlassSurfaceView.alpha = glassSample.bodyAlpha
         }
-        finalMenuGlassSurfaceView.isHidden = gooeySample.bodyAlpha <= 0.001
+        finalMenuGlassSurfaceView.isHidden = glassSample.bodyAlpha <= 0.001
         finalMenuGlassSurfaceView.isUserInteractionEnabled = rawT >= 0.999
             && animationDirection >= 0.0
             && interruptedCollapse == nil
         finalMenuGlassSurfaceView.updateMaterialThickness(materialProgress(rawT))
 
         applySurfaceGeometry(
-            frame: gooeySample.headFrame,
-            rotation: gooeySample.headRotation,
+            frame: glassSample.headFrame,
+            rotation: glassSample.headRotation,
             to: sourceSeedGlassSurfaceView
         )
-        sourceSeedGlassSurfaceView.setSurfaceCornerRadius(gooeySample.headRadius)
-        let renderedHeadAlpha: CGFloat
+        sourceSeedGlassSurfaceView.setSurfaceCornerRadius(glassSample.headRadius)
+        var renderedHeadAlpha: CGFloat
         if usesOpaqueNativeLobes {
-            renderedHeadAlpha = gooeySample.headAlpha <= 0.001 ? 0.0 : 1.0
+            renderedHeadAlpha = glassSample.headAlpha <= 0.001 ? 0.0 : 1.0
         } else if animationDirection >= 0.0, !UIAccessibility.isReduceMotionEnabled {
             // Legacy glass cannot merge overlapping fields. Let its existing
             // single-platter fallback own the overlap instead of drawing two
             // translucent shells; native iOS 26 keeps the embedded shoulder.
-            renderedHeadAlpha = gooeySample.headAlpha * (1.0 - gooeySample.bodyAlpha)
+            renderedHeadAlpha = glassSample.headAlpha * (1.0 - glassSample.bodyAlpha)
         } else {
-            renderedHeadAlpha = gooeySample.headAlpha
+            renderedHeadAlpha = glassSample.headAlpha
+        }
+        if let state = interruptedCollapse, let interruptionBlend {
+            renderedHeadAlpha = Self.lerp(state.renderedHeadAlpha, renderedHeadAlpha, interruptionBlend)
         }
         sourceSeedGlassSurfaceView.alpha = renderedHeadAlpha
         sourceSeedGlassSurfaceView.isHidden = renderedHeadAlpha <= 0.001
         sourceSeedGlassSurfaceView.updateMaterialThickness(materialProgress(rawT))
-        updateBridge(using: gooeySample, rawT: rawT)
+        updateBridge(using: glassSample, rawT: rawT)
 
         ambientShadowLayer.frame = shadowView.bounds
         contactShadowLayer.frame = shadowView.bounds
         let shadowPath = glassMorphContainer.isUsingNativeContainerEffect
-            ? contextMenuGooeySilhouettePath(sample: gooeySample)
+            ? contextMenuGlassmorphicSilhouettePath(sample: glassSample)
             : contextMenuBloomRoundedPath(in: metrics.frame, radii: metrics.cornerRadii)
         ambientShadowLayer.shadowPath = shadowPath
         contactShadowLayer.shadowPath = shadowPath
         updateShadow(rawT: rawT)
 
-        let sourceBounds = sourceSeedGlassSurfaceView.bounds
-        sourceProxyContainer.frame = sourceBounds
-        applySourceProxyCornerRadii(.uniform(gooeySample.headRadius))
+        sourceContentCarrier.frame = bounds
+        sourceContentMask.frame = sourceContentCarrier.bounds
+        let sourceMaskPaths = glassMorphContainer.isUsingNativeContainerEffect
+            ? contextMenuGlassmorphicSilhouetteParts(sample: glassSample)
+            : [shadowPath]
+        updateSourceContentMask(paths: sourceMaskPaths)
+        sourceProxyContainer.transform = .identity
+        if animationDirection < 0 {
+            if let state = interruptedCollapse {
+                let t = contextMenuBloomSmootherstep(interruptedCollapseRunProgress(
+                    rawT: rawT, startProgress: state.rawProgress
+                ))
+                sourceProxyContainer.frame = CGRect(
+                    x: Self.lerp(state.sourceContentFrame.minX, startFrame.minX, t),
+                    y: Self.lerp(state.sourceContentFrame.minY, startFrame.minY, t),
+                    width: startFrame.width, height: startFrame.height
+                )
+            } else {
+                let attached = contextMenuBloomAnchoredFrame(
+                    contentSize: startFrame.size,
+                    in: glassMorphContainer.isUsingNativeContainerEffect ? glassSample.bodyFrame : metrics.frame,
+                    anchor: bloomAnchor
+                )
+                let t = Self.smootherstep(0.40, 0.78, 1.0 - rawT)
+                sourceProxyContainer.frame = CGRect(
+                    x: Self.lerp(attached.minX, startFrame.minX, t),
+                    y: Self.lerp(attached.minY, startFrame.minY, t),
+                    width: startFrame.width, height: startFrame.height
+                )
+            }
+        } else {
+            sourceProxyContainer.frame = contextMenuBloomAnchoredFrame(
+                contentSize: startFrame.size, in: glassSample.headFrame, anchor: bloomAnchor
+            )
+        }
         for proxySubview in sourceProxyContainer.subviews {
             // The proxy is the source glyph/content, not another glass shell.
             // Keep it at its native source size and pinned to the same anchor
             // as the changing surface. Stretching it to the platter bounds
             // made the final close frames slide/scale before the real button
             // was restored.
-            proxySubview.frame = contextMenuBloomAnchoredFrame(
-                contentSize: startFrame.size,
-                in: sourceProxyContainer.bounds,
-                anchor: bloomAnchor
-            )
+            proxySubview.frame = sourceProxyContainer.bounds
             proxySubview.autoresizingMask = []
         }
         updateSourceProxy(rawT: rawT)
         let surfaceBounds = finalMenuGlassSurfaceView.bounds
         updateSurfaceSDFLayout(
             size: surfaceBounds.size,
-            cornerRadius: gooeySample.bodyCornerRadii.average
+            cornerRadius: glassSample.bodyCornerRadii.average
         )
         updateHighlight(rawT: rawT, surfaceFrame: finalMenuGlassSurfaceView.frame)
         updateContentFrames(for: surfaceBounds)
@@ -1891,7 +2085,7 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
     }
 
     private func updateBridge(
-        using sample: ContextMenuGooeyMorphSample,
+        using sample: ContextMenuGlassmorphicGeometrySample,
         rawT: CGFloat
     ) {
         guard glassMorphContainer.isUsingNativeContainerEffect else {
@@ -1954,23 +2148,6 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         }
     }
 
-    private func applySourceProxyCornerRadii(_ radii: ContextMenuBloomCornerRadii) {
-        if #available(iOS 26.0, *) {
-            sourceProxyContainer.cornerConfiguration = UICornerConfiguration.corners(
-                topLeftRadius: .fixed(max(0.0, radii.topLeft)),
-                topRightRadius: .fixed(max(0.0, radii.topRight)),
-                bottomLeftRadius: .fixed(max(0.0, radii.bottomLeft)),
-                bottomRightRadius: .fixed(max(0.0, radii.bottomRight))
-            )
-            sourceProxyContainer.layer.cornerRadius = 0
-            sourceProxyContainer.layer.masksToBounds = true
-        } else {
-            sourceProxyContainer.layer.cornerRadius = max(0.0, radii.average)
-            sourceProxyContainer.layer.cornerCurve = .continuous
-            sourceProxyContainer.layer.masksToBounds = true
-        }
-    }
-
     private func updateSourceProxy(rawT: CGFloat) {
         switch sourceMode {
         case .persistentSource:
@@ -1978,11 +2155,68 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
             sourceProxyContainer.isHidden = true
             sourceProxyContainer.transform = .identity
         case .leasedGlassSource:
-            let alpha = 1.0 - Self.smootherstep(0.02, 0.18, rawT)
-            sourceProxyContainer.alpha = alpha
-            sourceProxyContainer.isHidden = alpha <= 0.001
-            sourceProxyContainer.transform = .identity
+            let sample = sourceMaterializationSample(rawT: rawT)
+            sourceProxyContainer.alpha = sample.opacity
+            sourceProxyContainer.isHidden = sample.opacity <= 0.001
+            sourceProxyContainer.transform = sourceContentTransform(rawT: rawT)
+            sourceMaterializationView?.setBlurRadius(sample.blurRadius)
         }
+    }
+
+    private func sourceContentTransform(rawT: CGFloat) -> CGAffineTransform {
+        guard animationDirection < 0, !UIAccessibility.isReduceMotionEnabled else { return .identity }
+        if let state = interruptedCollapse {
+            let t = Self.smootherstep(0.0, 0.68, interruptedCollapseRunProgress(
+                rawT: rawT, startProgress: state.rawProgress
+            ))
+            return Self.interpolate(state.sourceContentTransform, .identity, t)
+        }
+        let body = finalMenuGlassSurfaceView.convert(finalMenuGlassSurfaceView.bounds, to: self)
+        let scale = min(1.0, max(0.0, body.width / max(1.0, startFrame.width)))
+        let headReturn = Self.smootherstep(0.64, 0.90, 1.0 - rawT)
+        let scaleX = Self.lerp(scale, 1.0, headReturn)
+        // A compact drop is narrower than the complete button. Fit its label
+        // inside the upper body, then let it expand/recenter with the source
+        // capsule instead of clipping the last letters against the mask.
+        let offsetX = scale < 1.0
+            ? (body.midX - sourceProxyContainer.center.x) * (1.0 - headReturn)
+            : 0.0
+        return CGAffineTransform(a: scaleX, b: 0, c: 0, d: 1, tx: offsetX, ty: 0)
+    }
+
+    private func updateSourceContentMask(paths: [CGPath]) {
+        // A single nonzero-fill path can subtract overlapping clockwise and
+        // counterclockwise contours (notably the stroked bridge), splitting
+        // returning text in two. Separate opaque layers form an alpha union.
+        while sourceContentMaskParts.count < paths.count {
+            let part = CAShapeLayer()
+            part.fillColor = UIColor.black.cgColor
+            sourceContentMask.addSublayer(part)
+            sourceContentMaskParts.append(part)
+        }
+        for (index, part) in sourceContentMaskParts.enumerated() {
+            part.frame = sourceContentMask.bounds
+            part.isHidden = index >= paths.count
+            part.path = index < paths.count ? paths[index] : nil
+        }
+    }
+
+    private func sourceMaterializationSample(rawT: CGFloat) -> ContextMenuSourceMaterializationSample {
+        if animationDirection < 0, let state = interruptedCollapse {
+            let t = Self.smootherstep(0.0, 0.68, interruptedCollapseRunProgress(
+                rawT: rawT, startProgress: state.rawProgress
+            ))
+            return .init(
+                opacity: Self.lerp(state.sourceContentSample.opacity, 1.0, t),
+                blurRadius: Self.lerp(state.sourceContentSample.blurRadius, 0.0, t)
+            )
+        }
+        return contextMenuSourceMaterializationSample(
+            rawProgress: rawT,
+            direction: animationDirection < 0 ? .closing : .opening,
+            menuHeight: targetMenuFrameInOverlay.height,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled
+        )
     }
 
     private func updateContentFrames(for surfaceBounds: CGRect) {
@@ -1994,8 +2228,12 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         let targetBounds = CGRect(origin: .zero, size: targetFrame.size)
         snapshotContainer.bounds = targetBounds
         snapshotContainer.center = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
-        blurredMenuSnapshotView.frame = snapshotContainer.bounds
-        sharpMenuSnapshotView.frame = snapshotContainer.bounds
+        // Both images can retain a directional transform from the last frame.
+        // Assigning frame under that transform changes their underlying bounds.
+        for imageView in [blurredMenuSnapshotView, sharpMenuSnapshotView] {
+            imageView.bounds = targetBounds
+            imageView.center = CGPoint(x: targetBounds.midX, y: targetBounds.midY)
+        }
         updateContentSDFLayout()
 
         liveMenuContentView.bounds = targetBounds
@@ -2009,11 +2247,42 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         // brightness snap when the snapshots are removed.
         let contentT = contentTimelineProgress(rawT: rawT)
         let isOpening = animationDirection >= 0.0 && interruptedCollapse == nil
-        let weights = isOpening
+        var weights = isOpening
             ? contextMenuBloomContentWeights(at: contentT)
             : contextMenuBloomClosingContentWeights(at: contentT)
+        var interruptedBlend: CGFloat = 0
+        var interruptedReveal: CGFloat?
+        if let state = interruptedCollapse {
+            let runT = interruptedCollapseRunProgress(rawT: rawT, startProgress: state.rawProgress)
+            let dissolveT = 1.0 - contextMenuClosingContentProgress(
+                rawProgress: 1.0 - runT, menuHeight: targetMenuFrameInOverlay.height
+            )
+            interruptedBlend = Self.smootherstep(0.0, 0.72, dissolveT)
+            let revealGain = contextMenuBloomRevealProgress(
+                for: contextMenuBloomClosingContentWeights(at: 1.0 - dissolveT)
+            )
+            let captured = state.contentRendering.weights
+            if runT <= 0 {
+                weights = captured
+            } else {
+                // Dissolve only the content that was actually visible when
+                // opening was interrupted. Transfer its sharp/live energy to
+                // the existing blurred snapshot without revealing extra rows.
+                let blurred = sqrt(
+                    captured.blurred * captured.blurred
+                        + (captured.sharp * captured.sharp + captured.live * captured.live) * interruptedBlend
+                ) * revealGain
+                let sharp = captured.sharp * sqrt(1.0 - interruptedBlend) * revealGain
+                let live = captured.live * sqrt(1.0 - interruptedBlend) * revealGain
+                weights = ContextMenuBloomContentWeights(
+                    blurred: blurred, sharp: sharp, live: live,
+                    snapshotContainer: sqrt(blurred * blurred + sharp * sharp)
+                )
+            }
+            interruptedReveal = state.contentRendering.reveal * revealGain
+        }
         let liveT = weights.live
-        let reveal = contextMenuBloomRevealProgress(for: weights)
+        let reveal = interruptedReveal ?? contextMenuBloomRevealProgress(for: weights)
         let liveMix = reveal > 0.0001
             ? min(1.0, (liveT / reveal) * (liveT / reveal))
             : 0.0
@@ -2142,7 +2411,26 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
             alongScale: 1.0 + (sharpAlongScale - 1.0) * liveDistortion,
             crossScale: 1.0 + (sharpCrossScale - 1.0) * liveDistortion
         )
-        updateContentSDFDistortion(rawT: contentT, liveMix: liveMix)
+        if let state = interruptedCollapse {
+            let captured = state.contentRendering
+            snapshotContainer.transform = Self.interpolate(
+                captured.snapshotTransform, snapshotContainer.transform, interruptedBlend
+            )
+            blurredMenuSnapshotView.transform = Self.interpolate(
+                captured.blurredTransform, blurredMenuSnapshotView.transform, interruptedBlend
+            )
+            sharpMenuSnapshotView.transform = Self.interpolate(
+                captured.sharpTransform, sharpMenuSnapshotView.transform, interruptedBlend
+            )
+            liveMenuContentView.transform = Self.interpolate(
+                captured.liveTransform, liveMenuContentView.transform, interruptedBlend
+            )
+        }
+        updateContentSDFDistortion(
+            rawT: contentT, liveMix: liveMix,
+            interruptionBlend: interruptedCollapse == nil ? nil : interruptedBlend
+        )
+        displayedContentReveal = reveal
         contentRevealProgressChanged?(reveal)
     }
 
@@ -2156,17 +2444,16 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
             )
             return max(
                 0.0,
-                interruptedCollapse.contentProgress * (1.0 - runT / 0.52)
+                interruptedCollapse.contentProgress * contextMenuClosingContentProgress(
+                    rawProgress: 1.0 - runT, menuHeight: targetMenuFrameInOverlay.height
+                )
             )
         }
-        // Rows dissolve into the blurred snapshot during the first ~165 ms
-        // of dismissal, before the glass completes its return to the button.
-        let elapsed = 1.0 - t
-        return max(0.0, 1.0 - elapsed / 0.52)
+        return contextMenuClosingContentProgress(rawProgress: t, menuHeight: targetMenuFrameInOverlay.height)
     }
 
     private func installContentDistortionFilterIfAvailable() {
-        guard contentSDFFilter == nil else { return }
+        guard usesOpticalDistortion, contentSDFFilter == nil else { return }
         if #available(iOS 26.0, *), let filter = LensSDFFilter() {
             let size = targetMenuFrameInOverlay.size
             filter.install(
@@ -2182,7 +2469,7 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
     }
 
     private func installSurfaceDistortionFilterIfAvailable() {
-        guard surfaceSDFFilter == nil, glassMorphContainer.isUsingNativeContainerEffect else { return }
+        guard usesOpticalDistortion, surfaceSDFFilter == nil, glassMorphContainer.isUsingNativeContainerEffect else { return }
         if #available(iOS 26.0, *), let filter = LensSDFFilter() {
             filter.install(
                 on: finalMenuGlassSurfaceView.layer,
@@ -2210,7 +2497,22 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
             guard !UIAccessibility.isReduceMotionEnabled else {
                 filter.setDisplacementHeight(0)
                 filter.setBlurRadius(0)
+                displayedSurfaceDistortion = .zero
                 return
+            }
+
+            func apply(displacement: CGFloat, blur: CGFloat) {
+                var value = OpticalDistortion(displacement: displacement, blur: blur)
+                if let state = interruptedCollapse {
+                    let runT = interruptedCollapseRunProgress(rawT: rawT, startProgress: state.rawProgress)
+                    value = .interpolated(
+                        from: state.surfaceDistortion, to: value,
+                        progress: Self.smootherstep(0.0, 0.35, runT)
+                    )
+                }
+                displayedSurfaceDistortion = value
+                filter.setDisplacementHeight(value.displacement)
+                filter.setBlurRadius(value.blur)
             }
 
             let t = max(0, min(1, rawT))
@@ -2232,11 +2534,9 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
                 let bodyReady = Self.smootherstep(0.08, 0.22, t)
                 let peakDisplacement = min(30.0, max(0.0, minimumSide * 0.14))
                 let peakBlur = min(1.8, max(0.0, minimumSide * 0.018))
-                filter.setDisplacementHeight(peakDisplacement * intensity * bodyReady)
-                filter.setBlurRadius(peakBlur * intensity * bodyReady)
+                apply(displacement: peakDisplacement * intensity * bodyReady, blur: peakBlur * intensity * bodyReady)
             } else {
-                filter.setDisplacementHeight(30.0 * intensity)
-                filter.setBlurRadius(1.8 * intensity)
+                apply(displacement: 30.0 * intensity, blur: 1.8 * intensity)
             }
         }
     }
@@ -2251,12 +2551,25 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         }
     }
 
-    private func updateContentSDFDistortion(rawT: CGFloat, liveMix: CGFloat) {
+    private func updateContentSDFDistortion(rawT: CGFloat, liveMix: CGFloat, interruptionBlend: CGFloat? = nil) {
         if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter {
             guard !UIAccessibility.isReduceMotionEnabled else {
                 filter.setDisplacementHeight(0)
                 filter.setBlurRadius(0)
+                displayedContentDistortion = .zero
                 return
+            }
+
+            func apply(displacement: CGFloat, blur: CGFloat) {
+                var value = OpticalDistortion(displacement: displacement, blur: blur)
+                if let state = interruptedCollapse, let interruptionBlend {
+                    value = .interpolated(
+                        from: state.contentDistortion, to: value, progress: interruptionBlend
+                    )
+                }
+                displayedContentDistortion = value
+                filter.setDisplacementHeight(value.displacement)
+                filter.setBlurRadius(value.blur)
             }
 
             let t = max(0, min(1, rawT))
@@ -2272,8 +2585,7 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
                     0.0,
                     distortionIn * distortionOut * sqrt(snapshotVisibility)
                 )
-                filter.setDisplacementHeight(42.0 * intensity)
-                filter.setBlurRadius(1.5 * intensity)
+                apply(displacement: 42.0 * intensity, blur: 1.5 * intensity)
                 return
             }
 
@@ -2288,8 +2600,7 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
             let minimumSide = min(snapshotContainer.bounds.width, snapshotContainer.bounds.height)
             let peakDisplacement = min(48.0, max(36.0, minimumSide * 0.18))
 
-            filter.setDisplacementHeight(peakDisplacement * intensity)
-            filter.setBlurRadius(2.7 * intensity)
+            apply(displacement: peakDisplacement * intensity, blur: 2.7 * intensity)
         }
     }
 
@@ -2347,17 +2658,17 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         return Metrics(frame: sample.frame, cornerRadii: sample.cornerRadii)
     }
 
-    private func currentGooeySample(
+    private func currentGlassmorphicSample(
         metrics: Metrics,
         rawT: CGFloat
-    ) -> ContextMenuGooeyMorphSample {
+    ) -> ContextMenuGlassmorphicGeometrySample {
         if animationDirection < 0, let interruptedCollapse {
             let runT = interruptedCollapseRunProgress(
                 rawT: rawT,
                 startProgress: interruptedCollapse.rawProgress
             )
             let collapseT = contextMenuBloomSmootherstep(runT)
-            let sourceSample = contextMenuGooeyMorphSample(
+            let sourceSample = contextMenuGlassmorphicGeometrySample(
                 source: startFrame,
                 target: targetMenuFrameInOverlay,
                 outerFrame: startFrame,
@@ -2369,14 +2680,14 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
                 rawProgress: 0.0,
                 reduceMotion: UIAccessibility.isReduceMotionEnabled
             )
-            return ContextMenuGooeyMorphSample.interpolated(
-                from: interruptedCollapse.gooeySample,
+            return ContextMenuGlassmorphicGeometrySample.interpolated(
+                from: interruptedCollapse.glassSample,
                 to: sourceSample,
                 progress: collapseT
             )
         }
 
-        return contextMenuGooeyMorphSample(
+        return contextMenuGlassmorphicGeometrySample(
             source: startFrame,
             target: targetMenuFrameInOverlay,
             outerFrame: metrics.frame,
@@ -2508,12 +2819,32 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         let wasAnimating = progressAnimator != nil || progressDisplayLink != nil
         let visibleProgress = wasAnimating ? lastAppliedProgress : progress
         cancelAnimation()
-        if wasAnimating {
-            progress = visibleProgress
-        }
+        // An explicitly sampled/frozen frame can also differ from the idle
+        // driver's transform. Preserve that rendered state on either path.
+        progress = visibleProgress
         let sampledMetrics = currentMetrics(rawT: progress)
         let sampledContentProgress = contentTimelineProgress(rawT: progress)
-        let sampledGooeySample = currentGooeySample(metrics: sampledMetrics, rawT: progress)
+        let sampledContentRendering = RenderedContent(
+            weights: ContextMenuBloomContentWeights(
+                blurred: snapshotContainer.alpha * blurredMenuSnapshotView.alpha,
+                sharp: snapshotContainer.alpha * sharpMenuSnapshotView.alpha,
+                live: liveMenuContentView.alpha,
+                snapshotContainer: snapshotContainer.alpha
+            ),
+            snapshotTransform: snapshotContainer.transform,
+            blurredTransform: blurredMenuSnapshotView.transform,
+            sharpTransform: sharpMenuSnapshotView.transform,
+            liveTransform: liveMenuContentView.transform,
+            reveal: displayedContentReveal
+        )
+        let sampledSourceContent = sourceMaterializationSample(rawT: progress)
+        let sampledSourceFrame = CGRect(
+            x: sourceProxyContainer.center.x - sourceProxyContainer.bounds.width * 0.5,
+            y: sourceProxyContainer.center.y - sourceProxyContainer.bounds.height * 0.5,
+            width: sourceProxyContainer.bounds.width,
+            height: sourceProxyContainer.bounds.height
+        )
+        let sampledGlassSample = currentGlassmorphicSample(metrics: sampledMetrics, rawT: progress)
         animationFrom = progress
         animationTo = target
         let isInterruptedCollapse = target < progress && progress < 0.999
@@ -2523,7 +2854,15 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
                 rawProgress: progress,
                 metrics: sampledMetrics,
                 contentProgress: sampledContentProgress,
-                gooeySample: sampledGooeySample
+                contentRendering: sampledContentRendering,
+                contentDistortion: displayedContentDistortion,
+                surfaceDistortion: displayedSurfaceDistortion,
+                glassSpacing: displayedGlassSpacing,
+                renderedHeadAlpha: sourceSeedGlassSurfaceView.alpha,
+                sourceContentSample: sampledSourceContent,
+                sourceContentFrame: sampledSourceFrame,
+                sourceContentTransform: sourceProxyContainer.transform,
+                glassSample: sampledGlassSample
             )
             : nil
         _ = dampingRatio
@@ -2643,7 +2982,49 @@ final class ContextMenuSourcePlatterBloomTransitionView: UIView {
         let rawProgress: CGFloat
         let metrics: Metrics
         let contentProgress: CGFloat
-        let gooeySample: ContextMenuGooeyMorphSample
+        let contentRendering: RenderedContent
+        let contentDistortion: OpticalDistortion
+        let surfaceDistortion: OpticalDistortion
+        let glassSpacing: CGFloat
+        let renderedHeadAlpha: CGFloat
+        let sourceContentSample: ContextMenuSourceMaterializationSample
+        let sourceContentFrame: CGRect
+        let sourceContentTransform: CGAffineTransform
+        let glassSample: ContextMenuGlassmorphicGeometrySample
+    }
+
+    private struct RenderedContent {
+        let weights: ContextMenuBloomContentWeights
+        let snapshotTransform: CGAffineTransform
+        let blurredTransform: CGAffineTransform
+        let sharpTransform: CGAffineTransform
+        let liveTransform: CGAffineTransform
+        let reveal: CGFloat
+    }
+
+    private struct OpticalDistortion {
+        let displacement: CGFloat
+        let blur: CGFloat
+        static let zero = OpticalDistortion(displacement: 0, blur: 0)
+
+        static func interpolated(from: Self, to: Self, progress: CGFloat) -> Self {
+            if progress <= 0 { return from }
+            if progress >= 1 { return to }
+            return Self(
+                displacement: from.displacement + (to.displacement - from.displacement) * progress,
+                blur: from.blur + (to.blur - from.blur) * progress
+            )
+        }
+    }
+
+    private static func interpolate(_ from: CGAffineTransform, _ to: CGAffineTransform, _ progress: CGFloat) -> CGAffineTransform {
+        if progress <= 0 { return from }
+        if progress >= 1 { return to }
+        return CGAffineTransform(
+            a: lerp(from.a, to.a, progress), b: lerp(from.b, to.b, progress),
+            c: lerp(from.c, to.c, progress), d: lerp(from.d, to.d, progress),
+            tx: lerp(from.tx, to.tx, progress), ty: lerp(from.ty, to.ty, progress)
+        )
     }
 
     private static func renderImage(from view: UIView) -> UIImage {

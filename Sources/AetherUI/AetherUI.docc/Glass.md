@@ -249,12 +249,13 @@ button.action = { sourceView in
 ```swift
 button.contextMenuItemsProvider = {
     return [
-        ContextMenuItem.action(.init(text: "Поделиться", action: { /* ... */ })),
-        ContextMenuItem.action(.init(text: "Удалить", isDestructive: true, action: { /* ... */ }))
+        ContextMenuItem.action(.init(title: "Поделиться", action: { _, dismiss in dismiss.dismiss() })),
+        ContextMenuItem.action(.init(title: "Удалить", textColor: .destructive, action: { _, dismiss in dismiss.dismiss() }))
     ]
 }
 button.contextMenuTrigger = .longPress     // или .tap
-button.contextMenuPresentationStyle = .morph
+// Для lifted preview при необходимости:
+// button.contextMenuPreview = .init(verticalSpacing: 8, lift: 1.04)
 ```
 
 ## GlassControlGroup

@@ -26,6 +26,7 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
 
     private let glassBackground: GlassBackgroundView
     private let contentContainer = UIView()
+    internal var contextMenuPresentationContentView: UIView { contentContainer }
     private var iconNode: ASImageNode?
     private var titleNode: ASTextNode?
     private var titleFont: UIFont = .aetherScaledSystemFont(ofSize: 15.0, weight: .medium)

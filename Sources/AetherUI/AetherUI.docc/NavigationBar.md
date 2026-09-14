@@ -505,3 +505,19 @@ defaults; factory `liquidGlass(...)` — preset для типового испо
 - <doc:Glass>
 - <doc:EdgeEffect>
 - <doc:ContextMenu>
+
+
+## Счётчик внутри кнопки Back
+
+```swift
+navigationBarItem.backButtonBadgeText = "165"
+// Позже: заменить число или оставить только chevron.
+navigationBarItem.backButtonBadgeText = "161"
+navigationBarItem.backButtonBadgeText = nil
+```
+
+Свойство относится к текущему экрану. `nil` и пустая строка оставляют
+обычную кнопку Back. Число участвует в изменении ширины общей капсулы при
+push/pop и обновлении содержимого; оно не подменяет текст предыдущего
+заголовка. Цвета задаются существующими `badgeBackgroundColor`,
+`badgeTextColor` и `badgeStrokeColor` темы панели.

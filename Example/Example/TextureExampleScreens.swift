@@ -83,8 +83,18 @@ extension ExampleAppearanceStore {
 // MARK: - Scene Wiring
 
 enum ExampleRootFactory {
-    static func makeRoot(window: AetherNativeWindow, observer: inout NSObjectProtocol?) -> AetherTabBarController {
+    static func makeRoot(window: AetherNativeWindow, observer: inout NSObjectProtocol?) -> UIViewController {
         let store = ExampleAppearanceStore.shared
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--animation-reference") || arguments.contains("--animation-reference-autoplay") {
+            let root = TextureAnimationReferenceController(autoplay: arguments.contains("--animation-reference-autoplay"))
+            let navigation = AetherNavigationController(mode: .single)
+            navigation.setViewControllers([root], animated: false)
+            navigation.updateAppearance(store.appearance)
+            window.overrideUserInterfaceStyle = .light
+            window.backgroundColor = store.backgroundColor
+            return navigation
+        }
         let symbolConfig = UIImage.SymbolConfiguration(pointSize: 21.0, weight: .medium)
 
         let components = makeTab(
@@ -476,6 +486,13 @@ final class TextureComponentsController: AetherViewController {
 
     private func reloadRows() {
         let rows: [TextureMenuItem] = [
+            TextureMenuItem(
+                id: "animation-reference",
+                title: "Animation Reference",
+                subtitle: "Edit / filter menus, profile, back badge, camera",
+                iconName: "play.rectangle.fill",
+                tintColor: .systemIndigo
+            ) { [weak self] in self?.push(TextureAnimationReferenceController()) },
             TextureMenuItem(
                 id: "appearance-gallery",
                 title: "Appearance Gallery",
@@ -2412,5 +2429,312 @@ private final class TextureSearchAccessoryView: NavigationBarContentView {
             height: querySize.height
         )
         segmentedNode.frame = CGRect(x: 16.0, y: 36.0, width: max(0.0, bounds.width - 32.0), height: 36.0)
+    }
+}
+
+// MARK: - Deterministic Animation Reference
+
+/// Fixed content and a one-shot timeline make simulator recordings repeatable.
+/// Ordinary launches never schedule this timeline.
+private final class TextureAnimationReferenceController: AetherViewController {
+    private let autoplay: Bool
+    private let isDetail: Bool
+    private let showsCamera: Bool
+    private let stack = UIStackView()
+    private let scrollView = UIScrollView()
+    private var activeMenu: ContextMenuController?
+    private var textNodes: [ASTextNode] = []
+    private var scheduledSteps: [DispatchWorkItem] = []
+    private var didStartAutoplay = false
+    private var detailController: TextureAnimationReferenceController?
+    private var badgeIndex = 0
+    private let badgeValues: [String?] = ["165", "161", nil]
+
+    init(autoplay: Bool = false, isDetail: Bool = false, showsCamera: Bool = true) {
+        self.autoplay = autoplay
+        self.isDetail = isDetail
+        self.showsCamera = showsCamera
+        super.init(navigationBarPresentationData: .defaultTheme(edgeColor: .systemBackground))
+    }
+
+    required init(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        scheduledSteps.forEach { $0.cancel() }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.accessibilityIdentifier = isDetail ? "animation-reference.detail" : "animation-reference.messages"
+        view.backgroundColor = .systemBackground
+        navigationItem.title = isDetail ? nil : "Сообщения"
+        if isDetail {
+            navigationItem.titleView = TextureAnimationReferenceTitleView(
+                image: Self.avatar(color: .systemBlue),
+                name: "Лёха"
+            )
+            navigationBarItem.backButtonBadgeText = badgeValues[badgeIndex]
+            navigationItem.rightBarButtonItem = showsCamera ? cameraItem() : nil
+        } else {
+            installMenuChrome()
+        }
+
+        scrollView.alwaysBounceVertical = true
+        view.addSubview(scrollView)
+        stack.axis = .vertical
+        stack.spacing = 14
+        stack.alignment = .fill
+        scrollView.addSubview(stack)
+        addBackdrop()
+        if isDetail {
+            addButton("Изменить счётчик: 165 → 161 → без числа", id: "animation-reference.change-badge") { [weak self] in
+                self?.advanceBadge()
+            }
+            addButton("Показать / скрыть камеру", id: "animation-reference.toggle-camera") { [weak self] in
+                guard let self else { return }
+                self.navigationItem.rightBarButtonItem = self.navigationItem.rightBarButtonItem == nil ? self.cameraItem() : nil
+            }
+            addButton("Назад", id: "animation-reference.pop") { [weak self] in self?.pop() }
+        } else {
+            addButton("Меню «Изменить»", id: "animation-reference.open-edit") { [weak self] in self?.showMenu(trailing: false) }
+            addButton("Меню фильтров", id: "animation-reference.open-filter") { [weak self] in self?.showMenu(trailing: true) }
+            addButton("Профиль → экран со счётчиком и камерой", id: "animation-reference.push-profile") { [weak self] in
+                self?.installProfileChrome()
+                self?.schedule(after: 0.6) { $0.openDetail(showsCamera: true) }
+            }
+            addButton("Экран без правой кнопки", id: "animation-reference.push-empty") { [weak self] in self?.openDetail(showsCamera: false) }
+            addButton("Вернуть кнопки меню", id: "animation-reference.reset") { [weak self] in self?.installMenuChrome() }
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard autoplay, !didStartAutoplay else { return }
+        didStartAutoplay = true
+        schedule(after: 1) { $0.showMenu(trailing: false) }
+        schedule(after: 3) { $0.activeMenu?.dismiss() }
+        schedule(after: 4) { $0.showMenu(trailing: true) }
+        schedule(after: 6) { $0.activeMenu?.dismiss() }
+        schedule(after: 6.6) { $0.installProfileChrome() }
+        schedule(after: 7) { $0.openDetail(showsCamera: true) }
+        schedule(after: 8) { $0.detailController?.advanceBadge() }
+        schedule(after: 9) { $0.detailController?.pop() }
+        schedule(after: 11) { $0.openDetail(showsCamera: false) }
+        schedule(after: 12) { $0.detailController?.advanceBadge() }
+        schedule(after: 12.5) { $0.detailController?.advanceBadge() }
+        schedule(after: 13) { $0.detailController?.pop() }
+        schedule(after: 14) { $0.installMenuChrome() }
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        let top = exampleTopInset(for: self, layout: layout) + 12
+        scrollView.frame = CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top))
+        let width = max(0, layout.size.width - 32)
+        let height = stack.systemLayoutSizeFitting(CGSize(width: width, height: UIView.layoutFittingCompressedSize.height), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height
+        stack.frame = CGRect(x: 16, y: 0, width: width, height: height)
+        scrollView.contentSize = CGSize(width: layout.size.width, height: height + layout.safeInsets.bottom + 20)
+    }
+
+    private func installMenuChrome() {
+        let edit = UIBarButtonItem(title: "Изменить", contextMenuItemsProvider: { [weak self] in self?.editItems() ?? [] })
+        edit.accessibilityIdentifier = "animation-reference.nav-edit"
+        edit.accessibilityLabel = "Изменить"
+        let filter = UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), contextMenuItemsProvider: { [weak self] in self?.filterItems() ?? [] })
+        filter.accessibilityIdentifier = "animation-reference.nav-filter"
+        filter.accessibilityLabel = "Фильтры"
+        navigationItem.leftBarButtonItem = edit
+        navigationItem.rightBarButtonItem = filter
+    }
+
+    private func installProfileChrome() {
+        let profile = UIBarButtonItem(image: Self.avatar(color: .systemOrange), style: .plain, target: self, action: #selector(profileTapped))
+        profile.accessibilityIdentifier = "animation-reference.nav-profile"
+        profile.accessibilityLabel = "Профиль"
+        profile.customView?.accessibilityIdentifier = "animation-reference.nav-profile"
+        profile.customView?.accessibilityLabel = "Профиль"
+        navigationItem.leftBarButtonItem = profile
+        navigationItem.rightBarButtonItem = cameraItem()
+    }
+
+    private func cameraItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(image: UIImage(systemName: "camera"), style: .plain, target: self, action: #selector(cameraTapped))
+        item.accessibilityIdentifier = "animation-reference.nav-camera"
+        item.accessibilityLabel = "Камера"
+        return item
+    }
+
+    @objc private func profileTapped() { openDetail(showsCamera: true) }
+    @objc private func cameraTapped() { navigationItem.rightBarButtonItem = nil }
+
+    private func openDetail(showsCamera: Bool) {
+        let controller = TextureAnimationReferenceController(isDetail: true, showsCamera: showsCamera)
+        detailController = controller
+        push(controller)
+    }
+
+    private func advanceBadge() {
+        badgeIndex = (badgeIndex + 1) % badgeValues.count
+        navigationBarItem.backButtonBadgeText = badgeValues[badgeIndex]
+    }
+
+    private func showMenu(trailing: Bool) {
+        guard activeMenu == nil, let window = view.window else { return }
+        // The navbar owns these actual groups, including its external button
+        // layer. A demo-owned controller lets autoplay use normal dismissal.
+        func groups(in view: UIView) -> [GlassControlGroup] {
+            guard !view.isHidden, view.alpha > 0.01 else { return [] }
+            let own = (view as? GlassControlGroup).map { [$0] } ?? []
+            return own + view.subviews.flatMap { groups(in: $0) }
+        }
+        let candidates = groups(in: window).filter {
+            let rect = $0.convert($0.bounds, to: window)
+            return rect.height > 10 && rect.minY >= 0 && rect.midY < window.safeAreaInsets.top + 90
+        }.sorted { $0.convert($0.bounds, to: window).midX < $1.convert($1.bounds, to: window).midX }
+        guard let source = trailing ? candidates.last : candidates.first else { return }
+        let menu = ContextMenuController(
+            source: .init(view: source, cornerRadius: source.bounds.height / 2),
+            items: trailing ? filterItems() : editItems(),
+            hasHapticFeedback: false,
+            onDismiss: { [weak self] in self?.activeMenu = nil }
+        )
+        activeMenu = menu
+        menu.present()
+    }
+
+    private func editItems() -> [ContextMenuItem] {
+        [
+            action("select", "Выбрать сообщения", "checkmark.circle"),
+            action("pins", "Изменить булавки", "pin"),
+            action("identity", "Настроить имя и фото", "person.crop.circle")
+        ]
+    }
+
+    private func filterItems() -> [ContextMenuItem] {
+        [
+            action("all", "Все сообщения", "tray", selected: true),
+            .separator,
+            action("known", "Известные отправители", "person.crop.circle"),
+            action("unknown", "Неизвестные отправители", "person.crop.circle.badge.questionmark"),
+            action("unread", "Непрочитанные", "bubble.left"),
+            .separator,
+            action("deleted", "Недавно удалённые", "trash"),
+            action("manage", "Управлять фильтрами", "slider.horizontal.3")
+        ]
+    }
+
+    private func action(_ id: String, _ title: String, _ symbol: String, selected: Bool = false) -> ContextMenuItem {
+        .action(.init(id: id, title: title, icon: UIImage(systemName: symbol), iconSide: .leading, isSelected: selected, action: { _, handle in handle.dismiss() }))
+    }
+
+    private func schedule(after delay: TimeInterval, action: @escaping (TextureAnimationReferenceController) -> Void) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            action(self)
+        }
+        scheduledSteps.append(work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func addButton(_ title: String, id: String, action: @escaping () -> Void) {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 15)
+        button.contentHorizontalAlignment = .leading
+        button.accessibilityIdentifier = id
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        stack.addArrangedSubview(button)
+    }
+
+    private func addBackdrop() {
+        let stories = UIStackView()
+        stories.axis = .horizontal
+        stories.distribution = .fillEqually
+        stories.spacing = 16
+        for (name, color) in [("Любимый пупс ❤️", UIColor.systemOrange), ("Мама", UIColor.systemGreen), ("Лёха", UIColor.systemBlue)] {
+            let column = UIStackView()
+            column.axis = .vertical
+            column.alignment = .center
+            column.spacing = 6
+            let avatar = UIImageView(image: Self.avatar(color: color))
+            avatar.widthAnchor.constraint(equalToConstant: 86).isActive = true
+            avatar.heightAnchor.constraint(equalToConstant: 86).isActive = true
+            column.addArrangedSubview(avatar)
+            let label = ASTextNode()
+            textNodes.append(label)
+            label.attributedText = NSAttributedString(string: name, attributes: [.font: UIFont.systemFont(ofSize: 11), .foregroundColor: UIColor.secondaryLabel])
+            label.view.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            label.view.widthAnchor.constraint(equalToConstant: 104).isActive = true
+            column.addArrangedSubview(label.view)
+            stories.addArrangedSubview(column)
+        }
+        stack.addArrangedSubview(stories)
+        for (name, message) in [("RSCHS", "Заморозки в воздухе и на почве −0…−2°C"), ("YOTA", "Возможны ограничения подключения"), ("MegaFon", "Здравствуйте! Сообщение сохранено.")] {
+            let label = ASTextNode()
+            textNodes.append(label)
+            label.attributedText = NSAttributedString(string: "\(name)\n\(message)", attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label])
+            label.maximumNumberOfLines = 2
+            label.view.heightAnchor.constraint(equalToConstant: 48).isActive = true
+            stack.addArrangedSubview(label.view)
+            let separator = UIView()
+            separator.backgroundColor = .separator
+            separator.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+            stack.addArrangedSubview(separator)
+        }
+    }
+
+    private static func avatar(color: UIColor) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 86, height: 86))
+        return renderer.image { context in
+            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 86, height: 86)).addClip()
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 86, height: 86))
+            let image = UIImage(systemName: "person.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 56, weight: .medium))?.withTintColor(.white, renderingMode: .alwaysOriginal)
+            image?.draw(in: CGRect(x: 18, y: 17, width: 50, height: 62))
+        }.withRenderingMode(.alwaysOriginal)
+    }
+}
+
+/// Uses the ordinary public titleView path so recordings exercise the same
+/// persistent avatar plane as a real conversation header.
+private final class TextureAnimationReferenceTitleView: UIView {
+    private let avatarNode = ASImageNode()
+    private let nameNode = ASTextNode()
+
+    init(image: UIImage, name: String) {
+        super.init(frame: CGRect(x: 0, y: 0, width: 100, height: 58))
+        isUserInteractionEnabled = false
+        accessibilityIdentifier = "animation-reference.contact-title"
+        accessibilityLabel = name
+        avatarNode.image = image
+        avatarNode.contentMode = .scaleAspectFit
+        avatarNode.displaysAsynchronously = false
+        addSubview(avatarNode.view)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        nameNode.attributedText = NSAttributedString(string: name, attributes: [
+            .font: UIFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: paragraph
+        ])
+        nameNode.maximumNumberOfLines = 1
+        nameNode.displaysAsynchronously = false
+        addSubview(nameNode.view)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var intrinsicContentSize: CGSize { CGSize(width: 100, height: 58) }
+    override func sizeThatFits(_ size: CGSize) -> CGSize { intrinsicContentSize }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        avatarNode.frame = CGRect(x: (bounds.width - 38) / 2, y: 0, width: 38, height: 38)
+        nameNode.frame = CGRect(x: 0, y: 41, width: bounds.width, height: 17)
+        avatarNode.recursivelyEnsureDisplaySynchronously(true)
+        nameNode.recursivelyEnsureDisplaySynchronously(true)
     }
 }

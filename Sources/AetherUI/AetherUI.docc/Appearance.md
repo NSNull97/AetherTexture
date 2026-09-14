@@ -80,58 +80,36 @@ surface использует публичный `UIVisualEffectView` с
 - Reduce Transparency делает поверхность плотнее, а Reduce Motion отключает
   style-only scale/morph motion.
 
-Legacy не создаёт refraction, distortion, lens, caustics, glass highlight,
-backdrop capture или Liquid Glass merge/morph pipeline.
+Legacy не создаёт нативный `UIGlassEffect`. Контекстное меню использует
+общую геометрию перехода с Liquid Glass, но сохраняет Legacy material.
 
-## Hard gate публичных transitions
-
-Renderer generation разрешается до создания transition hierarchy. Поэтому
-явный Legacy override не успевает даже временно создать Liquid Glass object:
+## Appearance контекстного меню и transition containers
 
 ```swift
-let gooeyConfiguration =
-    AetherGooeyContextMenuTransitionConfiguration.default(appearance: .legacy)
-let gooey = AetherGooeyContextMenuTransition(
-    configuration: gooeyConfiguration
-)
-
-let lens = LensTransitionContainer(
-    effectView: sourceEffectView,
-    appearanceStyle: .legacy
-)
-
-let morph = AetherSourceMorphController(
-    contentView: contentView,
-    targetSize: CGSize(width: 320, height: 280),
-    appearanceStyle: .legacy
-)
-
-let attachmentMenu = AetherAttachmentMenuController(
+let menu = ContextMenuController(
+    source: .init(view: button),
     items: items,
     appearanceStyle: .legacy
 )
+menu.present()
 ```
 
-Правила наследования:
+`ContextMenuController` сам разрешает внутренний режим из appearance.
+Публичного стиля анимации нет. Сейчас оба внутренних режима используют
+один движок source → menu; Legacy меняет renderer на
+`UIBlurEffect.Style.systemChromeMaterial`. Source lease сохраняет и
+восстанавливает состояние исходного view при закрытии и отмене.
 
-- `AetherGooeyContextMenuTransitionConfiguration.default(appearance:)`
-  фиксирует переданный style. В полном initializer параметр
-  `appearanceStyle: nil` снимком фиксирует текущий runtime при создании
-  configuration; последующая глобальная смена не меняет готовый transition.
-- У `LensTransitionContainer`, `AetherSourceMorphController` и
-  `AetherAttachmentMenuController` `appearanceStyle: nil` означает live
-  наследование application runtime, а non-`nil` — локально закреплённый style.
-- При live смене поколения `LensTransitionContainer` заменяет implementation,
-  сохраняя публичный `contentsView`. Активный inherited source/attachment morph
-  синхронно завершается и следующий `present` создаёт renderer нового
-  поколения. Explicit override не переключается.
+`appearanceStyle: nil` наследует runtime в момент `present()`. Explicit
+значение закрепляет renderer. Изменение поколения у inherited presentation
+закрывает активное меню; следующий `present()` создаёт актуальный renderer.
+Optional `preview: .init(...)` задаёт lifted content независимо от appearance.
 
-Legacy использует `UIBlurEffect.Style.systemChromeMaterial`. Gooey и
-source/attachment transitions работают через обычные UIKit alpha/scale
-animations: без Metal, SDF, source proxy snapshot, Liquid morph overlay и
-собственного `CADisplayLink`. Legacy `LensTransitionContainer` не создаёт
-private SDF/displacement implementation; size, position, alpha и corner radius
-анимируются публичными Core Animation keyframes.
+У `LensTransitionContainer`, `AetherSourceMorphController` и
+`AetherAttachmentMenuController` `nil` также означает наследование runtime,
+а non-`nil` — закреплённый appearance. Legacy source/attachment popup работает
+через UIKit alpha/scale; Legacy lens container сохраняет публичный
+`contentsView` и анимирует геометрию через Core Animation без private SDF.
 
 ## Миграция и Codable
 

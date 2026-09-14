@@ -483,12 +483,6 @@ final class AetherNodeArchitectureTests: XCTestCase {
         let contextActionsSource = try String(
             contentsOf: sourceRoot().appendingPathComponent("Sources/AetherUI/ContextMenu/ContextMenuActionsView.swift")
         )
-        let contextLensSource = try String(
-            contentsOf: sourceRoot().appendingPathComponent("Sources/AetherUI/ContextMenu/ContextMenuLensBloomTransitionView.swift")
-        )
-        let contextGooeySource = try String(
-            contentsOf: sourceRoot().appendingPathComponent("Sources/AetherUI/ContextMenu/AetherGooeyContextMenuTransition.swift")
-        )
         let attachmentSource = try String(
             contentsOf: sourceRoot().appendingPathComponent("Sources/AetherUI/AttachmentMenu/AetherSourceMorphController.swift")
         )
@@ -506,11 +500,7 @@ final class AetherNodeArchitectureTests: XCTestCase {
         XCTAssertTrue(contextActionsSource.contains("ASImageNode"))
         XCTAssertFalse(contextActionsSource.contains("UILabel()"))
         XCTAssertFalse(contextActionsSource.contains("UIImageView()"))
-        XCTAssertTrue(contextLensSource.contains("private let debugProgressLabel = AetherTextNodeOverlayView()"))
-        XCTAssertTrue(contextLensSource.contains("private let debugSourceModeLabel = AetherTextNodeOverlayView()"))
-        XCTAssertFalse(contextLensSource.contains("UILabel()"))
-        XCTAssertTrue(contextGooeySource.contains("private let label = AetherTextNodeOverlayView()"))
-        XCTAssertFalse(contextGooeySource.contains("UILabel()"))
+
     }
 
     func testTabBarPassiveChromeRendersThroughTextureNodes() throws {
@@ -876,7 +866,10 @@ final class AetherNodeArchitectureTests: XCTestCase {
         XCTAssertTrue(navigationBarSource.contains("private let imageNode = ASImageNode()"))
         XCTAssertTrue(navigationBarSource.contains("private let titleNode = ASTextNode()"))
         XCTAssertFalse(navigationBarSource.contains("UIButton(type: .system)"))
-        XCTAssertFalse(navigationBarSource.contains("UIImageView("))
+        // Passive controls use Texture. An outgoing custom view may need a
+        // raster fallback when UIKit cannot provide its transition snapshot;
+        // the snapshot-only allowlist below checks that exception precisely.
+        XCTAssertFalse(navigationBarSource.contains("UIImageView(image: iconImage)"))
 
         XCTAssertTrue(tabBarSource.contains("private let separatorNode: ASDisplayNode"))
         XCTAssertTrue(tabBarSource.contains("private let imageNode: ASImageNode"))
@@ -1003,13 +996,14 @@ final class AetherNodeArchitectureTests: XCTestCase {
             "ContextMenu/ContextMenuController.swift": [
                 "let view = UIImageView(image: image)"
             ],
-            "ContextMenu/ContextMenuLensBloomTransitionView.swift": [
-                "private let blurredContentSnapshotView = UIImageView()",
-                "private let sharpContentSnapshotView = UIImageView()"
+            "ContextMenu/ContextMenuGlassmorphicTransitionView.swift": [
+                "SnapshotView = UIImageView()"
             ],
-            "ContextMenu/ContextMenuSourcePlatterBloomTransitionView.swift": [
-                "private let blurredMenuSnapshotView = UIImageView()",
-                "private let sharpMenuSnapshotView = UIImageView()"
+            "Glass/AetherContentMaterialization.swift": [
+                "private let imageView = UIImageView()"
+            ],
+            "NavigationBar/NavigationBarImpl.swift": [
+                "return UIImageView(image: image)"
             ],
             "TabBar/BottomBarAccessoryTransitionParticipant.swift": [
                 "keeps one UIImageView/layer alive",

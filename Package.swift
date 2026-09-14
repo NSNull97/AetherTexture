@@ -39,7 +39,6 @@ let package = Package(
             ],
             path: "Sources/AetherUI",
             resources: [
-                .process("ContextMenu/Metal"),
                 .process("ListView/DustEffect/Metal")
             ],
             swiftSettings: [

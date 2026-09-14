@@ -970,12 +970,13 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
 
     private func navigationBarItemContentDidChange() {
         let shouldAnimateLiveChrome = isInFocus && viewIfLoaded?.window != nil
-        let chromeTransition: ContainedViewLayoutTransition = shouldAnimateLiveChrome
+        let defaultChromeTransition: ContainedViewLayoutTransition = shouldAnimateLiveChrome
             ? .animated(
                 duration: AetherMotion.navigationChrome.geometry.duration,
                 curve: .custom(0.18, 0.90, 0.22, 1.0)
             )
             : .immediate
+        let chromeTransition = navigationBarItem.contentTransitionOverride ?? defaultChromeTransition
         if let bar = navigationBarView {
             let update = {
                 bar.item = self.navigationBarItem
@@ -985,7 +986,7 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
                 // not silently fall back to `.immediate`.
                 bar.requestContainerLayout?(chromeTransition)
             }
-            if shouldAnimateLiveChrome, let bar = bar as? NavigationBarImpl {
+            if chromeTransition.isAnimated, let bar = bar as? NavigationBarImpl {
                 bar.withButtonMorphTransition(chromeTransition, update)
             } else {
                 update()

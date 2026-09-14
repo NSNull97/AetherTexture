@@ -109,6 +109,10 @@ private final class NavigationBarBadgeNode: ASDisplayNode {
         super.init()
 
         isUserInteractionEnabled = false
+        // This passive fill must be available to a synchronous content
+        // snapshot. UIKit can defer a view-backed node's background color
+        // until compositing, leaving its CALayer transparent during capture.
+        backgroundNode.isLayerBacked = true
         backgroundNode.backgroundColor = badgeColor
         backgroundNode.borderWidth = 1.0
         backgroundNode.borderColor = strokeColor.cgColor

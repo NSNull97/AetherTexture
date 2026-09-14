@@ -314,6 +314,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     private var rightAdditionalButtonsGroups: [GlassControlGroup] = []
     public let badgeView: NavigationBarBadgeView
     private var titleContentView: UIView?
+    private var automaticBackBadgeContentView: NavigationAutomaticBackBadgeContentView?
 
     private var _contentView: NavigationBarContentView?
     public var contentView: NavigationBarContentView? { _contentView }
@@ -492,6 +493,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     private var appearingVisualViewIDs = Set<ObjectIdentifier>()
     private var disappearingVisualViewIDs = Set<ObjectIdentifier>()
     private var disappearingVisualInteractionByID: [ObjectIdentifier: Bool] = [:]
+    private var disappearingVisualTransformByID: [ObjectIdentifier: CGAffineTransform] = [:]
     private var barButtonContextMenuProviderObserver: NSObjectProtocol?
     private var buttonsRowAlpha: CGFloat = 1.0
     private var currentButtonsRowFrame: CGRect = .zero
@@ -1060,11 +1062,13 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     }
 
     private func prepareAppearingVisualView(_ view: UIView, targetTransform: CGAffineTransform = .identity) {
+        reclaimDisappearingVisualView(view)
+        AetherContentMaterialization.cancel(view: view)
         performMorphGeometryWithoutAnimation {
             view.alpha = 0.0
             let scale = AetherMotion.navigationChrome.contentScale
             view.transform = targetTransform.scaledBy(x: scale, y: scale)
-            if usesLiquidGlassTransitionBlur {
+            if usesLiquidGlassTransitionBlur && !(view is GlassControlGroup) {
                 ContainedViewLayoutTransition.immediate.setBlur(
                     layer: view.layer,
                     radius: AetherMotion.navigationChrome.contentBlurRadius
@@ -1083,11 +1087,26 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         let id = ObjectIdentifier(view)
         appearingVisualViewIDs.insert(id)
         let effectTransition = buttonEffectTransition(appearing: true, from: transition)
+        let usesContentBlur = usesLiquidGlassTransitionBlur && !(view is GlassControlGroup)
+        if usesContentBlur && effectTransition.isAnimated && CALayer.blur() == nil {
+            Self.clearOwnedTransitionBlur(from: view.layer)
+            effectTransition.updateTransform(view: view, transform: targetTransform)
+            AetherContentMaterialization.animate(
+                view: view,
+                samples: AetherMotion.navigationChromeMaterializationSamples(appearing: true),
+                duration: effectTransition.duration,
+                targetAlpha: 1.0
+            ) { [weak self] in
+                self?.appearingVisualViewIDs.remove(id)
+            }
+            applyButtonOverspringPulseIfNeeded(to: view, amplitude: buttonPulseAmplitude(appearing: true), transition: effectTransition)
+            return
+        }
         effectTransition.updateAlpha(view: view, alpha: 1.0) { [weak self] _ in
             self?.appearingVisualViewIDs.remove(id)
         }
         effectTransition.updateTransform(view: view, transform: targetTransform)
-        if usesLiquidGlassTransitionBlur {
+        if usesContentBlur {
             effectTransition.setBlur(layer: view.layer, radius: 0.0)
         } else {
             Self.clearOwnedTransitionBlur(from: view.layer)
@@ -1100,10 +1119,13 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         transition: ContainedViewLayoutTransition?,
         completion: (() -> Void)? = nil
     ) {
+        guard !AetherContentMaterialization.isSnapshotView(view) else { return }
         let id = ObjectIdentifier(view)
         guard !disappearingVisualViewIDs.contains(id) else {
             return
         }
+        AetherContentMaterialization.cancel(view: view)
+        appearingVisualViewIDs.remove(id)
         let originalTransform = view.transform
 
         guard let transition, transition.isAnimated else {
@@ -1116,15 +1138,17 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         }
 
         disappearingVisualViewIDs.insert(id)
+        disappearingVisualTransformByID[id] = originalTransform
         let wasUserInteractionEnabled = view.isUserInteractionEnabled
         disappearingVisualInteractionByID[id] = wasUserInteractionEnabled
         view.isUserInteractionEnabled = false
         let effectTransition = buttonEffectTransition(appearing: false, from: transition)
-        effectTransition.updateAlpha(view: view, alpha: 0.0) { [weak self, weak view] _ in
+        let finish: () -> Void = { [weak self, weak view] in
             guard let self else { return }
             guard self.disappearingVisualViewIDs.remove(id) != nil else {
                 return
             }
+            self.disappearingVisualTransformByID.removeValue(forKey: id)
             let restoredUserInteraction = self.disappearingVisualInteractionByID.removeValue(forKey: id) ?? wasUserInteractionEnabled
             guard let view else {
                 completion?()
@@ -1137,12 +1161,28 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             Self.clearOwnedTransitionBlur(from: view.layer)
             completion?()
         }
+        let usesContentBlur = usesLiquidGlassTransitionBlur && !(view is GlassControlGroup)
+        let usesPublicMaterialization = usesContentBlur && CALayer.blur() == nil
+        if usesPublicMaterialization {
+            Self.clearOwnedTransitionBlur(from: view.layer)
+            AetherContentMaterialization.animate(
+                view: view,
+                samples: AetherMotion.navigationChromeMaterializationSamples(appearing: false),
+                duration: effectTransition.duration,
+                targetAlpha: 0.0,
+                completion: finish
+            )
+            // A zero-size view can complete synchronously without a proxy.
+            guard disappearingVisualViewIDs.contains(id) else { return }
+        } else {
+            effectTransition.updateAlpha(view: view, alpha: 0.0) { _ in finish() }
+        }
         let scale = AetherMotion.navigationChrome.contentScale
         effectTransition.updateTransform(
             view: view,
             transform: originalTransform.scaledBy(x: scale, y: scale)
         )
-        if usesLiquidGlassTransitionBlur {
+        if usesContentBlur && !usesPublicMaterialization {
             effectTransition.setBlur(
                 layer: view.layer,
                 radius: AetherMotion.navigationChrome.contentBlurRadius
@@ -1151,6 +1191,28 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             Self.clearOwnedTransitionBlur(from: view.layer)
         }
         applyButtonOverspringPulseIfNeeded(to: view, amplitude: buttonPulseAmplitude(appearing: false), transition: effectTransition)
+    }
+
+    /// A caller-owned view may return before its previous disappearance ends.
+    /// Invalidate that completion before restoring the view for its new owner.
+    private func reclaimDisappearingVisualView(_ view: UIView) {
+        let id = ObjectIdentifier(view)
+        guard disappearingVisualViewIDs.remove(id) != nil else { return }
+        appearingVisualViewIDs.remove(id)
+        AetherContentMaterialization.cancel(view: view)
+        view.layer.removeAllAnimations()
+        view.alpha = 1.0
+        if let transform = disappearingVisualTransformByID.removeValue(forKey: id) {
+            view.transform = transform
+        }
+        if let interaction = disappearingVisualInteractionByID.removeValue(forKey: id) {
+            view.isUserInteractionEnabled = interaction
+        }
+        Self.clearOwnedTransitionBlur(from: view.layer)
+        buttonLayer.removeButtonPlacement(
+            id: ButtonChromePlacementID.outgoingTitleContentView(id),
+            detachView: false
+        )
     }
 
     private func buttonPulseAmplitude(appearing: Bool) -> CGFloat {
@@ -2010,7 +2072,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             let resolvedAlpha = keepsPureBackButtonStable && isPureAutomaticBackButtonGroup(group, in: container) ? 1.0 : alpha
             group.setTransitionChromeAlpha(resolvedAlpha, transition: transition)
         }
-        for subview in container.subviews where !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
+        for subview in container.subviews where !AetherContentMaterialization.isSnapshotView(subview) && !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
             transition.updateAlpha(view: subview, alpha: alpha)
         }
     }
@@ -2038,7 +2100,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         }
 
         let transform = CGAffineTransform(scaleX: scale * horizontalScale, y: scale)
-        for subview in container.subviews where !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
+        for subview in container.subviews where !AetherContentMaterialization.isSnapshotView(subview) && !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
             transition.updateAlpha(view: subview, alpha: alpha)
             if usesLiquidGlassTransitionBlur {
                 transition.setBlur(layer: subview.layer, radius: blurRadius)
@@ -2063,7 +2125,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         }
 
         let transform = CGAffineTransform(scaleX: scale * horizontalScale, y: scale)
-        for subview in container.subviews where !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
+        for subview in container.subviews where !AetherContentMaterialization.isSnapshotView(subview) && !groupSet.contains(ObjectIdentifier(subview)) && !isButtonGlassContainer(subview, for: container) {
             transition.updateTransform(view: subview, transform: transform)
         }
     }
@@ -2565,6 +2627,8 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             // capsules sit at identical distances from the bar edges.
             let glassSideInset: CGFloat = 16.0
             let glassY = floor((buttonHeight - glassButtonHeight) / 2.0) + 2.0
+            let hadLeftChrome = buttonChromeFrame(container: leftButtonContainer, groups: glassButtonGroups(for: .left)) != nil
+            let hadRightChrome = buttonChromeFrame(container: rightButtonContainer, groups: glassButtonGroups(for: .right)) != nil
 
             let leftStart = leftInset + glassSideInset
             let leftAvailableWidth = max(1.0, width * 0.5 - leftStart)
@@ -2581,11 +2645,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             let rightButtonsWidth = layoutBarButtonItems(in: rightButtonContainer, items: item?.rightBarButtonItems, alignment: .right, height: glassButtonHeight, transition: glassTransition)
 
             if leftButtonsWidth > 0.0 {
-                updateButtonChromeFrame(view: leftButtonContainer, frame: CGRect(x: leftStart, y: glassY, width: leftButtonsWidth, height: glassButtonHeight), transition: buttonContainerTransition)
+                updateButtonChromeFrame(view: leftButtonContainer, frame: CGRect(x: leftStart, y: glassY, width: leftButtonsWidth, height: glassButtonHeight), transition: hadLeftChrome ? buttonContainerTransition : .immediate)
             }
             if rightButtonsWidth > 0.0 {
                 let rightFrame = CGRect(x: width - rightInset - glassSideInset - rightButtonsWidth, y: glassY, width: rightButtonsWidth, height: glassButtonHeight)
-                updateButtonChromeFrame(view: rightButtonContainer, frame: rightFrame, transition: buttonContainerTransition)
+                updateButtonChromeFrame(view: rightButtonContainer, frame: rightFrame, transition: hadRightChrome ? buttonContainerTransition : .immediate)
             }
             titleLeftInset = leftButtonsWidth > 0.0 ? leftInset + glassSideInset + leftButtonsWidth + 10.0 : leftInset
             titleRightInset = rightButtonsWidth > 0.0 ? rightInset + glassSideInset + rightButtonsWidth + 10.0 : rightInset
@@ -2954,7 +3018,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         )
     }
 
-    private func removeGlassButtonGroups(alignment: ButtonAlignment) {
+    private func removeGlassButtonGroups(
+        alignment: ButtonAlignment,
+        transition: ContainedViewLayoutTransition = .immediate,
+        preservingCustomViews customViews: [UIView] = []
+    ) {
         switch alignment {
         case .left:
             setSeparatedButtonGlueAnimator(nil, for: leftButtonContainer)
@@ -2962,9 +3030,76 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             setSeparatedButtonGlueAnimator(nil, for: rightButtonContainer)
         }
         for group in glassButtonGroups(for: alignment) {
-            group.removeFromSuperview()
+            retireButtonVisual(group, transition: transition, preservingCustomViews: customViews)
         }
         storeGlassButtonGroups([], alignment: alignment)
+    }
+
+    /// Retire visuals outside the resizing button containers, so a switch
+    /// between caller-owned controls and generated glass cannot clip, move or
+    /// immediately delete the outgoing state. A reused caller view is never
+    /// retained by the outgoing animation: only its old visual is retained.
+    private func retireButtonVisual(
+        _ view: UIView,
+        transition: ContainedViewLayoutTransition,
+        preservingCustomViews customViews: [UIView] = []
+    ) {
+        guard !AetherContentMaterialization.isSnapshotView(view),
+              !disappearingVisualViewIDs.contains(ObjectIdentifier(view)) else { return }
+        guard transition.isAnimated, let parent = view.superview else {
+            AetherContentMaterialization.cancel(view: view)
+            appearingVisualViewIDs.remove(ObjectIdentifier(view))
+            view.removeFromSuperview()
+            return
+        }
+
+        var outgoingView = view
+        for customView in customViews where customView === view || customView.isDescendant(of: view) {
+            AetherContentMaterialization.cancel(view: customView)
+            guard let snapshot = buttonVisualSnapshot(customView) else {
+                // A zero-sized caller view has no visible outgoing state.
+                // It must still remain available to the incoming layout.
+                customView.removeFromSuperview()
+                if customView === view { return }
+                continue
+            }
+            snapshot.frame = customView.frame
+            snapshot.isUserInteractionEnabled = false
+            if customView === view {
+                parent.insertSubview(snapshot, belowSubview: view)
+                outgoingView = snapshot
+            } else if let customParent = customView.superview {
+                customParent.insertSubview(snapshot, belowSubview: customView)
+            }
+            // The incoming group/control will take ownership synchronously.
+            customView.removeFromSuperview()
+        }
+
+        let host: UIView = usesSeparatedButtonHosting ? buttonLayer : buttonsContainerView
+        let outgoingParent = outgoingView.superview ?? parent
+        let visibleFrame = outgoingView.layer.presentation()?.frame ?? outgoingView.frame
+        let frame = outgoingParent.convert(visibleFrame, to: host)
+        AetherNavigationBarButtonLayer.reparentPreservingPresentation(
+            view: outgoingView,
+            from: outgoingParent,
+            to: host,
+            targetFrame: frame,
+            preservePresentationLayer: true
+        )
+        outgoingView.frame = frame
+        animateDisappearingVisualView(outgoingView, transition: transition)
+    }
+
+    private func buttonVisualSnapshot(_ view: UIView) -> UIView? {
+        guard view.bounds.width > 0.0, view.bounds.height > 0.0 else { return nil }
+        if let snapshot = view.snapshotView(afterScreenUpdates: false) {
+            return snapshot
+        }
+        // Off-window/custom drawing views may not supply a UIKit snapshot.
+        let image = UIGraphicsImageRenderer(size: view.bounds.size).image { context in
+            view.layer.render(in: context.cgContext)
+        }
+        return UIImageView(image: image)
     }
 
     private func semanticIdentity(for item: UIBarButtonItem) -> BarButtonSemanticIdentity {
@@ -3059,17 +3194,18 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             }
 
             if allCustomView && !needsBackButton {
-                removeGlassButtonGroups(alignment: alignment)
-
                 let expected = rawItems.compactMap { $0.customView }
-                for sub in container.subviews where !isButtonGlassContainer(sub, for: container) && !expected.contains(where: { $0 === sub }) {
-                    animateDisappearingVisualView(sub, transition: glassTransition)
+                removeGlassButtonGroups(alignment: alignment, transition: glassTransition, preservingCustomViews: expected)
+
+                for sub in container.subviews where !AetherContentMaterialization.isSnapshotView(sub) && !isButtonGlassContainer(sub, for: container) && !expected.contains(where: { $0 === sub }) {
+                    retireButtonVisual(sub, transition: glassTransition)
                 }
 
                 let spacing: CGFloat = 6.0
                 var offsetX: CGFloat = 0.0
                 for (idx, view) in expected.enumerated() {
                     let item = rawItems[idx]
+                    reclaimDisappearingVisualView(view)
                     let isNewView = view.superview !== container
                     let targetTransform = view.transform
                     if view.superview !== container {
@@ -3094,15 +3230,8 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                             targetTransform: targetTransform
                         )
                     } else if disappearingVisualViewIDs.contains(ObjectIdentifier(view)) {
-                        let viewID = ObjectIdentifier(view)
-                        disappearingVisualViewIDs.remove(viewID)
-                        appearingVisualViewIDs.remove(viewID)
-                        let restoredUserInteraction = disappearingVisualInteractionByID.removeValue(forKey: viewID) ?? view.isUserInteractionEnabled
-                        view.layer.removeAllAnimations()
-                        view.alpha = 1.0
+                        reclaimDisappearingVisualView(view)
                         view.transform = targetTransform
-                        view.isUserInteractionEnabled = restoredUserInteraction
-                        Self.clearOwnedTransitionBlur(from: view.layer)
                     } else if appearingVisualViewIDs.contains(ObjectIdentifier(view)) {
                         // Preserve the in-flight blur/fade when layout is
                         // requested again before the handoff has settled.
@@ -3137,9 +3266,24 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             if alignment == .left, let _ = self.previousItem, enableAutomaticBackButton {
                 let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
                 let backArrow = UIImage(systemName: "chevron.left", withConfiguration: config)!
+                let backContent: GlassControlGroup.Item.Content
+                if let badgeText = item?.backButtonBadgeText, !badgeText.isEmpty {
+                    let badgeContent: NavigationAutomaticBackBadgeContentView
+                    if let existing = automaticBackBadgeContentView, existing.badgeText == badgeText {
+                        badgeContent = existing
+                    } else {
+                        badgeContent = NavigationAutomaticBackBadgeContentView(text: badgeText, chevron: backArrow)
+                        automaticBackBadgeContentView = badgeContent
+                    }
+                    badgeContent.updateTheme(theme)
+                    backContent = .customView(badgeContent)
+                } else {
+                    automaticBackBadgeContentView = nil
+                    backContent = .icon(backArrow)
+                }
                 currentGroup.items.append(GlassControlGroup.Item(
                     id: automaticBackButtonID(alignment: alignment),
-                    content: .icon(backArrow),
+                    content: backContent,
                     action: { [weak self] in self?.backPressed() }
                 ))
             }
@@ -3296,6 +3440,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             }
             storeGlassButtonGroups(groups, alignment: alignment)
             let animatesGroupGeometry = glassTransition.isAnimated && buttonMorphTransitionOverride != nil
+            let previouslyPopulatedGroups = Set(groups.filter { !$0.items.isEmpty }.map(ObjectIdentifier.init))
             var previousGroupFrames: [ObjectIdentifier: CGRect] = [:]
             if animatesGroupGeometry {
                 for group in groups where group.bounds.width > 0.0 && group.bounds.height > 0.0 {
@@ -3305,10 +3450,10 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
 
             // Clean up stale non-group subviews from legacy/custom paths.
             let groupSet = Set(groups.map { ObjectIdentifier($0) })
-            for sub in container.subviews where !isButtonGlassContainer(sub, for: container) {
-                sub.removeFromSuperview()
+            for sub in container.subviews where !AetherContentMaterialization.isSnapshotView(sub) && !isButtonGlassContainer(sub, for: container) {
+                retireButtonVisual(sub, transition: glassTransition, preservingCustomViews: rawItems.compactMap(\.customView))
             }
-            for sub in groupHostView.subviews where !groupSet.contains(ObjectIdentifier(sub))
+            for sub in groupHostView.subviews where !AetherContentMaterialization.isSnapshotView(sub) && !groupSet.contains(ObjectIdentifier(sub))
                 && !((sub as? GlassControlGroup)?.isAwaitingAnimatedRemoval ?? false) {
                 sub.removeFromSuperview()
             }
@@ -3347,7 +3492,8 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                         group.frame = previousFrame
                     }
                 }
-                groupGeometryTransition.updateFrame(view: group, frame: CGRect(x: offsetX, y: 0.0, width: size.width, height: size.height))
+                let geometryTransition: ContainedViewLayoutTransition = previouslyPopulatedGroups.contains(ObjectIdentifier(group)) ? groupGeometryTransition : .immediate
+                geometryTransition.updateFrame(view: group, frame: CGRect(x: offsetX, y: 0.0, width: size.width, height: size.height))
                 offsetX += size.width
                 if index < groups.count - 1 {
                     offsetX += spacing
@@ -3355,7 +3501,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             }
             let glassContainerTransition = buttonMorphTransitionOverride ?? itemGeometryTransition
             let targetGlassContainerSize = CGSize(width: totalWidth, height: height)
-            updateButtonGlassContainer(in: container, size: targetGlassContainerSize, transition: glassContainerTransition)
+            updateButtonGlassContainer(in: container, size: targetGlassContainerSize, transition: previouslyPopulatedGroups.isEmpty ? .immediate : glassContainerTransition)
 
             // After `group.update` rebuilds the cell buttons, wire the
             // menu trigger DIRECTLY onto each button that carries a
@@ -3395,7 +3541,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
 
         guard !rawItems.isEmpty else {
             clearLegacyButtonViews(alignment: alignment)
-            for subview in container.subviews where !isButtonGlassContainer(subview, for: container) {
+            for subview in container.subviews where !AetherContentMaterialization.isSnapshotView(subview) && !isButtonGlassContainer(subview, for: container) {
                 animateDisappearingVisualView(subview, transition: morphTransition)
             }
             return 0.0
@@ -3417,6 +3563,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                     animateDisappearingVisualView(generatedView, transition: morphTransition)
                 }
                 view = customView
+                reclaimDisappearingVisualView(customView)
                 isNewView = customView.superview !== container
                 targetTransform = customView.transform
                 size = measuredBarButtonCustomViewSize(
@@ -3496,15 +3643,8 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                     animateAppearingVisualView(view, transition: morphTransition, targetTransform: targetTransform)
                 }
             } else if disappearingVisualViewIDs.contains(ObjectIdentifier(view)) {
-                let viewID = ObjectIdentifier(view)
-                disappearingVisualViewIDs.remove(viewID)
-                appearingVisualViewIDs.remove(viewID)
-                let restoredUserInteraction = disappearingVisualInteractionByID.removeValue(forKey: viewID) ?? view.isUserInteractionEnabled
-                view.layer.removeAllAnimations()
-                view.alpha = 1.0
+                reclaimDisappearingVisualView(view)
                 view.transform = targetTransform
-                view.isUserInteractionEnabled = restoredUserInteraction
-                Self.clearOwnedTransitionBlur(from: view.layer)
             } else if appearingVisualViewIDs.contains(ObjectIdentifier(view)) {
                 // Keep the in-flight blur/alpha/scale animation intact.
             } else {
@@ -3519,7 +3659,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             offsetX += size.width + 8.0
         }
         let expectedViewIDs = Set(expectedViews.map { ObjectIdentifier($0) })
-        for subview in container.subviews where !isButtonGlassContainer(subview, for: container) && !expectedViewIDs.contains(ObjectIdentifier(subview)) {
+        for subview in container.subviews where !AetherContentMaterialization.isSnapshotView(subview) && !isButtonGlassContainer(subview, for: container) && !expectedViewIDs.contains(ObjectIdentifier(subview)) {
             animateDisappearingVisualView(subview, transition: morphTransition)
         }
         return max(0.0, offsetX - 8.0)
@@ -3582,6 +3722,8 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             if morphTransition?.isAnimated == true && isHostedByThisBar {
                 animateOutgoingTitleContentView(existingTitleContentView, transition: morphTransition)
             } else if isHostedByThisBar {
+                AetherContentMaterialization.cancel(view: existingTitleContentView)
+                appearingVisualViewIDs.remove(ObjectIdentifier(existingTitleContentView))
                 existingTitleContentView.removeFromSuperview()
             }
             titleContentView = nil
@@ -3590,6 +3732,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             measuredTitleHeight = 0
         }
         if let titleView = itemTitleView, titleView !== titleContentView {
+            reclaimDisappearingVisualView(titleView)
             buttonLayer.removeButtonPlacement(id: ButtonChromePlacementID.titleContentView, detachView: false)
             titleContentView?.removeFromSuperview()
             titleContentView = titleView
@@ -3952,7 +4095,6 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                 hidesDuringPresentation: true
             ),
             items: items,
-            presentationStyle: .fluidMorph,
             appearanceStyle: presentationData.theme.appearanceStyle,
             onDismiss: { [weak self] in
                 guard let self else { return }
@@ -3966,6 +4108,61 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
 }
 
 // MARK: - Back Button View
+
+/// A single semantic back item: the badge never becomes a second touch target
+/// or a separate glass surface, and its width participates in group layout.
+final class NavigationAutomaticBackBadgeContentView: UIView {
+    let badgeText: String
+    private let chevronNode = ASImageNode()
+    private let badge = NavigationBarBadgeView()
+
+    init(text: String, chevron: UIImage) {
+        badgeText = text
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        chevronNode.image = chevron.withRenderingMode(.alwaysTemplate)
+        chevronNode.contentMode = .scaleAspectFit
+        chevronNode.view.isUserInteractionEnabled = false
+        badge.text = text
+        addSubview(chevronNode.view)
+        addSubview(badge)
+        accessibilityLabel = text
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        chevronNode.view.removeFromSuperview()
+    }
+
+    func updateTheme(_ theme: NavigationBarTheme) {
+        chevronNode.tintColor = theme.buttonColor
+        badge.badgeColor = theme.badgeBackgroundColor
+        badge.textColor = theme.badgeTextColor
+        badge.strokeColor = theme.badgeStrokeColor
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let badgeSize = badge.sizeThatFits(size)
+        return CGSize(width: 12.0 + 13.0 + 5.0 + badgeSize.width + 12.0, height: 44.0)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let badgeSize = badge.sizeThatFits(bounds.size)
+        chevronNode.frame = CGRect(x: 12.0, y: (bounds.height - 22.0) * 0.5, width: 13.0, height: 22.0)
+        chevronNode.recursivelyEnsureDisplaySynchronously(true)
+        badge.frame = CGRect(x: 30.0, y: (bounds.height - badgeSize.height) * 0.5, width: badgeSize.width, height: badgeSize.height)
+        // UIKit layout alone leaves Texture's nested text/background nodes
+        // pending. They must join the chevron in the first materialization
+        // frame, including when the public renderer captures this subtree.
+        badge.layoutIfNeeded()
+        badge.contentNode.layoutIfNeeded()
+        badge.contentNode.recursivelyEnsureDisplaySynchronously(true)
+    }
+}
 
 final class NavigationBackButtonView: UIView, AetherAppearanceConsumer {
     private static let paragraphStyle: NSParagraphStyle = {

@@ -25,6 +25,8 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
 
     private let glassBackground: GlassBackgroundView
     private let contentContainer: UIView
+    /// Lease only the glyph/label; the transition owns the single glass shell.
+    internal var contextMenuPresentationContentView: UIView { contentContainer }
     private var iconNode: ASImageNode?
     private var titleNode: ASTextNode?
     private var titleText: String?
@@ -53,11 +55,8 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
     /// `.tap` overrides `action` and presents on tap-up.
     public enum ContextMenuTrigger { case longPress, tap }
     public var contextMenuTrigger: ContextMenuTrigger = .longPress
-    /// Layout flavour passed to the underlying `ContextMenuController`.
-    /// Defaults to `.morph` (button glass expands into menu). Set to
-    /// `.preview(...)` to use the long-press card style (button lifts as a
-    /// preview snapshot, menu appears below).
-    public var contextMenuPresentationStyle: ContextMenuController.PresentationStyle = .morph
+    /// Optional lifted source content shown above the menu.
+    public var contextMenuPreview: ContextMenuController.Preview?
     private weak var currentContextController: ContextMenuController?
     private var longPressRecognizer: UILongPressGestureRecognizer?
 
@@ -364,7 +363,7 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
             source: self,
             cornerRadius: bounds.height / 2.0,
             items: items,
-            presentationStyle: contextMenuPresentationStyle,
+            preview: contextMenuPreview,
             appearanceStyle: appearanceStyleOverride ?? AetherAppearance.runtimeCurrent.style,
             onDismiss: { [weak self] in
                 self?.currentContextController = nil

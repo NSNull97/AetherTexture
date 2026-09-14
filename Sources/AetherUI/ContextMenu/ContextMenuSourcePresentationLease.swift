@@ -240,6 +240,8 @@ extension ContextMenuSourceDescriptor {
         self.sourceCornerRadius = sourceCornerRadius
         self.sourceMode = sourceMode
         let contentOnlyProxySource = (visualView as? GlassControlGroup)?.singleItemPresentationProxyContentView
+            ?? (visualView as? GlassBarButtonView)?.contextMenuPresentationContentView
+            ?? (visualView as? GlassButton)?.contextMenuPresentationContentView
         self.makeProxyView = { [weak visualView] in
             guard let visualView else { return UIView(frame: CGRect(origin: .zero, size: frame.size)) }
             if let contentOnlyProxySource {

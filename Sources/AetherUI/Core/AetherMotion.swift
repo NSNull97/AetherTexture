@@ -242,8 +242,8 @@ public enum AetherMotion {
     /// Button/capsule to menu morph. The ease-out geometry reaches its main
     /// target around 300 ms and uses the remaining time for a subtle settle.
     public static let contextMenu = SourceMorph(
-        presentation: Spring(duration: 0.66, dampingRatio: 0.86),
-        dismissal: Spring(duration: 0.34, dampingRatio: 0.90),
+        presentation: Spring(duration: 0.32, dampingRatio: 0.86),
+        dismissal: Spring(duration: 0.32, dampingRatio: 0.90),
         sourceFadeDuration: 0.14,
         contentBlurRadius: 14.0,
         contentRevealStart: 0.12,

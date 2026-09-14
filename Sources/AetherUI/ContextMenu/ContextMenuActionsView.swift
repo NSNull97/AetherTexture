@@ -843,29 +843,3 @@ final class ContextMenuActionsView: UIView {
         return container
     }
 }
-
-extension ContextMenuActionsView: AetherContextMenuContentAnimatable {
-    func prepareForGooeyOpen() {
-        setRevealProgress(0.0)
-    }
-
-    func updateGooeyOpenProgress(_ progress: CGFloat) {
-        setRevealProgress(progress)
-    }
-
-    func finishGooeyOpen() {
-        setRevealProgress(1.0)
-    }
-
-    func prepareForGooeyClose() {
-        setRevealProgress(1.0)
-    }
-
-    func updateGooeyCloseProgress(_ progress: CGFloat) {
-        setRevealProgress(progress)
-    }
-
-    func finishGooeyClose() {
-        setRevealProgress(0.0)
-    }
-}

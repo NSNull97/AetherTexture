@@ -93,46 +93,43 @@ AetherApplicationRuntime.shared?.updateAppearanceStyle(.liquidGlassV2)
 сохранённые значения iOS 26/27 декодируются новым `Codable` API. Новые значения
 сериализуются как `legacy`, `liquid-glass-v1` и `liquid-glass-v2`.
 
-### Legacy hard gates в публичных transitions
-
-Публичные transition-контейнеры принимают канонический appearance до создания
-renderer'а:
+### Context menu и appearance
 
 ```swift
-let gooey = AetherGooeyContextMenuTransition(
-    configuration: .default(appearance: .legacy)
-)
-
-let lens = LensTransitionContainer(
-    effectView: sourceEffectView,
-    appearanceStyle: .legacy
-)
-
-let sourceMorph = AetherSourceMorphController(
-    contentView: contentView,
-    targetSize: CGSize(width: 320, height: 280),
-    appearanceStyle: .legacy
-)
-
-let attachments = AetherAttachmentMenuController(
+let menu = ContextMenuController(
+    source: .init(view: button),
     items: items,
     appearanceStyle: .legacy
 )
+menu.present()
 ```
 
-Explicit `appearanceStyle` закрепляет локальный стиль. У
-`LensTransitionContainer`, `AetherSourceMorphController` и
-`AetherAttachmentMenuController` значение `nil` наследует live runtime. В
-низкоуровневой `AetherGooeyContextMenuTransitionConfiguration` отсутствующий
-style снимком фиксирует runtime в момент создания конфигурации; фабрика
-`default(appearance:)` всегда фиксирует переданный style.
+Контроллер сам выбирает внутренний режим по `AetherAppearanceStyle`.
+Публичного переключателя анимации и конфигурации отдельного transition нет.
+`appearanceStyle: nil` наследует runtime в момент презентации; explicit value
+закрепляет renderer. Сейчас Legacy и Liquid Glass используют общий движок
+перехода source → menu, при этом Legacy сохраняет публичный
+`UIBlurEffect(.systemChromeMaterial)`. Исходная кнопка передаётся временной
+копии и восстанавливается при закрытии или отмене.
 
-Legacy hard gate выполняется до Liquid-специфичных allocation. Поверхности
-используют публичный `UIBlurEffect(.systemChromeMaterial)`; gooey и source
-morph переходят на обычные UIKit alpha/scale animations без Metal, SDF,
-source snapshot и собственного `CADisplayLink`. `LensTransitionContainer` не
-создаёт private SDF/displacement implementation и сохраняет движение только
-через публичные Core Animation size/position/corner-radius keyframes.
+Для lifted preview передайте `preview: .init(verticalSpacing: 8, lift: 1.04)`.
+Это конфигурация содержимого над меню, а не выбор анимации.
+Подробности: [ContextMenu](Sources/AetherUI/AetherUI.docc/ContextMenu.md).
+
+У `LensTransitionContainer`, `AetherSourceMorphController` и
+`AetherAttachmentMenuController` optional `appearanceStyle` также закрепляет
+renderer или наследует runtime. Legacy source/attachment popup использует
+UIKit alpha/scale; Legacy lens container — публичные Core Animation keyframes
+без private SDF/displacement implementation.
+
+### Воспроизводимый пример анимаций
+
+В Example откройте **Components → Animation Reference** либо запустите с
+`--animation-reference`. Аргумент `--animation-reference-autoplay` открывает
+тот же экран и один раз воспроизводит левое и правое меню, переход
+аватар → back со счётчиком, смену счётчика и переход без правой кнопки.
+Контент фиксированный, сеть и случайные данные не используются. Обычный
+запуск Example не включает автопроигрывание.
 
 ### Platform support for Liquid Glass
 

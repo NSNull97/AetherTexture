@@ -10,6 +10,7 @@ internal struct AetherImageSemanticIdentity: Hashable {
     let widthInMilliPoints: Int
     let heightInMilliPoints: Int
     let fingerprint: UInt64
+    let preservesOriginalColors: Bool
 
     init(_ image: UIImage) {
         let identifier = image.accessibilityIdentifier?.isEmpty == false
@@ -19,11 +20,12 @@ internal struct AetherImageSemanticIdentity: Hashable {
         self.widthInMilliPoints = Int((image.size.width * 1_000.0).rounded())
         self.heightInMilliPoints = Int((image.size.height * 1_000.0).rounded())
         self.fingerprint = Self.renderedFingerprint(image)
+        self.preservesOriginalColors = image.renderingMode == .alwaysOriginal
     }
 
     var stableComponent: String {
         let identifierHash = accessibilityIdentifier.map(Self.stringFingerprint) ?? 0
-        return "\(identifierHash).\(widthInMilliPoints).\(heightInMilliPoints).\(fingerprint)"
+        return "\(identifierHash).\(widthInMilliPoints).\(heightInMilliPoints).\(fingerprint).\(preservesOriginalColors)"
     }
 
     private static func stringFingerprint(_ value: String) -> UInt64 {
@@ -354,11 +356,6 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                 )
                 contentView = freshView
                 isNewEntry = true
-                animateInsertedButton(
-                    button,
-                    targetAlpha: item.action != nil ? 1.0 : 0.5,
-                    transition: transition
-                )
             }
 
             // Wire action.
@@ -411,6 +408,21 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                 view: contentView,
                 frame: CGRect(origin: contentOrigin, size: contentSize)
             )
+            if isNewEntry {
+                contentView.layoutIfNeeded()
+                let materializesCustomContent: Bool
+                if case .customView = item.content {
+                    materializesCustomContent = true
+                } else {
+                    materializesCustomContent = false
+                }
+                animateInsertedButton(
+                    entry.button,
+                    targetAlpha: item.action != nil ? 1.0 : 0.5,
+                    transition: transition,
+                    materializesCustomContent: materializesCustomContent
+                )
+            }
 
             newEntries.append(entry)
             contentsWidth += itemWidth
@@ -427,7 +439,9 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                 staleFrame.origin.x = nextNaturalWidth - staleFrame.width
                 ContainedViewLayoutTransition.immediate.updateFrame(view: stale.button, frame: staleFrame)
             }
-            animateRemovedButton(stale.button, transition: transition)
+            let materializesCustomContent: Bool
+            if case .customView = stale.contentId { materializesCustomContent = true } else { materializesCustomContent = false }
+            animateRemovedButton(stale.button, transition: transition, materializesCustomContent: materializesCustomContent)
         }
         itemViews = newEntries
         currentIsInteractive = false
@@ -437,6 +451,11 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         // visible empty pill next to real content (matches behaviour).
         if items.isEmpty {
             isUserInteractionEnabled = false
+            if backgroundView.layer.animation(forKey: Self.surfaceMaterializationOpacityKey) != nil {
+                let visibleAlpha = backgroundView.layer.presentation()?.opacity ?? backgroundView.layer.opacity
+                backgroundView.layer.removeAnimation(forKey: Self.surfaceMaterializationOpacityKey)
+                backgroundView.alpha = CGFloat(visibleAlpha)
+            }
             let previousSize = naturalSize == .zero ? backgroundView.bounds.size : naturalSize
             if didChangeVisualItems,
                transition.isAnimated,
@@ -493,9 +512,17 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             && (abs(previousNaturalSize.width - size.width) > 0.5
                 || abs(previousNaturalSize.height - size.height) > 0.5)
 
-        transition.updateFrame(view: backgroundView, frame: CGRect(origin: .zero, size: size))
-        transition.updateFrame(view: controlsView, frame: CGRect(origin: .zero, size: size))
-        updateBackgroundChrome(size: size, isDark: isDark, tintColor: tintColor, transition: transition)
+        // A surface that did not exist materializes at its resting size. Only
+        // existing surfaces interpolate their bounds; growing a hidden 0x0
+        // backdrop makes a new navigation button look like a zoom animation.
+        let isInsertingSurface = previousItemCount == 0
+        let surfaceGeometryTransition: ContainedViewLayoutTransition = isInsertingSurface ? .immediate : transition
+        surfaceGeometryTransition.updateFrame(view: backgroundView, frame: CGRect(origin: .zero, size: size))
+        surfaceGeometryTransition.updateFrame(view: controlsView, frame: CGRect(origin: .zero, size: size))
+        updateBackgroundChrome(size: size, isDark: isDark, tintColor: tintColor, transition: surfaceGeometryTransition)
+        if isInsertingSurface {
+            animateInsertedSurface(transition: transition)
+        }
         if !suppressesAutomaticSizeMorphPulse {
             if previousItemCount == 0 {
                 animateMaterialPulse(kind: .appearance, from: size, to: size, transition: transition)
@@ -572,7 +599,8 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
     private func animateInsertedButton(
         _ button: UIView,
         targetAlpha: CGFloat,
-        transition: ContainedViewLayoutTransition
+        transition: ContainedViewLayoutTransition,
+        materializesCustomContent: Bool
     ) {
         guard transition.isAnimated && animatesInsertedItemsAlpha else {
             button.alpha = targetAlpha
@@ -587,11 +615,37 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             targetAlpha: targetAlpha,
             appearing: true,
             duration: min(transition.duration, AetherMotion.navigationChrome.contentAppearanceDuration),
-            generation: updateGeneration
+            generation: updateGeneration,
+            materializesCustomContent: materializesCustomContent
         )
     }
 
+    private func animateInsertedSurface(transition: ContainedViewLayoutTransition) {
+        let layer = backgroundView.layer
+        layer.removeAnimation(forKey: Self.surfaceMaterializationOpacityKey)
+        guard transition.isAnimated, animatesInsertedItemsAlpha, !UIAccessibility.isReduceMotionEnabled else {
+            backgroundView.alpha = 1.0
+            return
+        }
+
+        // Keep the material separate from the blurred glyph layer. Applying a
+        // filter to a native effect view would also blur its sampled backdrop.
+        let samples = AetherMotion.navigationChromeMaterializationSamples(appearing: true)
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = samples.map { NSNumber(value: Float($0.opacity)) }
+        animation.keyTimes = samples.indices.map { NSNumber(value: Double($0) / Double(samples.count - 1)) }
+        animation.duration = min(transition.duration, AetherMotion.navigationChrome.contentAppearanceDuration)
+        animation.calculationMode = .linear
+        animation.isRemovedOnCompletion = true
+        animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - (1.0 / 120.0)
+        animation.aetherPreferHighFrameRate()
+        layer.add(animation, forKey: Self.surfaceMaterializationOpacityKey)
+    }
+
     private func restoreExistingButton(_ button: UIView, targetAlpha: CGFloat, transition: ContainedViewLayoutTransition) {
+        if AetherContentMaterialization.isAnimating(view: button) {
+            return
+        }
         guard transition.isAnimated && animatesInsertedItemsAlpha else {
             button.alpha = targetAlpha
             button.transform = .identity
@@ -604,7 +658,8 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         softTransition.setBlur(layer: button.layer, radius: 0.0)
     }
 
-    private func animateRemovedButton(_ button: UIView, transition: ContainedViewLayoutTransition) {
+    private func animateRemovedButton(_ button: UIView, transition: ContainedViewLayoutTransition, materializesCustomContent: Bool) {
+        AetherContentMaterialization.cancel(view: button)
         guard transition.isAnimated else {
             button.removeFromSuperview()
             return
@@ -623,7 +678,8 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             targetAlpha: button.alpha,
             appearing: false,
             duration: min(transition.duration, AetherMotion.navigationChrome.contentDisappearanceDuration),
-            generation: updateGeneration
+            generation: updateGeneration,
+            materializesCustomContent: materializesCustomContent
         ) { [weak button] in button?.removeFromSuperview() }
     }
 
@@ -633,8 +689,10 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         appearing: Bool,
         duration: TimeInterval,
         generation: Int,
+        materializesCustomContent: Bool,
         completion: (() -> Void)? = nil
     ) {
+        AetherContentMaterialization.cancel(view: button)
         guard backgroundView.usesLiquidGlassAppearance else {
             button.layer.removeAnimation(forKey: Self.contentMaterializationOpacityKey)
             button.layer.removeAnimation(forKey: Self.contentMaterializationBlurKey)
@@ -650,6 +708,22 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             return
         }
         let samples = AetherMotion.navigationChromeMaterializationSamples(appearing: appearing)
+        let blurFilter = CALayer.blur()
+        // Capture composite content once so every part of a chevron/badge or
+        // avatar follows the same optical timeline on both rendering paths.
+        if blurFilter == nil || materializesCustomContent {
+            button.layer.removeAnimation(forKey: Self.contentMaterializationOpacityKey)
+            button.layer.removeAnimation(forKey: Self.contentMaterializationBlurKey)
+            button.layer.filters = nil
+            AetherContentMaterialization.animate(
+                view: button,
+                samples: samples,
+                duration: duration,
+                targetAlpha: appearing ? targetAlpha : 0.0,
+                completion: completion
+            )
+            return
+        }
         let keyTimes = (0 ..< samples.count).map {
             NSNumber(value: Double($0) / Double(samples.count - 1))
         }
@@ -689,7 +763,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         layer.add(opacity, forKey: Self.contentMaterializationOpacityKey)
 
         #if !APPSTORE_SAFE
-        if let blurFilter = CALayer.blur() {
+        if let blurFilter {
             let finalBlur = samples.last?.blurRadius ?? 0.0
             blurFilter.setValue(finalBlur as NSNumber, forKey: ObfuscatedSymbols.filterRadiusKey)
             layer.filters = [blurFilter]
@@ -988,12 +1062,21 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
     }
 
     internal static let sizeMorphPulseAnimationKey = "aether.glassButtonSizeMorphPulse"
+    internal static let surfaceMaterializationOpacityKey = "aether.glassButtonSurfaceMaterializationOpacity"
     internal static let materialPulseCounterAnimationKey = "aether.glassButtonMaterialPulseCounter"
     internal static let contentMaterializationOpacityKey = "aether.navigationChromeMaterialization.opacity"
     internal static let contentMaterializationBlurKey = "aether.navigationChromeMaterialization.blur"
 
     internal var sizeMorphPulseAnimationForTesting: CAKeyframeAnimation? {
         layer.animation(forKey: Self.sizeMorphPulseAnimationKey) as? CAKeyframeAnimation
+    }
+
+    internal var surfaceMaterializationAnimationForTesting: CAKeyframeAnimation? {
+        backgroundView.layer.animation(forKey: Self.surfaceMaterializationOpacityKey) as? CAKeyframeAnimation
+    }
+
+    internal var surfaceFrameForTesting: CGRect {
+        backgroundView.frame
     }
 
     internal var sizeMorphPulseModelTransformForTesting: CATransform3D {
@@ -1146,6 +1229,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
 
 private final class GlassControlGroupIconContentView: UIView {
     private let imageNode = ASImageNode()
+    private let preservesOriginalColors: Bool
     private(set) var resolvedForegroundColor: UIColor = .clear
 
     var foregroundColor: UIColor {
@@ -1156,11 +1240,12 @@ private final class GlassControlGroupIconContentView: UIView {
 
     init(image: UIImage, foregroundColor: UIColor) {
         self.foregroundColor = foregroundColor
+        preservesOriginalColors = image.renderingMode == .alwaysOriginal
         super.init(frame: .zero)
 
         isUserInteractionEnabled = false
-        imageNode.image = image.withRenderingMode(.alwaysTemplate)
-        imageNode.contentMode = .center
+        imageNode.image = preservesOriginalColors ? image : image.withRenderingMode(.alwaysTemplate)
+        imageNode.contentMode = preservesOriginalColors ? .scaleAspectFit : .center
         imageNode.view.isUserInteractionEnabled = false
         addSubview(imageNode.view)
         updateImageAppearance()
@@ -1184,7 +1269,8 @@ private final class GlassControlGroupIconContentView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        imageNode.frame = bounds
+        imageNode.frame = preservesOriginalColors ? bounds.insetBy(dx: 3.0, dy: 3.0) : bounds
+        imageNode.recursivelyEnsureDisplaySynchronously(true)
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -1194,9 +1280,9 @@ private final class GlassControlGroupIconContentView: UIView {
     private func updateImageAppearance() {
         let resolvedColor = foregroundColor.resolvedColor(with: traitCollection)
         resolvedForegroundColor = resolvedColor
-        imageNode.tintColor = resolvedColor
+        imageNode.tintColor = preservesOriginalColors ? nil : resolvedColor
         imageNode.view.setMonochromaticEffect(
-            tintColor: resolvedColor
+            tintColor: preservesOriginalColors ? nil : resolvedColor
         )
     }
 }

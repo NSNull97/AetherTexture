@@ -14,7 +14,6 @@ public final class MenuGlassSurfaceView: UIView {
     private let isDark: Bool
     private var surfaceCornerRadii = ContextMenuBloomCornerRadii.uniform(0)
     private var forcesRoundedBoundsClip = false
-    private var isGooeyMaterialSuppressed = false
     private var supplementalScatteringEnabled = true
     var routesTouchesToGlassSurface = false
 
@@ -98,7 +97,7 @@ public final class MenuGlassSurfaceView: UIView {
             isDark: isDark,
             tintColor: .init(kind: .panel),
             isInteractive: true,
-            isVisible: !isGooeyMaterialSuppressed,
+            isVisible: true,
             transition: .immediate
         )
     }
@@ -185,14 +184,6 @@ public final class MenuGlassSurfaceView: UIView {
         setSurfaceCornerRadii(surfaceCornerRadii)
     }
 
-    func setGooeyMaterialSuppressed(_ suppressed: Bool) {
-        guard isGooeyMaterialSuppressed != suppressed else { return }
-        isGooeyMaterialSuppressed = suppressed
-        surfaceView?.isHidden = suppressed
-        scatteringView.isHidden = suppressed || !supplementalScatteringEnabled
-        setNeedsLayout()
-    }
-
     func updateMaterialThickness(_ progress: CGFloat) {
         guard surfaceView?.usesLiquidGlassAppearance == true else {
             scatteringView.backgroundColor = .clear
@@ -208,6 +199,6 @@ public final class MenuGlassSurfaceView: UIView {
 
     func setSupplementalScatteringEnabled(_ enabled: Bool) {
         supplementalScatteringEnabled = enabled
-        scatteringView.isHidden = !enabled || isGooeyMaterialSuppressed
+        scatteringView.isHidden = !enabled
     }
 }
