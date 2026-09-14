@@ -331,21 +331,88 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(maskFrame.height, renderedFrame.height, accuracy: 0.000001)
     }
 
-    func testReturningTextStaysLegibleWhileExpandingBackToItsButton() {
+    func testSourceCaptionKeepsItsNaturalSizeInBothDirections() {
         for appearance in AetherAppearanceStyle.allCases {
-            let host = makeHost(appearance: appearance, menuHeight: 160)
+            for width: CGFloat in [94, 160, 240] {
+                let host = makeHost(appearance: appearance, menuHeight: 160, sourceWidth: width)
+                defer { host.tearDownGlassEffects() }
+                for direction in [ContextMenuBloomDirection.opening, .closing] {
+                    for frame in 0...120 {
+                        host.setProgress(CGFloat(frame) / 120, direction: direction)
+                        let source = host.sourceProxyContainer
+                        XCTAssertEqual(source.transform.a, 1)
+                        XCTAssertEqual(source.transform.d, 1)
+                        XCTAssertEqual(source.transform.b, 0)
+                        XCTAssertEqual(source.transform.c, 0)
+                        XCTAssertEqual(source.bounds.size, CGSize(width: width, height: 44))
+                    }
+                }
+            }
+        }
+    }
+
+    func testFluidClockSettlesWithoutReversingMaterialization() {
+        var previous: CGFloat = 0
+        var minimum: CGFloat = 0
+        var maximum: CGFloat = 0
+        for frame in 0...1000 {
+            let t = CGFloat(frame) / 1000
+            let sample = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false)
+            XCTAssertGreaterThanOrEqual(sample.progress, previous)
+            XCTAssertLessThanOrEqual(sample.progress, 1)
+            XCTAssertLessThan(abs(sample.rebound), 0.025)
+            if t <= 0.70 || t == 1 { XCTAssertEqual(sample.rebound, 0) }
+            minimum = min(minimum, sample.rebound)
+            maximum = max(maximum, sample.rebound)
+            previous = sample.progress
+            XCTAssertEqual(contextMenuLiquidAnimationSample(fraction: t, reduceMotion: true).rebound, 0)
+        }
+        XCTAssertGreaterThan(maximum, 0.015)
+        XCTAssertLessThan(minimum, -0.003)
+        // No velocity jump when the main travel hands off to the spring.
+        let epsilon: CGFloat = 0.0001
+        XCTAssertLessThan(contextMenuLiquidAnimationSample(fraction: epsilon, reduceMotion: false).progress / epsilon, 0.001)
+        XCTAssertLessThan((1 - contextMenuLiquidAnimationSample(fraction: 0.80 - epsilon, reduceMotion: false).progress) / epsilon, 0.001)
+        XCTAssertLessThan(abs(contextMenuLiquidAnimationSample(fraction: 1 - epsilon, reduceMotion: false).rebound) / epsilon, 0.001)
+    }
+
+    func testDisplayClockOverspringsOnlyGlassAndKeepsTheLastFrameOnReversal() throws {
+        for appearance in AetherAppearanceStyle.allCases {
+            let host = makeHost(appearance: appearance, menuHeight: 160, sourceWidth: 160)
             defer { host.tearDownGlassEffects() }
-            host.setProgress(0.45, direction: .closing)
-            let source = host.sourceProxyContainer
-            XCTAssertLessThan(source.transform.a, 1)
-            XCTAssertEqual(source.transform.d, 1)
-            // The shoulder can be wider than the retracting belly. Fitting
-            // the label only to the belly squeezed it into a narrow stripe.
-            XCTAssertGreaterThanOrEqual(source.frame.width, source.bounds.width * 0.72)
-            XCTAssertLessThanOrEqual(source.frame.width, source.bounds.width)
-            host.setProgress(0, direction: .closing)
-            XCTAssertEqual(source.transform, .identity)
-            XCTAssertEqual(source.bounds.size, CGSize(width: 94, height: 44))
+            host.animateExpand(duration: 0.52, damping: 0.86)
+            host.advanceAnimation(to: 1)
+            // 425 ms is in the terminal recoil, after the content has arrived.
+            for frame in 1...51 { host.advanceAnimation(to: 1 + Double(frame) / 120) }
+            XCTAssertGreaterThan(host.finalMenuGlassSurfaceView.bounds.height, 160)
+            XCTAssertLessThan(host.finalMenuGlassSurfaceView.bounds.height, 164)
+            XCTAssertEqual(host.liveMenuContentView.transform, .identity)
+            XCTAssertEqual(host.sourceProxyContainer.transform.a, 1)
+            let views = try menuContentViews(in: host) + [host.sourceProxyContainer, host.finalMenuGlassSurfaceView]
+            let before = views.map(ViewRendering.init)
+            var completions = 0
+            host.animateCollapse(duration: 0.52, damping: 0.90) { completions += 1 }
+            for (view, expected) in zip(views, before) { assertRendering(view, equals: expected) }
+            host.advanceAnimation(to: 2)
+            for frame in 1...64 {
+                host.advanceAnimation(to: 2 + Double(frame) / 120)
+                XCTAssertEqual(host.sourceProxyContainer.transform.a, 1)
+                XCTAssertEqual(host.sourceProxyContainer.transform.d, 1)
+                if frame == 51 {
+                    let mask = try XCTUnwrap(host.sourceProxyContainer.superview?.layer.mask)
+                    let paths = (mask.sublayers ?? []).filter { !$0.isHidden }
+                        .compactMap { ($0 as? CAShapeLayer)?.path }
+                    let outline = paths.reduce(CGRect.null) { $0.union($1.boundingBoxOfPath) }
+                    XCTAssertGreaterThan(outline.width, 160)
+                    XCTAssertGreaterThan(outline.height, 43)
+                    XCTAssertLessThan(outline.height, 44)
+                }
+            }
+            XCTAssertEqual(completions, 1)
+            XCTAssertEqual(host.sourceProxyContainer.transform, .identity)
+            XCTAssertEqual(host.sourceProxyContainer.frame, CGRect(x: 18, y: 70, width: 160, height: 44))
+            host.advanceAnimation(to: 4)
+            XCTAssertEqual(completions, 1)
         }
     }
 

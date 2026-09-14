@@ -220,8 +220,8 @@ final class AetherMotionTests: XCTestCase {
         XCTAssertEqual(AetherMotion.bottomBarAccessoryResize.dampingRatio, 0.80, accuracy: 0.001)
         XCTAssertEqual(AetherMotion.bottomBarAccessoryResize.initialVelocity, 0.10, accuracy: 0.001)
 
-        XCTAssertEqual(AetherMotion.contextMenu.presentation.duration, 0.42, accuracy: 0.001)
-        XCTAssertEqual(AetherMotion.contextMenu.dismissal.duration, 0.42, accuracy: 0.001)
+        XCTAssertEqual(AetherMotion.contextMenu.presentation.duration, 0.52, accuracy: 0.001)
+        XCTAssertEqual(AetherMotion.contextMenu.dismissal.duration, 0.52, accuracy: 0.001)
         XCTAssertEqual(
             AetherMotion.contextMenu.dismissal.duration,
             AetherMotion.contextMenu.presentation.duration
@@ -283,8 +283,8 @@ final class AetherMotionTests: XCTestCase {
 
     func testContextMenuGlassmorphicUsesReferenceTimingProfile() {
         let timing = ContextMenuController.glassmorphicTiming
-        XCTAssertEqual(timing.openDuration, 0.42, accuracy: 0.001)
-        XCTAssertEqual(timing.closeDuration, 0.42, accuracy: 0.001)
+        XCTAssertEqual(timing.openDuration, 0.52, accuracy: 0.001)
+        XCTAssertEqual(timing.closeDuration, 0.52, accuracy: 0.001)
         XCTAssertEqual(timing.closeDuration, timing.openDuration, accuracy: 0.001)
     }
 
@@ -531,8 +531,8 @@ final class AetherMotionTests: XCTestCase {
         let heightPeakMilliseconds = heightPeak.rawProgress
             * CGFloat(ContextMenuController.glassmorphicTiming.openDuration)
             * 1_000.0
-        XCTAssertEqual(widthPeakMilliseconds, 233.0 * 0.42 / 0.32, accuracy: 10.0)
-        XCTAssertEqual(heightPeakMilliseconds, 222.0 * 0.42 / 0.32, accuracy: 14.0)
+        XCTAssertEqual(widthPeakMilliseconds, 233.0 * 0.52 / 0.32, accuracy: 10.0)
+        XCTAssertEqual(heightPeakMilliseconds, 222.0 * 0.52 / 0.32, accuracy: 14.0)
 
         let teardropProgress = CGFloat(117.0 / 320.0)
         let teardrop = try XCTUnwrap(samples.min {

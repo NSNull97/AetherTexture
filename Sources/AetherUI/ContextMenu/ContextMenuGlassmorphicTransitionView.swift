@@ -7,6 +7,18 @@ enum ContextMenuBloomDirection: Equatable {
     case closing
 }
 
+/// The shape reaches its destination before the glass finishes settling.
+/// Content follows the bounded clock; only the surface receives the recoil.
+func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool) -> (progress: CGFloat, rebound: CGFloat) {
+    let t = max(0, min(1, fraction))
+    let travel = min(1, t / (reduceMotion ? 1 : 0.80))
+    let progress = travel * travel * (3 - 2 * travel)
+    guard !reduceMotion, t > 0.70, t < 1 else { return (progress, 0) }
+    let settle = (t - 0.70) / 0.30
+    let wave = exp(-4 * settle) * sin(2 * .pi * settle) * pow(sin(.pi * settle), 2) / 0.19
+    return (progress, 0.020 * wave)
+}
+
 /// Independent clocks measured from the first changing dismissal frame.
 /// The source becomes readable inside the still-collapsing surface; it must
 /// not wait for the tiny source lobe to finish growing back into a button.
@@ -621,19 +633,25 @@ func contextMenuGlassmorphicGeometrySample(
         direction: .closing, rawProgress: rawProgress, reduceMotion: reduceMotion)
     let transform = contextMenuLiquidRecoilTransform(source: source, anchor: anchor,
         rawProgress: rawProgress, reduceMotion: reduceMotion)
-    let radiusScale = min(transform.a, transform.d)
-    func radii(_ r: ContextMenuBloomCornerRadii) -> ContextMenuBloomCornerRadii {
-        .init(topLeft: r.topLeft * radiusScale, topRight: r.topRight * radiusScale,
-              bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale)
+    return sample.applying(transform)
+}
+
+extension ContextMenuGlassmorphicGeometrySample {
+    fileprivate func applying(_ transform: CGAffineTransform) -> Self {
+        let radiusScale = min(transform.a, transform.d)
+        func radii(_ r: ContextMenuBloomCornerRadii) -> ContextMenuBloomCornerRadii {
+            .init(topLeft: r.topLeft * radiusScale, topRight: r.topRight * radiusScale,
+                  bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale)
+        }
+        return .init(headFrame: self.headFrame.applying(transform),
+            bodyFrame: self.bodyFrame.applying(transform),
+            headRotation: self.headRotation, bodyRotation: self.bodyRotation,
+            headRadius: self.headRadius * radiusScale, bodyCornerRadii: radii(self.bodyCornerRadii),
+            bridgeStart: self.bridgeStart.applying(transform), bridgeEnd: self.bridgeEnd.applying(transform),
+            bridgeRadius: self.bridgeRadius * radiusScale,
+            neckBulbCenter: self.neckBulbCenter.applying(transform), neckBulbRadius: self.neckBulbRadius * radiusScale,
+            headAlpha: self.headAlpha, bodyAlpha: self.bodyAlpha)
     }
-    return .init(headFrame: sample.headFrame.applying(transform),
-        bodyFrame: sample.bodyFrame.applying(transform),
-        headRotation: sample.headRotation, bodyRotation: sample.bodyRotation,
-        headRadius: sample.headRadius * radiusScale, bodyCornerRadii: radii(sample.bodyCornerRadii),
-        bridgeStart: sample.bridgeStart.applying(transform), bridgeEnd: sample.bridgeEnd.applying(transform),
-        bridgeRadius: sample.bridgeRadius * radiusScale,
-        neckBulbCenter: sample.neckBulbCenter.applying(transform), neckBulbRadius: sample.neckBulbRadius * radiusScale,
-        headAlpha: sample.headAlpha, bodyAlpha: sample.bodyAlpha)
 }
 
 /// A small, area-preserving damped recoil. The sine window gives both ends
@@ -1391,6 +1409,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     private var progress: CGFloat = 0
     private var animationDuration: TimeInterval = 0
     private var animationElapsed: TimeInterval = 0
+    private var animationSurfaceRebound: CGFloat = 0
     private var animationTimestamp: TimeInterval?
     private var progressDisplayLink: CADisplayLink?
     private var animationFrom: CGFloat = 0
@@ -1599,6 +1618,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         cancelAnimation()
         interruptedCollapse = nil
         animationDirection = direction == .opening ? 1 : -1
+        animationSurfaceRebound = 0
         self.progress = max(0, min(1, progress))
         updateGeometry(progress: self.progress)
     }
@@ -1652,6 +1672,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         interruptedCollapse = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        animationSurfaceRebound = 0
         progress = 1
         let metrics = currentMetrics(rawT: 1)
         apply(metrics: metrics, rawT: 1)
@@ -1671,6 +1692,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         cancelAnimation()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        animationSurfaceRebound = 0
         progress = 0
         let metrics = currentMetrics(rawT: 0)
         apply(metrics: metrics, rawT: 0)
@@ -1923,16 +1945,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         if !sourceSeedGlassSurfaceView.isHidden {
             body = body.union(sourceSeedGlassSurfaceView.convert(sourceSeedGlassSurfaceView.bounds, to: self))
         }
-        let scale = min(1.0, max(0.72, body.width / max(1.0, startFrame.width)))
         let headReturn = Self.smootherstep(0.40, 0.68, 1.0 - rawT)
-        let scaleX = Self.lerp(scale, 1.0, headReturn)
-        // A compact drop is narrower than the complete button. Fit its label
-        // inside the upper body, then let it expand/recenter with the source
-        // capsule instead of clipping the last letters against the mask.
-        let offsetX = scale < 1.0
+        // The liquid can carry the caption, but must never squeeze its
+        // glyphs. Keep the original raster at exactly its source size.
+        // Opacity, blur and the surface mask own materialization instead.
+        let offsetX = body.width < startFrame.width
             ? (body.midX - sourceProxyContainer.center.x) * (1.0 - headReturn)
             : 0.0
-        return CGAffineTransform(a: scaleX, b: 0, c: 0, d: 1, tx: offsetX, ty: 0)
+        return CGAffineTransform(translationX: offsetX, y: 0)
     }
 
     private func updateSourceContentMask(paths: [CGPath]) {
@@ -2305,7 +2325,31 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         contactShadowLayer.shadowOffset = CGSize(width: 0, height: Self.lerp(Self.lerp(2.0, 5.0, energy), 4.0, finalT))
     }
 
+    private func surfaceReboundTransform(rawT: CGFloat) -> CGAffineTransform {
+        guard !UIAccessibility.isReduceMotionEnabled, animationSurfaceRebound != 0 else { return .identity }
+        let unit = bloomAnchor.unitPoint
+        let t = max(0, min(1, rawT))
+        let pivot = CGPoint(
+            x: Self.lerp(startFrame.minX + startFrame.width * unit.x,
+                         targetMenuFrameInOverlay.minX + targetMenuFrameInOverlay.width * unit.x, t),
+            y: Self.lerp(startFrame.minY + startFrame.height * unit.y,
+                         targetMenuFrameInOverlay.minY + targetMenuFrameInOverlay.height * unit.y, t))
+        let y = 1 + animationDirection * animationSurfaceRebound
+        let x = 1 / y
+        return .init(a: x, b: 0, c: 0, d: y, tx: pivot.x * (1 - x), ty: pivot.y * (1 - y))
+    }
+
     private func currentMetrics(rawT: CGFloat) -> Metrics {
+        let base = baseMetrics(rawT: rawT)
+        let transform = surfaceReboundTransform(rawT: rawT)
+        let scale = min(transform.a, transform.d)
+        let r = base.cornerRadii
+        return Metrics(frame: base.frame.applying(transform), cornerRadii: .init(
+            topLeft: r.topLeft * scale, topRight: r.topRight * scale,
+            bottomLeft: r.bottomLeft * scale, bottomRight: r.bottomRight * scale))
+    }
+
+    private func baseMetrics(rawT: CGFloat) -> Metrics {
         if animationDirection < 0, let interruptedCollapse {
             return interruptedCollapseMetrics(rawT: rawT, state: interruptedCollapse)
         }
@@ -2328,7 +2372,11 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale))
     }
 
-    private func currentGlassmorphicSample(
+    private func currentGlassmorphicSample(metrics: Metrics, rawT: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
+        baseGlassmorphicSample(metrics: metrics, rawT: rawT).applying(surfaceReboundTransform(rawT: rawT))
+    }
+
+    private func baseGlassmorphicSample(
         metrics: Metrics,
         rawT: CGFloat
     ) -> ContextMenuGlassmorphicGeometrySample {
@@ -2515,7 +2563,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let sampledGlassSample = currentGlassmorphicSample(metrics: sampledMetrics, rawT: progress)
         animationFrom = progress
         animationTo = target
-        let isInterruptedCollapse = target < progress && progress < 0.999
+        let isInterruptedCollapse = target < progress && (progress < 0.999 || animationSurfaceRebound != 0)
+        animationSurfaceRebound = 0
         animationDirection = target >= animationFrom ? 1 : -1
         interruptedCollapse = isInterruptedCollapse
             ? InterruptedCollapse(
@@ -2594,7 +2643,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         // Normal 60/120 Hz callbacks retain their actual frame intervals.
         animationElapsed += min(max(0, timestamp - previous), 1.0 / 30.0)
         let fraction = min(1, animationElapsed / animationDuration)
-        progress = animationFrom + (animationTo - animationFrom) * fraction
+        let motion = contextMenuLiquidAnimationSample(fraction: fraction,
+            reduceMotion: UIAccessibility.isReduceMotionEnabled)
+        progress = animationFrom + (animationTo - animationFrom) * motion.progress
+        animationSurfaceRebound = motion.rebound * abs(animationTo - animationFrom)
         updateGeometry(progress: progress)
         if fraction >= 1 {
             stopProgressDisplayLink()
