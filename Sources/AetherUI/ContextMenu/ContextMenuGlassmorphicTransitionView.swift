@@ -660,6 +660,7 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
     let neckBulbRadius: CGFloat
     let headAlpha: CGFloat
     let bodyAlpha: CGFloat
+    var bridgeEllipticity: CGFloat = 0
 
     static func interpolated(
         from: ContextMenuGlassmorphicGeometrySample,
@@ -708,7 +709,8 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
             neckBulbCenter: point(from.neckBulbCenter, to.neckBulbCenter),
             neckBulbRadius: scalar(from.neckBulbRadius, to.neckBulbRadius),
             headAlpha: scalar(from.headAlpha, to.headAlpha),
-            bodyAlpha: scalar(from.bodyAlpha, to.bodyAlpha)
+            bodyAlpha: scalar(from.bodyAlpha, to.bodyAlpha),
+            bridgeEllipticity: scalar(from.bridgeEllipticity, to.bridgeEllipticity)
         )
     }
 }
@@ -738,20 +740,26 @@ func contextMenuGlassmorphicGeometrySample(
         let dy = sourceCenter.y - center.y
         let distance = hypot(dx, dy)
         let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.26)
-            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.40, end: 0.64))
+            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.32, end: 0.52))
         let side = min(body.width, body.height)
         let reach = min(distance, side * 0.30 + source.height * 0.60) * neck
         let fraction = distance > 0.001 ? reach / distance : 0
         let tip = CGPoint(x: center.x + dx * fraction, y: center.y + dy * fraction)
-        let join = CGPoint(x: center.x + dx * fraction * 0.65, y: center.y + dy * fraction * 0.65)
         let rawRadius = min(source.height * 0.28, side * 0.26) * neck
         let radius = rawRadius > 1.25 ? rawRadius : 0
+        let rootRadius = radius * 1.75
+        // Keep the entire broad root inside the body's inscribed circle.
+        // A root placed at a fixed fraction of the neck could poke through
+        // a rounded shoulder and produce a second bump as the lens widened.
+        let rootReach = min(reach * 0.65, max(0, side * 0.5 - rootRadius))
+        let rootFraction = distance > 0.001 ? rootReach / distance : 0
+        let join = CGPoint(x: center.x + dx * rootFraction, y: center.y + dy * rootFraction)
         return .init(headFrame: geometry.frame, bodyFrame: body,
             headRotation: 0, bodyRotation: 0,
             headRadius: sourceRadius, bodyCornerRadii: geometry.cornerRadii,
             bridgeStart: tip, bridgeEnd: join, bridgeRadius: radius,
-            neckBulbCenter: center, neckBulbRadius: radius * 1.75,
-            headAlpha: 0, bodyAlpha: 1)
+            neckBulbCenter: center, neckBulbRadius: rootRadius,
+            headAlpha: 0, bodyAlpha: 1, bridgeEllipticity: 1)
     }
     let outer = contextMenuBloomGeometrySample(
         source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
@@ -777,7 +785,8 @@ extension ContextMenuGlassmorphicGeometrySample {
             bridgeStart: self.bridgeStart.applying(transform), bridgeEnd: self.bridgeEnd.applying(transform),
             bridgeRadius: self.bridgeRadius * radiusScale,
             neckBulbCenter: self.neckBulbCenter.applying(transform), neckBulbRadius: self.neckBulbRadius * radiusScale,
-            headAlpha: self.headAlpha, bodyAlpha: self.bodyAlpha)
+            headAlpha: self.headAlpha, bodyAlpha: self.bodyAlpha,
+            bridgeEllipticity: self.bridgeEllipticity)
     }
 }
 
@@ -1359,15 +1368,18 @@ private func contextMenuGlassmorphicSilhouetteParts(
         ), transform: rotationTransform(for: sample.headFrame, angle: sample.headRotation))
     }
     if sample.bridgeRadius > 0.5 {
-        let sourceSegment = CGMutablePath()
-        sourceSegment.move(to: sample.bridgeStart)
-        sourceSegment.addLine(to: sample.bridgeEnd)
-        append(sourceSegment.copy(
-            strokingWithWidth: sample.bridgeRadius * 2.0,
-            lineCap: .round,
-            lineJoin: .round,
-            miterLimit: 0.0
-        ))
+        let dx = sample.bridgeEnd.x - sample.bridgeStart.x
+        let dy = sample.bridgeEnd.y - sample.bridgeStart.y
+        let diameter = sample.bridgeRadius * 2
+        let fullWidth = hypot(dx, dy) + diameter
+        let localWidth = fullWidth + (diameter - fullWidth) * sample.bridgeEllipticity
+        let localBounds = CGRect(x: -localWidth / 2, y: -diameter / 2, width: localWidth, height: diameter)
+        let transform = CGAffineTransform(
+            translationX: (sample.bridgeStart.x + sample.bridgeEnd.x) / 2,
+            y: (sample.bridgeStart.y + sample.bridgeEnd.y) / 2
+        ).rotated(by: atan2(dy, dx)).scaledBy(x: fullWidth / localWidth, y: 1)
+        append(CGPath(roundedRect: localBounds, cornerWidth: sample.bridgeRadius,
+                      cornerHeight: sample.bridgeRadius, transform: nil), transform: transform)
         if sample.neckBulbRadius > 0.5 {
             let continuation = CGMutablePath()
             continuation.move(to: sample.bridgeEnd)
@@ -1998,25 +2010,31 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             _ view: MenuGlassSurfaceView,
             from start: CGPoint,
             to end: CGPoint,
-            radius: CGFloat
+            radius: CGFloat,
+            ellipticity: CGFloat = 0
         ) {
             let dx = end.x - start.x
             let dy = end.y - start.y
             let distance = hypot(dx, dy)
             let diameter = radius * 2.0
+            let fullWidth = max(diameter, distance + diameter)
+            let localWidth = fullWidth + (diameter - fullWidth) * ellipticity
             view.isHidden = false
             view.alpha = 1.0
             view.bounds = CGRect(
                 x: 0.0,
                 y: 0.0,
-                width: max(diameter, distance + diameter),
+                width: localWidth,
                 height: diameter
             )
             view.center = CGPoint(
                 x: (start.x + end.x) * 0.5,
                 y: (start.y + end.y) * 0.5
             )
+            // Stretch a circular surface into an ellipse during opening.
+            // Unlike a capsule, its sides widen continuously toward the belly.
             view.transform = CGAffineTransform(rotationAngle: atan2(dy, dx))
+                .scaledBy(x: fullWidth / localWidth, y: 1)
             view.setSurfaceCornerRadius(radius)
             view.updateMaterialThickness(materialProgress(rawT))
         }
@@ -2026,7 +2044,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 bridgeGlassSurfaceView,
                 from: sample.bridgeStart,
                 to: sample.bridgeEnd,
-                radius: sample.bridgeRadius
+                radius: sample.bridgeRadius,
+                ellipticity: sample.bridgeEllipticity
             )
             configureSegment(
                 bridgeContinuationGlassSurfaceView,

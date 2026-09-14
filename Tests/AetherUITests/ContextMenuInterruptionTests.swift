@@ -82,6 +82,11 @@ final class ContextMenuInterruptionTests: XCTestCase {
                                 let reach = hypot(opening.bridgeStart.x - opening.bodyFrame.midX,
                                                   opening.bridgeStart.y - opening.bodyFrame.midY)
                                 XCTAssertLessThanOrEqual(reach, min(opening.bodyFrame.width, opening.bodyFrame.height) * 0.30 + 44 * 0.60 + 0.0001)
+                                let rootReach = hypot(opening.bridgeEnd.x - opening.bodyFrame.midX,
+                                                      opening.bridgeEnd.y - opening.bodyFrame.midY)
+                                XCTAssertLessThanOrEqual(rootReach + opening.neckBulbRadius,
+                                    min(opening.bodyFrame.width, opening.bodyFrame.height) * 0.5 + 0.0001,
+                                    "The broad neck root must not protrude through the shoulder as a second bump")
                             }
                             XCTAssertEqual(opening.bodyAlpha, 1)
                             XCTAssertGreaterThan(opening.bodyFrame.width, 0)
