@@ -1,0 +1,2876 @@
+import XCTest
+import UIKit
+import AsyncDisplayKit
+@testable import AetherUI
+
+final class AetherListCoreTests: XCTestCase {
+    @MainActor
+    private func makeListNode(frame: CGRect, preloadPages: CGFloat = 0) -> AetherListNode {
+        let listNode = AetherListNode()
+        listNode.frame = frame
+        listNode.preloadPages = preloadPages
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+        return listNode
+    }
+
+    func testDeletionRemapIndices() {
+        let remap = AetherListFrameMetrics.deletionRemap(itemCount: 8, deletedIndices: [1, 4])
+        XCTAssertEqual(remap, [
+            2: 1,
+            3: 2,
+            5: 3,
+            6: 4,
+            7: 5
+        ])
+    }
+
+    func testInsertionRemapIndices() {
+        let remap = AetherListFrameMetrics.insertionRemap(survivingIndices: [0, 1, 2, 3], insertedIndices: [0, 2])
+        XCTAssertEqual(remap, [
+            0: 1,
+            1: 3,
+            2: 4,
+            3: 5
+        ])
+    }
+
+    func testVisibleRangeComputationIncludesPreload() {
+        let heights: [CGFloat] = [20, 40, 60, 80, 100]
+        let offsets = AetherListFrameMetrics.rebuildOffsets(heights: heights, offsetInsets: .zero).offsets
+        let range = AetherListFrameMetrics.visibleRange(
+            offsets: offsets,
+            heights: heights,
+            viewportTop: 55,
+            viewportHeight: 100,
+            preloadPages: 0.5
+        )
+        XCTAssertEqual(range, 0..<5)
+    }
+
+    func testEstimatedOffsetsFallback() {
+        let result = AetherListFrameMetrics.rebuildOffsets(
+            heights: [44, 60, 32],
+            offsetInsets: UIEdgeInsets(top: 10, left: 0, bottom: 7, right: 0)
+        )
+        XCTAssertEqual(result.offsets, [10, 54, 114])
+        XCTAssertEqual(result.totalHeight, 153)
+    }
+
+    func testScrollToBottomTargetCalculation() {
+        let offsets = AetherListFrameMetrics.rebuildOffsets(heights: [40, 60, 120], offsetInsets: .zero).offsets
+        let target = AetherListFrameMetrics.scrollOffset(
+            index: 2,
+            position: .bottom(offset: 12),
+            offsets: offsets,
+            heights: [40, 60, 120],
+            nodeInsets: .zero,
+            viewportHeight: 100,
+            insets: UIEdgeInsets(top: 8, left: 0, bottom: 20, right: 0),
+            currentOffset: 0,
+            customOverflow: nil
+        )
+        XCTAssertEqual(target, 152)
+    }
+
+    func testVisibleScrollTargetRespectsInsets() {
+        let offsets = AetherListFrameMetrics.rebuildOffsets(heights: [40, 40, 40], offsetInsets: .zero).offsets
+        let insets = UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0)
+
+        let targetForTopCoveredItem = AetherListFrameMetrics.scrollOffset(
+            index: 0,
+            position: .visible,
+            offsets: offsets,
+            heights: [40, 40, 40],
+            nodeInsets: .zero,
+            viewportHeight: 100,
+            insets: insets,
+            currentOffset: 0,
+            customOverflow: nil
+        )
+        XCTAssertEqual(targetForTopCoveredItem, -10)
+
+        let targetForBottomCoveredItem = AetherListFrameMetrics.scrollOffset(
+            index: 2,
+            position: .visible,
+            offsets: offsets,
+            heights: [40, 40, 40],
+            nodeInsets: .zero,
+            viewportHeight: 100,
+            insets: insets,
+            currentOffset: 0,
+            customOverflow: nil
+        )
+        XCTAssertEqual(targetForBottomCoveredItem, 40)
+    }
+
+    func testTransactionObjectStoresOperations() {
+        let item = TestItem(id: 1, height: 44)
+        let transaction = AetherListTransaction(
+            deleteIndices: [AetherListDeleteItem(index: 0)],
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: item)],
+            options: [.synchronous],
+            scrollToItem: AetherListScrollToItem(index: 0, position: .top(offset: 0), animated: false)
+        )
+        XCTAssertEqual(transaction.deleteIndices.count, 1)
+        XCTAssertEqual(transaction.insertIndicesAndItems.count, 1)
+        XCTAssertTrue(transaction.options.contains(.synchronous))
+        XCTAssertEqual(transaction.scrollToItem?.index, 0)
+    }
+
+    func testTransactionPlannerProducesRemaps() {
+        let plan = AetherListTransactionPlanner.plan(
+            itemCount: 5,
+            deleteIndices: [1],
+            insertIndices: [0, 2],
+            moveIndices: [(fromIndex: 3, toIndex: 1)],
+            updateIndices: [2]
+        )
+
+        XCTAssertEqual(plan.deletionRemap, [2: 1, 3: 2, 4: 3])
+        XCTAssertEqual(plan.insertionRemap, [0: 1, 2: 4, 3: 5, 4: 6])
+        XCTAssertTrue(plan.operations.contains(.delete(index: 1)))
+        XCTAssertTrue(plan.operations.contains(.insert(index: 0)))
+        XCTAssertTrue(plan.operations.contains(.move(fromIndex: 3, toIndex: 1)))
+        XCTAssertTrue(plan.operations.contains(.update(index: 2)))
+    }
+
+    func testNodeReplayPlanDisablesAnimationsForReduceMotion() {
+        let plan = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions, .animateAlpha, .crossfade],
+            hasForcedInsertionAnimation: true,
+            hasParticleDissolveRemoval: true,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: true
+        )
+
+        XCTAssertFalse(plan.animatesStructuralChanges)
+        XCTAssertFalse(plan.usesAlphaAnimations)
+        XCTAssertEqual(plan.updateAnimation, .none)
+        XCTAssertEqual(plan.survivingFrameAnimation, .none)
+        XCTAssertEqual(
+            plan.insertionAnimation(
+                isNewNode: true,
+                forceItemAnimation: true,
+                directionHint: .up,
+                invertOffsetDirection: true
+            ),
+            .none
+        )
+        XCTAssertNil(plan.deletionAnimation(for: .scale))
+    }
+
+    func testNodeReplayPlanStretchesSurvivorSlideForParticleDissolve() {
+        let regular = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions],
+            hasForcedInsertionAnimation: false,
+            hasParticleDissolveRemoval: false,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: false
+        )
+        let particle = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions],
+            hasForcedInsertionAnimation: false,
+            hasParticleDissolveRemoval: true,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: false
+        )
+
+        XCTAssertEqual(regular.survivingFrameAnimation, .animated(duration: 0.3, curve: .standard))
+        XCTAssertEqual(particle.survivingFrameAnimation, .animated(duration: 0.72, curve: .easeOut))
+    }
+
+    func testNodeReplayPlanResolvesInsertionAndDeletionAnimations() {
+        let alpha = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions, .animateAlpha],
+            hasForcedInsertionAnimation: false,
+            hasParticleDissolveRemoval: false,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: false
+        )
+        XCTAssertEqual(
+            alpha.insertionAnimation(
+                isNewNode: true,
+                forceItemAnimation: false,
+                directionHint: nil,
+                invertOffsetDirection: false
+            ),
+            .alphaFade(duration: 0.1)
+        )
+        XCTAssertEqual(alpha.deletionAnimation(for: .scale), .fade)
+        XCTAssertEqual(
+            alpha.deletionAnimation(for: .particleDissolve(tileSize: 2)),
+            .particleDissolve(tileSize: 2)
+        )
+
+        let item = AetherListNodeReplayPlan.make(
+            options: [.requestItemInsertionAnimations, .animateFullTransition],
+            hasForcedInsertionAnimation: false,
+            hasParticleDissolveRemoval: false,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: false
+        )
+        XCTAssertEqual(item.updateAnimation, .fullTransition(duration: 0.3))
+        XCTAssertEqual(
+            item.insertionAnimation(
+                isNewNode: true,
+                forceItemAnimation: true,
+                directionHint: .up,
+                invertOffsetDirection: true
+            ),
+            .item(duration: 0.3, directionHint: .up, invertOffsetDirection: true)
+        )
+    }
+
+    func testNodeMaterializationPlannerTakesPreviousNodeOnceAndEvictsDuplicateTarget() {
+        var planner = AetherListNodeMaterializationPlanner(
+            previousNodeByIndex: [3: "old"],
+            currentNodeByIndex: [1: "duplicate", 3: "old"]
+        )
+
+        let command = planner.takePreviousNode(previousIndex: 3, targetIndex: 1)
+        XCTAssertEqual(command, AetherListNodeMaterializationCommand(
+            nodeId: "old",
+            previousIndex: 3,
+            targetIndex: 1,
+            duplicateTargetNodeId: "duplicate"
+        ))
+        XCTAssertEqual(planner.currentNodeId(at: 1), "old")
+        XCTAssertNil(planner.currentNodeId(at: 3))
+        XCTAssertNil(planner.takePreviousNode(previousIndex: 3, targetIndex: 2))
+    }
+
+    func testNodeMaterializationPlannerDoesNotEvictWhenPreviousNodeAlreadyOwnsTarget() {
+        var planner = AetherListNodeMaterializationPlanner(
+            previousNodeByIndex: [1: "same"],
+            currentNodeByIndex: [1: "same"]
+        )
+
+        let command = planner.takePreviousNode(previousIndex: 1, targetIndex: 1)
+        XCTAssertEqual(command, AetherListNodeMaterializationCommand(
+            nodeId: "same",
+            previousIndex: 1,
+            targetIndex: 1,
+            duplicateTargetNodeId: nil
+        ))
+        XCTAssertEqual(planner.currentNodeId(at: 1), "same")
+        XCTAssertNil(planner.takePreviousNode(previousIndex: -1, targetIndex: 1))
+        XCTAssertNil(planner.takePreviousNode(previousIndex: 1, targetIndex: -1))
+    }
+
+    func testUpdateMaterializationCommandsCanRunAgainstNonUIKitExecutor() {
+        var planner = AetherListNodeMaterializationPlanner(
+            previousNodeByIndex: [3: "old"],
+            currentNodeByIndex: [1: "duplicate", 2: "current2"]
+        )
+        let descriptors = [
+            AetherListUpdateMaterializationDescriptor(
+                sourceIndex: 0,
+                index: 1,
+                previousIndex: 3,
+                itemId: "u1",
+                estimatedHeight: 51
+            ),
+            AetherListUpdateMaterializationDescriptor(
+                sourceIndex: 1,
+                index: 2,
+                previousIndex: 99,
+                itemId: "u2",
+                estimatedHeight: 62
+            ),
+            AetherListUpdateMaterializationDescriptor(
+                sourceIndex: 2,
+                index: 4,
+                previousIndex: 0,
+                itemId: "invalid",
+                estimatedHeight: 70
+            ),
+            AetherListUpdateMaterializationDescriptor(
+                sourceIndex: 3,
+                index: 0,
+                previousIndex: 99,
+                itemId: "u0",
+                estimatedHeight: 40
+            )
+        ]
+
+        let commands = AetherListUpdateMaterializationCommandPlanner.commands(
+            descriptors: descriptors,
+            itemCount: 4,
+            materializationPlanner: &planner
+        )
+        let executor = RecordingUpdateMaterializationExecutor<String, String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .materialize(
+                index: 1,
+                sourceIndex: 0,
+                itemId: "u1",
+                nodeSource: .previous(AetherListNodeMaterializationCommand(
+                    nodeId: "old",
+                    previousIndex: 3,
+                    targetIndex: 1,
+                    duplicateTargetNodeId: "duplicate"
+                ))
+            ),
+            .materialize(
+                index: 2,
+                sourceIndex: 1,
+                itemId: "u2",
+                nodeSource: .current("current2")
+            ),
+            .setEstimatedHeight(
+                index: 0,
+                sourceIndex: 3,
+                itemId: "u0",
+                height: 40
+            )
+        ])
+        XCTAssertEqual(planner.currentNodeId(at: 1), "old")
+        XCTAssertEqual(planner.currentNodeId(at: 2), "current2")
+    }
+
+    func testVisibleNodeMaterializationCommandsCanRunAgainstNonUIKitExecutor() {
+        var planner = AetherListNodeMaterializationPlanner(
+            previousNodeByIndex: [4: "old4"],
+            currentNodeByIndex: [0: "current0", 2: "current2"]
+        )
+
+        let commands = AetherListVisibleNodeMaterializationCommandPlanner.commands(
+            visibleRange: 0..<4,
+            insertPreviousIndexByTargetIndex: [1: 4, 2: 8],
+            materializationPlanner: &planner
+        )
+        let executor = RecordingVisibleNodeMaterializationExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .mount(
+                index: 1,
+                source: .previous(AetherListNodeMaterializationCommand(
+                    nodeId: "old4",
+                    previousIndex: 4,
+                    targetIndex: 1,
+                    duplicateTargetNodeId: nil
+                ))
+            ),
+            .mount(index: 3, source: .reusableOrCreated)
+        ])
+        XCTAssertEqual(planner.currentNodeId(at: 0), "current0")
+        XCTAssertEqual(planner.currentNodeId(at: 1), "old4")
+        XCTAssertEqual(planner.currentNodeId(at: 2), "current2")
+    }
+
+    func testStickyHeaderCommandsCanRunAgainstNonUIKitExecutor() {
+        let descriptors = [
+            AetherListStickyHeaderDescriptor(
+                index: 0,
+                affinity: .top,
+                naturalY: 0,
+                height: 20,
+                nodeId: "top0"
+            ),
+            AetherListStickyHeaderDescriptor(
+                index: 2,
+                affinity: .top,
+                naturalY: 90,
+                height: 20,
+                nodeId: "top2"
+            ),
+            AetherListStickyHeaderDescriptor(
+                index: 3,
+                affinity: .bottom,
+                naturalY: 160,
+                height: 30,
+                nodeId: nil
+            )
+        ]
+
+        let commands = AetherListStickyHeaderCommandPlanner.commands(
+            descriptors: descriptors,
+            viewportTop: 75,
+            viewportBottom: 100,
+            boundsWidth: 320,
+            displayScale: 1
+        )
+        let executor = RecordingStickyHeaderExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .ensureNode(index: 3),
+            .applyLayout(
+                nodeId: "top0",
+                index: 0,
+                frame: CGRect(x: 0, y: 70, width: 320, height: 20),
+                state: AetherListStickyHeaderState(
+                    affinity: .top,
+                    isPinned: false,
+                    isFloating: true,
+                    isFlashing: true
+                ),
+                zPosition: 1000,
+                bringToFront: true
+            ),
+            .applyLayout(
+                nodeId: "top2",
+                index: 2,
+                frame: CGRect(x: 0, y: 90, width: 320, height: 20),
+                state: .none,
+                zPosition: 0,
+                bringToFront: false
+            )
+        ])
+        XCTAssertEqual(
+            AetherListStickyHeaderCommandPlanner.pinnedIndices(
+                descriptors: descriptors,
+                viewportTop: 75,
+                viewportBottom: 100
+            ),
+            [0, 3]
+        )
+    }
+
+    func testBottomStickyHeaderCommandPinsToViewportBottom() {
+        let descriptors = [
+            AetherListStickyHeaderDescriptor(
+                index: 1,
+                affinity: .bottom,
+                naturalY: 300,
+                height: 40,
+                nodeId: "bottom"
+            )
+        ]
+        let commands = AetherListStickyHeaderCommandPlanner.commands(
+            descriptors: descriptors,
+            viewportTop: 0,
+            viewportBottom: 100,
+            boundsWidth: 320,
+            displayScale: 1
+        )
+
+        XCTAssertEqual(commands, [
+            .applyLayout(
+                nodeId: "bottom",
+                index: 1,
+                frame: CGRect(x: 0, y: 60, width: 320, height: 40),
+                state: AetherListStickyHeaderState(
+                    affinity: .bottom,
+                    isPinned: true,
+                    isFloating: true,
+                    isFlashing: true
+                ),
+                zPosition: 1000,
+                bringToFront: true
+            )
+        ])
+    }
+
+    func testVirtualizationCommandsCanRunAgainstNonUIKitExecutor() {
+        let loadedNodes = [
+            AetherListVirtualizationLoadedNode(nodeId: "old0", index: 0, isProtected: false),
+            AetherListVirtualizationLoadedNode(nodeId: "drag1", index: 1, isProtected: true),
+            AetherListVirtualizationLoadedNode(nodeId: "visible2", index: 2, isProtected: false),
+            AetherListVirtualizationLoadedNode(nodeId: "pinned6", index: 6, isProtected: false),
+            AetherListVirtualizationLoadedNode(nodeId: "unindexed", index: nil, isProtected: false)
+        ]
+        let commands = AetherListVirtualizationCommandPlanner.commands(
+            visibleRange: 2..<5,
+            pinnedIndices: [6],
+            loadedNodes: loadedNodes,
+            itemOffsets: [0, 10, 20, 30, 40, 50, 60],
+            itemHeights: [10, 10, 10, 10, 10, 10, 10],
+            boundsWidth: 320,
+            displayScale: 1
+        )
+        let executor = RecordingVirtualizationExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .recycle(nodeId: "old0", index: 0),
+            .mount(index: 3),
+            .mount(index: 4),
+            .setFrame(
+                nodeId: "drag1",
+                index: 1,
+                frame: CGRect(x: 0, y: 10, width: 320, height: 10)
+            ),
+            .setFrame(
+                nodeId: "visible2",
+                index: 2,
+                frame: CGRect(x: 0, y: 20, width: 320, height: 10)
+            ),
+            .setFrame(
+                nodeId: "pinned6",
+                index: 6,
+                frame: CGRect(x: 0, y: 60, width: 320, height: 10)
+            )
+        ])
+    }
+
+    func testAsyncLayoutCommandsCanRunAgainstNonUIKitExecutor() {
+        let descriptors = [
+            AetherListAsyncLayoutItemDescriptor(
+                index: 0,
+                itemId: "cached0",
+                reuseIdentifier: "text",
+                hasPreparedLayout: true,
+                hasPendingLayoutTask: false,
+                isKnownSynchronous: false
+            ),
+            AetherListAsyncLayoutItemDescriptor(
+                index: 1,
+                itemId: "stalePending1",
+                reuseIdentifier: "image",
+                hasPreparedLayout: false,
+                hasPendingLayoutTask: true,
+                isKnownSynchronous: false
+            ),
+            AetherListAsyncLayoutItemDescriptor(
+                index: 2,
+                itemId: "ready2",
+                reuseIdentifier: "text",
+                hasPreparedLayout: false,
+                hasPendingLayoutTask: false,
+                isKnownSynchronous: false
+            ),
+            AetherListAsyncLayoutItemDescriptor(
+                index: 3,
+                itemId: "pending3",
+                reuseIdentifier: "image",
+                hasPreparedLayout: false,
+                hasPendingLayoutTask: true,
+                isKnownSynchronous: false
+            ),
+            AetherListAsyncLayoutItemDescriptor(
+                index: 4,
+                itemId: "sync4",
+                reuseIdentifier: "sync-row",
+                hasPreparedLayout: false,
+                hasPendingLayoutTask: false,
+                isKnownSynchronous: true
+            ),
+            AetherListAsyncLayoutItemDescriptor(
+                index: 6,
+                itemId: "stalePending6",
+                reuseIdentifier: "image",
+                hasPreparedLayout: false,
+                hasPendingLayoutTask: true,
+                isKnownSynchronous: false
+            )
+        ]
+        let commands = AetherListAsyncLayoutCommandPlanner.commands(
+            prefetchRange: 2..<5,
+            itemDescriptors: descriptors
+        )
+        let executor = RecordingAsyncLayoutExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .cancel(itemId: "stalePending1"),
+            .cancel(itemId: "stalePending6"),
+            .prepare(index: 2, itemId: "ready2")
+        ])
+    }
+
+    func testVisibilityLifecycleCommandsCanRunAgainstNonUIKitExecutor() {
+        let descriptors = [
+            AetherListVisibilityNodeDescriptor(
+                nodeId: "old0",
+                index: 0,
+                frame: CGRect(x: 0, y: -80, width: 320, height: 40),
+                isAccessibilityVisible: true
+            ),
+            AetherListVisibilityNodeDescriptor(
+                nodeId: "hidden1",
+                index: 1,
+                frame: CGRect(x: 0, y: 0, width: 320, height: 20),
+                isAccessibilityVisible: false
+            ),
+            AetherListVisibilityNodeDescriptor(
+                nodeId: "visible2",
+                index: 2,
+                frame: CGRect(x: 0, y: 20, width: 320, height: 40),
+                isAccessibilityVisible: true
+            ),
+            AetherListVisibilityNodeDescriptor(
+                nodeId: "later4",
+                index: 4,
+                frame: CGRect(x: 0, y: 120, width: 320, height: 40),
+                isAccessibilityVisible: true
+            ),
+            AetherListVisibilityNodeDescriptor(
+                nodeId: "unindexed",
+                index: nil,
+                frame: CGRect(x: 0, y: 10, width: 320, height: 10),
+                isAccessibilityVisible: true
+            )
+        ]
+        let snapshot = AetherListVisibilityLifecycleCommandPlanner.snapshot(
+            nodeDescriptors: descriptors,
+            viewportTop: 0,
+            viewportHeight: 100
+        )
+        let commands = AetherListVisibilityLifecycleCommandPlanner.commands(
+            snapshot: snapshot,
+            notifyDisplayedRange: true
+        )
+        let executor = RecordingVisibilityLifecycleExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(snapshot.displayedRange.loadedRange, 0..<5)
+        XCTAssertEqual(snapshot.displayedRange.visibleRange, 1..<3)
+        XCTAssertEqual(snapshot.displayedRange.visibleItemRange, AetherListVisibleItemRange(
+            firstIndex: 1,
+            firstIndexFullyVisible: true,
+            lastIndex: 2
+        ))
+        XCTAssertEqual(snapshot.accessibilityNodeIds, ["old0", "visible2", "later4", "unindexed"])
+        XCTAssertEqual(executor.commands, [
+            .recordVisibleViews(count: 5),
+            .setAccessibilityOrder(nodeIds: ["old0", "visible2", "later4", "unindexed"]),
+            .notifyDisplayedRange(snapshot.displayedRange)
+        ])
+    }
+
+    func testContentMetricsIncludeVirtualInsets() {
+        let metrics = AetherListContentMetricsPlanner.metrics(
+            itemHeights: [10, 20, 30],
+            itemOffsetInsets: UIEdgeInsets(top: 6, left: 0, bottom: 7, right: 0),
+            virtualContentInsets: AetherListVirtualContentInsets(top: 100, bottom: 50)
+        )
+
+        XCTAssertEqual(metrics.effectiveOffsetInsets.top, 106)
+        XCTAssertEqual(metrics.effectiveOffsetInsets.bottom, 57)
+        XCTAssertEqual(metrics.itemOffsets, [106, 116, 136])
+        XCTAssertEqual(metrics.totalContentHeight, 223)
+        XCTAssertEqual(AetherListContentMetricsPlanner.topDelta(
+            from: UIEdgeInsets(top: 10, left: 0, bottom: 0, right: 0),
+            to: UIEdgeInsets(top: 35, left: 0, bottom: 0, right: 0)
+        ), 25)
+    }
+
+    func testEffectiveInsetsPlannerKeepsBottomAnchorWhenBottomInsetChanges() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 40,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 416),
+            isTrackingOrDragging: false,
+            bottomAnchorTolerance: 8
+        )
+
+        XCTAssertEqual(plan.contentInset.bottom, 60)
+        XCTAssertEqual(plan.scrollIndicatorInsets.bottom, 60)
+        XCTAssertEqual(plan.contentOffset, CGPoint(x: 2, y: 460))
+    }
+
+    func testEffectiveInsetsPlannerCompensatesTopInsetWhenNotDragging() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 35, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 0,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 100),
+            isTrackingOrDragging: false,
+            bottomAnchorTolerance: 8
+        )
+
+        XCTAssertEqual(plan.contentOffset, CGPoint(x: 2, y: 75))
+    }
+
+    func testEffectiveInsetsPlannerDoesNotMoveMiddleOffsetForBottomInsetOnlyChange() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 40,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 100),
+            isTrackingOrDragging: false,
+            bottomAnchorTolerance: 8
+        )
+
+        XCTAssertNil(plan.contentOffset)
+    }
+
+    func testEffectiveInsetsPlannerMovesMiddleOffsetForKeyboardDrivenBottomInsetChange() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 40,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 100),
+            isTrackingOrDragging: true,
+            bottomAnchorTolerance: 8,
+            alwaysCompensateBottomInsetChanges: true
+        )
+
+        XCTAssertEqual(plan.contentInset.bottom, 60)
+        XCTAssertEqual(plan.contentOffset, CGPoint(x: 2, y: 140))
+    }
+
+    func testEffectiveInsetsPlannerKeepsBottomAnchorWhileDragging() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 40,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 416),
+            isTrackingOrDragging: true,
+            bottomAnchorTolerance: 8
+        )
+
+        XCTAssertEqual(plan.contentInset.bottom, 60)
+        XCTAssertEqual(plan.contentOffset, CGPoint(x: 2, y: 460))
+    }
+
+    func testEffectiveInsetsPlannerPreservesOffsetForInteractiveKeyboardChange() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            keyboardBottomInset: 40,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: false,
+            totalContentHeight: 500,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            currentContentInset: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            currentContentOffset: CGPoint(x: 2, y: 416),
+            isTrackingOrDragging: true,
+            bottomAnchorTolerance: 8,
+            preserveContentOffset: true,
+            alwaysCompensateBottomInsetChanges: true
+        )
+
+        XCTAssertEqual(plan.contentInset.bottom, 60)
+        XCTAssertNil(plan.contentOffset)
+    }
+
+    func testEffectiveInsetsPlannerPadsShortStackFromBottomContent() {
+        let plan = AetherListEffectiveInsetsPlanner.plan(
+            baseInsets: .zero,
+            keyboardBottomInset: 20,
+            explicitScrollIndicatorInsets: nil,
+            stackFromBottom: true,
+            totalContentHeight: 40,
+            viewportHeight: 100,
+            contentSizeHeight: 40,
+            currentContentInset: .zero,
+            currentContentOffset: .zero,
+            isTrackingOrDragging: false,
+            bottomAnchorTolerance: 8
+        )
+
+        XCTAssertEqual(plan.contentInset.top, 40)
+        XCTAssertEqual(plan.contentInset.bottom, 20)
+        XCTAssertEqual(plan.contentOffset, CGPoint(x: 0, y: -40))
+    }
+
+    func testBoundaryTriggerPlannerUsesDistanceAndItemThresholds() {
+        let snapshot = AetherListBoundaryTriggerSnapshot(
+            itemCount: 100,
+            displayedRange: AetherListDisplayedItemRange(
+                loadedRange: 0..<20,
+                visibleRange: 4..<8
+            ),
+            visibleContentOffset: 120,
+            visibleBottomContentOffset: 900,
+            isUserInitiated: true
+        )
+        let triggers = AetherListBoundaryTriggerPlanner.triggers(
+            snapshot: snapshot,
+            configuration: AetherListBoundaryTriggerConfiguration(
+                topDistance: 100,
+                bottomDistance: 100,
+                topItemThreshold: 2,
+                bottomItemThreshold: 5,
+                triggersDuringProgrammaticScroll: false
+            )
+        )
+
+        XCTAssertEqual(triggers, [
+            AetherListBoundaryTrigger(edge: .top, reasons: [.itemThreshold])
+        ])
+    }
+
+    func testBoundaryTriggerPlannerHonorsProgrammaticScrollSetting() {
+        let snapshot = AetherListBoundaryTriggerSnapshot(
+            itemCount: 10,
+            displayedRange: AetherListDisplayedItemRange(
+                loadedRange: 0..<5,
+                visibleRange: 0..<2
+            ),
+            visibleContentOffset: 0,
+            visibleBottomContentOffset: 400,
+            isUserInitiated: false
+        )
+
+        XCTAssertEqual(AetherListBoundaryTriggerPlanner.triggers(
+            snapshot: snapshot,
+            configuration: AetherListBoundaryTriggerConfiguration(
+                topDistance: 20,
+                triggersDuringProgrammaticScroll: false
+            )
+        ), [])
+        XCTAssertEqual(AetherListBoundaryTriggerPlanner.triggers(
+            snapshot: snapshot,
+            configuration: AetherListBoundaryTriggerConfiguration(topDistance: 20)
+        ), [
+            AetherListBoundaryTrigger(edge: .top, reasons: [.distance])
+        ])
+    }
+
+    func testModelMutationCommandsCanRunAgainstNonUIKitExecutor() {
+        let firstInsert = AetherListModelMutationInsertDescriptor(
+            sourceIndex: 0,
+            requestedIndex: -5,
+            itemId: "x",
+            estimatedHeight: 5,
+            previousIndex: 3,
+            directionHint: .up,
+            forceAnimateInsertion: true
+        )
+        let secondInsert = AetherListModelMutationInsertDescriptor(
+            sourceIndex: 1,
+            requestedIndex: 2,
+            itemId: "y",
+            estimatedHeight: 6,
+            previousIndex: nil,
+            directionHint: .down,
+            forceAnimateInsertion: false
+        )
+        let plan = AetherListModelMutationCommandPlanner.plan(
+            itemIds: ["a", "b", "c", "d"],
+            itemHeights: [10, 20, 30, 40],
+            deleteItems: [
+                AetherListDeleteItem(index: 1, directionHint: .down, animation: .scale)
+            ],
+            moveItems: [
+                AetherListMoveItem(fromIndex: 2, toIndex: 0)
+            ],
+            insertDescriptors: [secondInsert, firstInsert]
+        )
+
+        let executor = RecordingModelMutationExecutor<String>()
+        plan.commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .delete(index: 1, itemId: "b", animation: .scale, hint: .down),
+            .move(fromIndex: 2, toIndex: 0),
+            .insert(index: 0, descriptor: firstInsert),
+            .insert(index: 2, descriptor: secondInsert)
+        ])
+        XCTAssertEqual(plan.itemIds, ["x", "d", "y", "a", "c"])
+        XCTAssertEqual(plan.itemHeights, [5, 40, 6, 10, 30])
+        XCTAssertEqual(plan.insertPreviousIndexByTargetIndex, [0: 3])
+        XCTAssertEqual(plan.insertDirectionHintByTargetIndex, [0: .up, 2: .down])
+        XCTAssertEqual(plan.forceAnimateInsertionIndices, [0])
+    }
+
+    func testModelMutationPlannerSkipsInvalidOperations() {
+        let plan = AetherListModelMutationCommandPlanner.plan(
+            itemIds: ["a", "b"],
+            itemHeights: [10, 20],
+            deleteItems: [AetherListDeleteItem(index: 4)],
+            moveItems: [AetherListMoveItem(fromIndex: -1, toIndex: 0)],
+            insertDescriptors: []
+        )
+
+        XCTAssertEqual(plan.commands, [])
+        XCTAssertEqual(plan.itemIds, ["a", "b"])
+        XCTAssertEqual(plan.itemHeights, [10, 20])
+    }
+
+    func testFrameReplayCommandsCanRunAgainstNonUIKitExecutor() {
+        let replayPlan = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions, .animateAlpha],
+            hasForcedInsertionAnimation: false,
+            hasParticleDissolveRemoval: false,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: false
+        )
+        let commands = AetherListFrameReplayCommandPlanner.commands(
+            nodeIdsInDisplayOrder: ["existing", "inserted"],
+            indexByNodeId: ["existing": 0, "inserted": 1],
+            targetFrameByNodeId: [
+                "existing": CGRect(x: 0, y: 10, width: 320, height: 44),
+                "inserted": CGRect(x: 0, y: 54, width: 320, height: 30)
+            ],
+            previousFrameByNodeId: [
+                "existing": CGRect(x: 0, y: 0, width: 320, height: 44)
+            ],
+            insertedNodeIds: ["inserted"],
+            removals: [
+                AetherListFrameReplayRemoval(nodeId: "removed", animation: .scale, hint: .down)
+            ],
+            replayPlan: replayPlan,
+            forceItemAnimationIndices: [],
+            insertionDirectionHintByIndex: [:],
+            requestItemInsertionAnimations: false,
+            invertOffsetDirection: false
+        )
+
+        let executor = RecordingFrameReplayExecutor<String>()
+        commands.forEach { executor.execute($0) }
+
+        XCTAssertEqual(executor.commands, [
+            .animateFrame(
+                nodeId: "existing",
+                from: CGRect(x: 0, y: 0, width: 320, height: 44),
+                to: CGRect(x: 0, y: 10, width: 320, height: 44),
+                duration: 0.3,
+                curve: .standard
+            ),
+            .insert(
+                nodeId: "inserted",
+                frame: CGRect(x: 0, y: 54, width: 320, height: 30),
+                animation: .alphaFade(duration: 0.1)
+            ),
+            .remove(nodeId: "removed", animation: .fade, hint: .down)
+        ])
+    }
+
+    func testFrameReplayCommandsUseImmediateRemovalWhenAnimationsAreDisabled() {
+        let replayPlan = AetherListNodeReplayPlan.make(
+            options: [.animateInsertions],
+            hasForcedInsertionAnimation: true,
+            hasParticleDissolveRemoval: false,
+            baseDuration: 0.3,
+            particleDissolveDuration: 0.72,
+            reduceMotionEnabled: true
+        )
+        let commands = AetherListFrameReplayCommandPlanner.commands(
+            nodeIdsInDisplayOrder: ["node"],
+            indexByNodeId: ["node": 0],
+            targetFrameByNodeId: ["node": CGRect(x: 0, y: 0, width: 320, height: 44)],
+            previousFrameByNodeId: ["node": CGRect(x: 0, y: 20, width: 320, height: 44)],
+            insertedNodeIds: [],
+            removals: [
+                AetherListFrameReplayRemoval(nodeId: "removed", animation: .fade, hint: nil)
+            ],
+            replayPlan: replayPlan,
+            forceItemAnimationIndices: [],
+            insertionDirectionHintByIndex: [:],
+            requestItemInsertionAnimations: false,
+            invertOffsetDirection: false
+        )
+
+        XCTAssertEqual(commands, [
+            .setFrame(nodeId: "node", frame: CGRect(x: 0, y: 0, width: 320, height: 44)),
+            .remove(nodeId: "removed", animation: nil, hint: nil)
+        ])
+    }
+
+    func testSizeAndInsetsCommandCanRunAgainstNonUIKitExecutor() throws {
+        let update = AetherListUpdateSizeAndInsets(
+            size: CGSize(width: 375, height: 667),
+            insets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+            headerInsets: UIEdgeInsets(top: 4, left: 0, bottom: 0, right: 0),
+            scrollIndicatorInsets: UIEdgeInsets(top: 2, left: 0, bottom: 8, right: 0),
+            itemOffsetInsets: UIEdgeInsets(top: 6, left: 0, bottom: 7, right: 0),
+            virtualContentInsets: AetherListVirtualContentInsets(top: 9, bottom: 11),
+            duration: 0.25,
+            curve: .easeInOut
+        )
+        let command = AetherListSizeAndInsetsCommandPlanner.command(
+            currentFrame: CGRect(x: 8, y: 12, width: 320, height: 480),
+            currentBoundsSize: CGSize(width: 320, height: 480),
+            safeAreaInsets: UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 8),
+            currentLayoutParams: AetherListItemLayoutParams(width: 320, availableHeight: 480),
+            options: [],
+            update: update
+        )
+
+        let executor = RecordingSizeAndInsetsExecutor()
+        executor.execute(try XCTUnwrap(command))
+
+        XCTAssertEqual(executor.commands, [
+            .update(AetherListSizeAndInsetsUpdateCommand(
+                targetFrame: CGRect(x: 8, y: 12, width: 375, height: 667),
+                updatedLayoutParams: AetherListItemLayoutParams(
+                    width: 375,
+                    leftInset: 12,
+                    rightInset: 8,
+                    availableHeight: 667
+                ),
+                headerInsets: UIEdgeInsets(top: 4, left: 0, bottom: 0, right: 0),
+                scrollIndicatorInsets: UIEdgeInsets(top: 2, left: 0, bottom: 8, right: 0),
+                itemOffsetInsets: UIEdgeInsets(top: 6, left: 0, bottom: 7, right: 0),
+                virtualContentInsets: AetherListVirtualContentInsets(top: 9, bottom: 11),
+                insets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+                transition: .animated(duration: 0.25, curve: .easeInOut),
+                prefersCustomTransition: false
+            ))
+        ])
+    }
+
+    func testSizeAndInsetsPlannerEmitsForceRelayoutCommand() {
+        let params = AetherListItemLayoutParams(width: 320, availableHeight: 480)
+        let command = AetherListSizeAndInsetsCommandPlanner.command(
+            currentFrame: CGRect(x: 0, y: 0, width: 320, height: 480),
+            currentBoundsSize: CGSize(width: 320, height: 480),
+            safeAreaInsets: .zero,
+            currentLayoutParams: params,
+            options: [.forceUpdate],
+            update: nil
+        )
+
+        XCTAssertEqual(command, .forceRelayout(params: params))
+    }
+
+    func testScrollAnchoringCommandCanRunAgainstNonUIKitExecutor() throws {
+        let state = AetherListIntermediateState(
+            stableIds: [0, 1, 2],
+            heights: [40, 50, 60]
+        )
+        let command = AetherListScrollAnchoringCommandPlanner.command(
+            itemCount: 3,
+            scrollToItem: AetherListScrollToItem(index: 1, position: .top(offset: 0), animated: true),
+            resolvedScrollToOffsetY: 40,
+            additionalScrollDistance: 12,
+            additionalDistanceTransition: .animated(duration: 0.2, curve: .linear),
+            stationaryAnchor: nil,
+            postIntermediateState: state,
+            currentContentOffset: CGPoint(x: 3, y: 5),
+            stackFromBottom: true,
+            wasNearBottom: true,
+            animate: false,
+            animateTopItemPosition: false
+        )
+
+        let executor = RecordingScrollAnchoringExecutor()
+        executor.execute(try XCTUnwrap(command))
+
+        XCTAssertEqual(executor.commands, [
+            .setContentOffset(CGPoint(x: 3, y: 52), animated: true)
+        ])
+    }
+
+    func testScrollAnchoringPlannerPreservesStationaryAnchor() {
+        let state = AetherListIntermediateState(
+            stableIds: [9, 1, 2],
+            heights: [30, 50, 60]
+        )
+        let command = AetherListScrollAnchoringCommandPlanner.command(
+            itemCount: 3,
+            scrollToItem: nil,
+            resolvedScrollToOffsetY: nil,
+            additionalScrollDistance: 0,
+            additionalDistanceTransition: .immediate,
+            stationaryAnchor: AetherListIntermediateAnchor(stableId: 1, index: 0, offset: 0),
+            postIntermediateState: state,
+            currentContentOffset: CGPoint(x: 2, y: 100),
+            stackFromBottom: true,
+            wasNearBottom: true,
+            animate: true,
+            animateTopItemPosition: true
+        )
+
+        XCTAssertEqual(command, .setContentOffset(CGPoint(x: 2, y: 130), animated: true))
+    }
+
+    func testScrollAnchoringPlannerKeepsBottomWhenStationaryAnchorIsLost() {
+        let state = AetherListIntermediateState(
+            stableIds: [0, 2],
+            heights: [40, 60]
+        )
+        let command = AetherListScrollAnchoringCommandPlanner.command(
+            itemCount: 2,
+            scrollToItem: nil,
+            resolvedScrollToOffsetY: nil,
+            additionalScrollDistance: 0,
+            additionalDistanceTransition: .immediate,
+            stationaryAnchor: AetherListIntermediateAnchor(stableId: 1, index: 1, offset: 40),
+            postIntermediateState: state,
+            currentContentOffset: .zero,
+            stackFromBottom: true,
+            wasNearBottom: true,
+            animate: false,
+            animateTopItemPosition: false
+        )
+
+        XCTAssertEqual(command, .applyEffectiveInsetsAndScrollToBottom(animated: false))
+    }
+
+    func testIntermediateStatePreservesStableAnchorAcrossInsertAbove() throws {
+        let state = AetherListIntermediateState(
+            stableIds: [0, 1, 2],
+            heights: [50, 50, 50]
+        )
+        let anchor = try XCTUnwrap(state.stationaryAnchor(in: (1, 1)))
+        let after = state.applying(
+            insertItems: [
+                AetherListIntermediateInsertItem(
+                    index: 0,
+                    item: AetherListIntermediateItem(stableId: 99, height: 30)
+                )
+            ]
+        )
+
+        XCTAssertEqual(anchor.stableId, 1)
+        XCTAssertEqual(after.index(of: 1), 2)
+        XCTAssertEqual(after.offsetDelta(preserving: anchor), 30)
+    }
+
+    func testIntermediatePlannerReturnsBeforeAndAfterState() throws {
+        let state = AetherListIntermediateState(
+            stableIds: [0, 1, 2],
+            heights: [20, 30, 40]
+        )
+        let plan = AetherListTransactionPlanner.plan(
+            state: state,
+            deleteIndices: [0],
+            insertItems: [
+                AetherListIntermediateInsertItem(
+                    index: 1,
+                    item: AetherListIntermediateItem(stableId: 3, height: 10)
+                )
+            ],
+            moveIndices: [(fromIndex: 1, toIndex: 0)],
+            updateItems: [
+                AetherListIntermediateUpdateItem(
+                    index: 1,
+                    previousIndex: 1,
+                    item: AetherListIntermediateItem(stableId: 4, height: 60)
+                )
+            ]
+        )
+
+        XCTAssertEqual(plan.beforeState, state)
+        XCTAssertEqual(plan.afterState?.items.map(\.stableId), [2, 4, 1])
+        XCTAssertEqual(plan.afterState?.itemOffsets, [0, 40, 100])
+    }
+
+    @MainActor
+    func testListNodeScrollerKeepsNativePanGestureAndHostedScrollView() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.layoutIfNeeded()
+
+        let scroller = listView.backingScrollViewForTesting
+        XCTAssertTrue(listView.view.subviews.contains(where: { $0 === scroller }))
+        XCTAssertTrue(scroller.gestureRecognizers?.contains(where: { $0 === scroller.panGestureRecognizer }) ?? false)
+        XCTAssertTrue(scroller.bounces)
+        XCTAssertTrue(scroller.alwaysBounceVertical)
+    }
+
+    func testOverscrollDistancesUseScrollableBounds() {
+        let none = AetherListFrameMetrics.overscrollDistances(
+            contentOffsetY: 0,
+            contentSizeHeight: 44,
+            viewportHeight: 100,
+            contentInset: .zero
+        )
+        XCTAssertEqual(none.top, 0)
+        XCTAssertEqual(none.bottom, 0)
+
+        let top = AetherListFrameMetrics.overscrollDistances(
+            contentOffsetY: -30,
+            contentSizeHeight: 44,
+            viewportHeight: 100,
+            contentInset: .zero
+        )
+        XCTAssertEqual(top.top, 30)
+        XCTAssertEqual(top.bottom, 0)
+    }
+
+    func testPagedScrollToTopOffsetUsesDoubleVisiblePageAndClampsToTop() {
+        let inset = UIEdgeInsets(top: 20, left: 0, bottom: 30, right: 0)
+
+        XCTAssertEqual(AetherListFrameMetrics.pagedScrollToTopOffset(
+            currentOffsetY: 420,
+            contentSizeHeight: 1_000,
+            viewportHeight: 200,
+            contentInset: inset
+        ), 120)
+
+        XCTAssertEqual(AetherListFrameMetrics.pagedScrollToTopOffset(
+            currentOffsetY: 420,
+            contentSizeHeight: 1_000,
+            viewportHeight: 200,
+            contentInset: inset,
+            distance: 75
+        ), 345)
+
+        XCTAssertEqual(AetherListFrameMetrics.pagedScrollToTopOffset(
+            currentOffsetY: 80,
+            contentSizeHeight: 1_000,
+            viewportHeight: 200,
+            contentInset: inset
+        ), -20)
+
+        XCTAssertNil(AetherListFrameMetrics.pagedScrollToTopOffset(
+            currentOffsetY: -20,
+            contentSizeHeight: 1_000,
+            viewportHeight: 200,
+            contentInset: inset
+        ))
+
+        XCTAssertNil(AetherListFrameMetrics.pagedScrollToTopOffset(
+            currentOffsetY: -20,
+            contentSizeHeight: 80,
+            viewportHeight: 200,
+            contentInset: inset
+        ))
+    }
+
+    func testCustomScrollIndicatorFrameHidesWhenNotScrollableAndCanFollowOverscroll() throws {
+        XCTAssertNil(AetherListFrameMetrics.verticalScrollIndicatorFrame(
+            boundsWidth: 320,
+            viewportHeight: 100,
+            contentSizeHeight: 44,
+            contentInset: .zero,
+            scrollIndicatorInsets: nil,
+            contentOffsetY: 0,
+            followsOverscroll: false
+        ))
+
+        let pinned = try XCTUnwrap(AetherListFrameMetrics.verticalScrollIndicatorFrame(
+            boundsWidth: 320,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            contentInset: UIEdgeInsets(top: 20, left: 0, bottom: 30, right: 0),
+            scrollIndicatorInsets: UIEdgeInsets(top: 10, left: 0, bottom: 15, right: 0),
+            contentOffsetY: -70,
+            followsOverscroll: false
+        ))
+        let following = try XCTUnwrap(AetherListFrameMetrics.verticalScrollIndicatorFrame(
+            boundsWidth: 320,
+            viewportHeight: 100,
+            contentSizeHeight: 500,
+            contentInset: UIEdgeInsets(top: 20, left: 0, bottom: 30, right: 0),
+            scrollIndicatorInsets: UIEdgeInsets(top: 10, left: 0, bottom: 15, right: 0),
+            contentOffsetY: -70,
+            followsOverscroll: true
+        ))
+
+        XCTAssertEqual(pinned.minY, 10, accuracy: 0.5)
+        XCTAssertLessThan(following.minY, pinned.minY)
+        XCTAssertEqual(pinned.height, following.height, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testShortContentDoesNotReportBottomOverscrollAtRest() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        var bottomOverscroll: CGFloat = -1
+        let bottomBackgroundNode = ASDisplayNode()
+        listView.bottomOverscrollChanged = { bottomOverscroll = $0 }
+        listView.bottomOverscrollBackgroundNode = bottomBackgroundNode
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: TestItem(id: 1, height: 44))],
+            options: [.synchronous]
+        )
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        XCTAssertEqual(bottomOverscroll, 0, accuracy: 0.5)
+        XCTAssertEqual(bottomBackgroundNode.frame.height, 0, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testShortContentWithInsetsDoesNotCreateFalseScrollRange() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.insets = UIEdgeInsets(top: 20, left: 0, bottom: 30, right: 0)
+        listView.layoutIfNeeded()
+
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: TestItem(id: 1, height: 44))],
+            options: [.synchronous]
+        )
+
+        let scroller = listView.backingScrollViewForTesting
+        XCTAssertEqual(scroller.contentSize.height, 50, accuracy: 0.5)
+        XCTAssertEqual(scroller.contentOffset.y, -20, accuracy: 0.5)
+        XCTAssertNil(AetherListFrameMetrics.verticalScrollIndicatorFrame(
+            boundsWidth: 320,
+            viewportHeight: 100,
+            contentSizeHeight: scroller.contentSize.height,
+            contentInset: scroller.contentInset,
+            scrollIndicatorInsets: nil,
+            contentOffsetY: scroller.contentOffset.y,
+            followsOverscroll: false
+        ))
+    }
+
+    @MainActor
+    func testVirtualContentInsetsPreserveVisibleOffset() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 50), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        listView.virtualContentInsets = AetherListVirtualContentInsets(top: 120, bottom: 30)
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentSize.height, 400, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 170, accuracy: 0.5)
+        XCTAssertEqual(listView.state.virtualContentInsets, AetherListVirtualContentInsets(top: 120, bottom: 30))
+        XCTAssertEqual(listView.state.totalContentHeight, 400, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testBottomInsetChangeKeepsVisibleBottomAnchored() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+
+        listView.updateInsets(
+            UIEdgeInsets(top: 0, left: 0, bottom: 80, right: 0),
+            transition: .immediate,
+            compensatesBottomInsetChanges: true
+        )
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 80, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 230, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testLayoutDrivenKeyboardInsetKeepsVisibleBottomAnchored() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+
+        listView.updateInsets(.zero, keyboardBottomInset: 80, transition: .immediate)
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 80, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 230, accuracy: 0.5)
+
+        listView.updateInsets(.zero, keyboardBottomInset: 0, transition: .immediate)
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 0, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testInteractiveKeyboardLayoutChangeKeepsVisibleBottomAnchored() {
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        let listView = makeListNode(frame: containerView.bounds)
+        containerView.addSubview(listView.view)
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+
+        let keyboardLayout = ContainerViewLayout(
+            size: containerView.bounds.size,
+            inputHeight: 80,
+            inputHeightIsInteractivellyChanging: true
+        )
+        listView.updateInsets(.zero, keyboardLayout: keyboardLayout, in: containerView, transition: .immediate)
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 80, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 230, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testAnimatedKeyboardLayoutChangeKeepsVisibleBottomAnchored() {
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        let listView = makeListNode(frame: containerView.bounds)
+        containerView.addSubview(listView.view)
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+
+        let keyboardLayout = ContainerViewLayout(size: containerView.bounds.size, inputHeight: 80)
+        listView.updateInsets(
+            .zero,
+            keyboardLayout: keyboardLayout,
+            in: containerView,
+            transition: .animated(duration: 0.25, curve: .easeInOut)
+        )
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 80, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 230, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testLayoutDrivenKeyboardInsetCanPreserveContentOffset() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+
+        listView.updateInsets(
+            .zero,
+            keyboardBottomInset: 80,
+            transition: .immediate,
+            compensatesBottomInsetChanges: true,
+            preserveContentOffset: true
+        )
+
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentInset.bottom, 80, accuracy: 0.5)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 150, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testScrollToTopInPagesMovesByDoubleVisiblePage() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 200))
+        listView.preloadPages = 0
+        listView.insets = UIEdgeInsets(top: 20, left: 0, bottom: 30, right: 0)
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<20).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 420), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        XCTAssertTrue(listView.scrollToTopInPages(animated: false))
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 120, accuracy: 0.5)
+
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 80), animated: false)
+        XCTAssertTrue(listView.scrollToTopInPages(animated: false))
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, -20, accuracy: 0.5)
+
+        XCTAssertFalse(listView.scrollToTopInPages(animated: false))
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, -20, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testBoundaryTriggerCallbackDeduplicatesUntilLeavingEdge() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        var contexts: [AetherListBoundaryTriggerContext] = []
+        listView.boundaryReached = { contexts.append($0) }
+        listView.boundaryTriggerConfiguration = AetherListBoundaryTriggerConfiguration(
+            topDistance: 40,
+            topItemThreshold: 0
+        )
+        let items: [AetherListItem] = (0..<8).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertEqual(contexts.map(\.edge), [.top])
+        XCTAssertEqual(contexts[0].reasons, [.distance, .itemThreshold])
+
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+        XCTAssertEqual(contexts.count, 1)
+
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 120), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+        XCTAssertEqual(contexts.count, 1)
+
+        listView.backingScrollViewForTesting.setContentOffset(.zero, animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+        XCTAssertEqual(contexts.map(\.edge), [.top, .top])
+    }
+
+    @MainActor
+    func testBoundaryTriggerCallbackCanRequireUserInitiatedScroll() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        var contexts: [AetherListBoundaryTriggerContext] = []
+        listView.boundaryReached = { contexts.append($0) }
+        listView.boundaryTriggerConfiguration = AetherListBoundaryTriggerConfiguration(
+            topDistance: 40,
+            triggersDuringProgrammaticScroll: false
+        )
+        let items: [AetherListItem] = (0..<4).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertTrue(contexts.isEmpty)
+    }
+
+    @MainActor
+    func testListGestureHitTestingRespectsNestedControlsAndExternalGate() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: ControlHitTestItem(id: 1))],
+            options: [.synchronous]
+        )
+
+        let node = try XCTUnwrap(listView.nodeForItem(at: 0))
+        node.layoutIfNeeded()
+
+        XCTAssertNil(listView.itemNodeForListGesture(at: CGPoint(x: 20, y: 20), gesture: .tap))
+        XCTAssertTrue(listView.itemNodeForListGesture(at: CGPoint(x: 120, y: 20), gesture: .tap) === node)
+
+        listView.allowsReorder = true
+        XCTAssertNil(listView.itemNodeForListGesture(at: CGPoint(x: 20, y: 20), gesture: .reorder))
+        XCTAssertTrue(listView.itemNodeForListGesture(at: CGPoint(x: 120, y: 20), gesture: .reorder) === node)
+
+        listView.itemGestureShouldBegin = { gesture, index, _, pointInNode in
+            return gesture == .tap && index == 0 && pointInNode.x > 160
+        }
+        XCTAssertNil(listView.itemNodeForListGesture(at: CGPoint(x: 120, y: 20), gesture: .tap))
+        XCTAssertTrue(listView.itemNodeForListGesture(at: CGPoint(x: 200, y: 20), gesture: .tap) === node)
+    }
+
+    @MainActor
+    func testSwipeActionsOpenAndCloseProgrammatically() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let action = AetherListSwipeAction(
+            key: "archive",
+            title: "Archive",
+            backgroundColor: .systemGray
+        )
+        let item = TestItem(id: 1, height: 44, swipeActions: AetherListSwipeActions(right: [action]))
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: item)],
+            options: [.synchronous]
+        )
+
+        let node = try XCTUnwrap(listView.nodeForItem(at: 0))
+        listView.setSwipeActionsOpened(.right, at: 0, animated: false)
+
+        XCTAssertEqual(listView.revealedSwipeItemIndex, 0)
+        XCTAssertLessThan(listView.swipeRevealOffset(at: 0), 0.0)
+        XCTAssertEqual(node.view.transform.tx, listView.swipeRevealOffset(at: 0), accuracy: 0.5)
+
+        listView.closeSwipeActions(animated: false)
+
+        XCTAssertNil(listView.revealedSwipeItemIndex)
+        XCTAssertEqual(listView.swipeRevealOffset(at: 0), 0.0, accuracy: 0.5)
+        XCTAssertEqual(node.view.transform.tx, 0.0, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testOpeningSwipeActionsClosesPreviouslyOpenRow() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let action = AetherListSwipeAction(
+            key: "delete",
+            title: "Delete",
+            backgroundColor: .systemRed
+        )
+        let items: [AetherListItem] = [
+            TestItem(id: 1, height: 44, swipeActions: AetherListSwipeActions(right: [action])),
+            TestItem(id: 2, height: 44, swipeActions: AetherListSwipeActions(right: [action]))
+        ]
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        let firstNode = try XCTUnwrap(listView.nodeForItem(at: 0))
+        let secondNode = try XCTUnwrap(listView.nodeForItem(at: 1))
+
+        listView.setSwipeActionsOpened(.right, at: 0, animated: false)
+        XCTAssertEqual(listView.revealedSwipeItemIndex, 0)
+
+        listView.setSwipeActionsOpened(.right, at: 1, animated: false)
+
+        XCTAssertEqual(listView.revealedSwipeItemIndex, 1)
+        XCTAssertEqual(firstNode.view.transform.tx, 0.0, accuracy: 0.5)
+        XCTAssertLessThan(secondNode.view.transform.tx, 0.0)
+        XCTAssertEqual(listView.swipeRevealOffset(at: 0), 0.0, accuracy: 0.5)
+        XCTAssertLessThan(listView.swipeRevealOffset(at: 1), 0.0)
+    }
+
+    @MainActor
+    func testRightSwipeActionsStayPinnedDuringOverswipe() throws {
+        let container = AetherListSwipeOptionContainer(
+            optionSelected: { _, _ in },
+            expandedStateChanged: {}
+        )
+        container.setActions(
+            AetherListSwipeActions(
+                right: [
+                    AetherListSwipeAction(key: "mute", title: "Mute", backgroundColor: .systemOrange),
+                    AetherListSwipeAction(key: "delete", title: "Delete", backgroundColor: .systemRed),
+                    AetherListSwipeAction(key: "archive", title: "Archive", backgroundColor: .systemGray)
+                ]
+            )
+        )
+        let size = CGSize(width: 320, height: 72)
+        container.frame = CGRect(origin: .zero, size: size)
+        container.updateLayout(size: size, leftInset: 0.0, rightInset: 0.0)
+        container.ensureOptionsView(for: .right)
+
+        let revealWidth = container.revealWidth(for: .right)
+        XCTAssertGreaterThan(revealWidth, 0.0)
+
+        container.updateRevealOffset(-revealWidth, transition: .immediate)
+        let optionsView = try XCTUnwrap(container.subviews.first)
+        let clippingView = try XCTUnwrap(optionsView.subviews.first)
+        let optionsContainerView = try XCTUnwrap(clippingView.subviews.first)
+        let primaryActionView = try XCTUnwrap(optionsContainerView.subviews.last)
+        let pinnedMaxX = primaryActionView.convert(primaryActionView.bounds, to: container).maxX
+        XCTAssertGreaterThan(pinnedMaxX, size.width - 12.0)
+        XCTAssertLessThan(pinnedMaxX, size.width)
+
+        container.updateRevealOffset(-(revealWidth + 160.0), transition: .immediate)
+        let overswipeMaxX = primaryActionView.convert(primaryActionView.bounds, to: container).maxX
+        XCTAssertGreaterThan(overswipeMaxX, size.width - 12.0)
+        XCTAssertLessThan(overswipeMaxX, size.width)
+        XCTAssertEqual(overswipeMaxX, pinnedMaxX, accuracy: 6.0)
+    }
+
+    func testSwipeOffsetRubberBandsLongOverswipe() {
+        let revealWidth: CGFloat = 190.0
+        let viewportWidth: CGFloat = 320.0
+        let bounded = aetherListBoundedSwipeOffset(
+            -2000.0,
+            revealWidth: revealWidth,
+            viewportWidth: viewportWidth
+        )
+
+        XCTAssertLessThan(abs(bounded), 310.0)
+        XCTAssertGreaterThan(abs(bounded), revealWidth)
+        XCTAssertEqual(
+            aetherListBoundedSwipeOffset(-120.0, revealWidth: revealWidth, viewportWidth: viewportWidth),
+            -120.0,
+            accuracy: 0.5
+        )
+    }
+
+    @MainActor
+    func testSwipeRevealBackgroundAppearsAndCleansUp() throws {
+        let node = AetherListItemNode(frame: CGRect(x: 0, y: 0, width: 320, height: 72))
+        node.backgroundColor = .systemBackground
+        let initialClipsToBounds = node.clipsToBounds
+
+        node.setSwipeRevealBackgroundActive(true, transition: .immediate)
+        XCTAssertTrue(node.backgroundColor?.isEqual(aetherListSwipeRevealBackgroundColor) ?? false)
+        XCTAssertEqual(node.layer.cornerRadius, 26.0, accuracy: 0.5)
+        XCTAssertTrue(node.clipsToBounds)
+        XCTAssertEqual(node.subnodes?.count, 1)
+        let backgroundNode = try XCTUnwrap(node.subnodes?.first)
+        XCTAssertEqual(backgroundNode.view.alpha, 1.0)
+        XCTAssertEqual(backgroundNode.layer.cornerRadius, 26.0, accuracy: 0.5)
+
+        node.backgroundColor = .systemBackground
+        node.setSwipeRevealBackgroundActive(true, transition: .immediate)
+        XCTAssertTrue(node.backgroundColor?.isEqual(aetherListSwipeRevealBackgroundColor) ?? false)
+
+        node.setSwipeRevealBackgroundActive(false, transition: .immediate)
+        XCTAssertTrue(node.backgroundColor?.isEqual(UIColor.systemBackground) ?? false)
+        XCTAssertEqual(node.layer.cornerRadius, 0.0, accuracy: 0.5)
+        XCTAssertEqual(node.clipsToBounds, initialClipsToBounds)
+        XCTAssertTrue(node.subnodes?.isEmpty ?? true)
+    }
+
+    @MainActor
+    func testAccessoryItemIsHostedAndUpdatedByNode() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        listView.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(
+                    index: 0,
+                    item: TestItem(id: 1, height: 44, accessoryItem: BadgeAccessoryItem(id: "badge", text: "A"))
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        let node = try XCTUnwrap(listView.nodeForItem(at: 0))
+        node.layoutIfNeeded()
+        let label = try XCTUnwrap(node.subnodes?.compactMap { $0 as? ASTextNode }.first)
+        XCTAssertEqual(label.attributedText?.string, "A")
+        XCTAssertEqual(label.frame.width, 24, accuracy: 0.5)
+        XCTAssertEqual(label.frame.maxX, node.bounds.maxX - 16, accuracy: 0.5)
+
+        listView.transaction(
+            updateIndicesAndItems: [
+                AetherListUpdateItem(
+                    index: 0,
+                    previousIndex: 0,
+                    item: TestItem(id: 1, height: 44, accessoryItem: BadgeAccessoryItem(id: "badge", text: "B"))
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        node.layoutIfNeeded()
+        XCTAssertTrue(node.subnodes?.contains(where: { $0 === label }) ?? false)
+        XCTAssertEqual(label.attributedText?.string, "B")
+    }
+
+    @MainActor
+    func testBottomAffinityHeaderPinsToBottomEdge() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = [
+            TestItem(id: 1, height: 300),
+            TestItem(id: 2, height: 40, headerAffinity: .bottom),
+            TestItem(id: 3, height: 100)
+        ]
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        let headerNode = try XCTUnwrap(listView.nodeForItem(at: 1))
+        XCTAssertEqual(headerNode.frame.minY, 60, accuracy: 0.5)
+        XCTAssertEqual(headerNode.frame.height, 40, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testPushedTopHeaderKeepsStickyStateAndHitTestPriority() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = [
+            TestItem(id: 1, height: 20, headerAffinity: .top),
+            TestItem(id: 2, height: 70),
+            TestItem(id: 3, height: 20, headerAffinity: .top),
+            TestItem(id: 4, height: 100)
+        ]
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 75), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        let headerNode = try XCTUnwrap(listView.nodeForItem(at: 0))
+        XCTAssertEqual(headerNode.frame.minY, 70, accuracy: 0.5)
+        XCTAssertFalse(headerNode.stickyHeaderState.isPinned)
+        XCTAssertTrue(headerNode.stickyHeaderState.isFloating)
+        XCTAssertTrue(headerNode.stickyHeaderState.isFlashing)
+        XCTAssertEqual(headerNode.stickyHeaderState.affinity, .top)
+        XCTAssertEqual(headerNode.layer.zPosition, 1000, accuracy: 0.5)
+
+        let hitNode = try XCTUnwrap(listView.itemNodeForListGesture(at: CGPoint(x: 10, y: 80), gesture: .tap))
+        XCTAssertTrue(hitNode === headerNode)
+    }
+
+    @MainActor
+    func testAsyncPreparedLayoutAppliesToVisibleNode() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.debugInfo = true
+        listView.layoutIfNeeded()
+
+        let item = AsyncPreparedItem(id: 10)
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: item)],
+            options: [.synchronous]
+        )
+
+        let expectation = expectation(description: "prepared layout applied")
+        DispatchQueue.main.async {
+            let node = listView.nodeForItem(at: 0)
+            XCTAssertEqual(node?.frame.height ?? 0, 80, accuracy: 0.5)
+            XCTAssertTrue(item.didApplyPreparedLayout)
+            XCTAssertGreaterThan(listView.debugInstrumentation.counters.preparedLayoutApplications, 0)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+    }
+
+    @MainActor
+    func testDebugInstrumentationTracksNodePerformanceCounters() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.debugInfo = true
+        listView.layoutIfNeeded()
+
+        let action = AetherListSwipeAction(
+            key: "archive",
+            title: "Archive",
+            backgroundColor: .systemGray
+        )
+        listView.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(
+                    index: 0,
+                    item: TestItem(
+                        id: 1,
+                        height: 44,
+                        accessoryItem: BadgeAccessoryItem(id: "badge", text: "A"),
+                        swipeActions: AetherListSwipeActions(right: [action])
+                    )
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        var counters = listView.debugInstrumentation.counters
+        XCTAssertGreaterThan(counters.transactionCount, 0)
+        XCTAssertGreaterThan(counters.createdViews, 0)
+        XCTAssertGreaterThan(counters.layoutApplications, 0)
+        XCTAssertGreaterThan(counters.totalNodeCreateDuration, 0)
+        XCTAssertGreaterThan(counters.totalLayoutApplicationDuration, 0)
+        XCTAssertGreaterThan(counters.lastTransactionDuration, 0)
+
+        listView.transaction(
+            updateIndicesAndItems: [
+                AetherListUpdateItem(
+                    index: 0,
+                    previousIndex: 0,
+                    item: TestItem(
+                        id: 1,
+                        height: 44,
+                        accessoryItem: BadgeAccessoryItem(id: "badge", text: "B"),
+                        swipeActions: AetherListSwipeActions(right: [action])
+                    )
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        counters = listView.debugInstrumentation.counters
+        XCTAssertGreaterThan(counters.updatedNodes, 0)
+        XCTAssertGreaterThan(counters.totalNodeUpdateDuration, 0)
+
+        listView.setSwipeActionsOpened(.right, at: 0, animated: false)
+
+        counters = listView.debugInstrumentation.counters
+        XCTAssertGreaterThan(counters.swipeRevealUpdates, 0)
+        XCTAssertGreaterThan(counters.totalSwipeRevealUpdateDuration, 0)
+    }
+
+    @MainActor
+    func testAetherListNodeOwnsTextureBackedListLogicAndCoreOperations() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.debugInfo = true
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        XCTAssertEqual(listNode.state.visibleSize, listNode.bounds.size)
+
+        let action = AetherListSwipeAction(
+            key: "archive",
+            title: "Archive",
+            backgroundColor: .systemGray
+        )
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(
+                    index: 0,
+                    item: TestItem(
+                        id: 1,
+                        height: 44,
+                        swipeActions: AetherListSwipeActions(right: [action])
+                    )
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        let node = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        XCTAssertEqual(listNode.itemCount, 1)
+        XCTAssertEqual(listNode.state.visibleViewCount, 1)
+        XCTAssertTrue(node.view.superview != nil)
+        XCTAssertGreaterThan(listNode.debugInstrumentation.counters.createdViews, 0)
+        XCTAssertEqual(node.frame, CGRect(x: 0, y: 0, width: 320, height: 44))
+
+        listNode.setSwipeActionsOpened(.right, at: 0, animated: false)
+        XCTAssertEqual(listNode.revealedSwipeItemIndex, 0)
+        XCTAssertLessThan(listNode.swipeRevealOffset(at: 0), 0.0)
+        XCTAssertGreaterThan(listNode.debugInstrumentation.counters.swipeRevealUpdates, 0)
+        XCTAssertTrue(node.supernode?.subnodes?.contains { !($0 is AetherListItemNode) } ?? false)
+
+        listNode.closeSwipeActions(animated: false)
+        XCTAssertNil(listNode.revealedSwipeItemIndex)
+        XCTAssertFalse(node.supernode?.subnodes?.contains { !($0 is AetherListItemNode) } ?? true)
+    }
+
+    @MainActor
+    func testAetherListNodeOpeningSwipeActionsClosesPreviouslyOpenRow() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let action = AetherListSwipeAction(
+            key: "delete",
+            title: "Delete",
+            backgroundColor: .systemRed
+        )
+        let items: [AetherListItem] = [
+            TestItem(id: 1, height: 44, swipeActions: AetherListSwipeActions(right: [action])),
+            TestItem(id: 2, height: 44, swipeActions: AetherListSwipeActions(right: [action]))
+        ]
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        let firstNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        let secondNode = try XCTUnwrap(listNode.nodeForItem(at: 1))
+
+        listNode.setSwipeActionsOpened(.right, at: 0, animated: false)
+        XCTAssertEqual(listNode.revealedSwipeItemIndex, 0)
+
+        listNode.setSwipeActionsOpened(.right, at: 1, animated: false)
+
+        XCTAssertEqual(listNode.revealedSwipeItemIndex, 1)
+        XCTAssertEqual(firstNode.view.transform.tx, 0.0, accuracy: 0.5)
+        XCTAssertLessThan(secondNode.view.transform.tx, 0.0)
+        XCTAssertEqual(listNode.swipeRevealOffset(at: 0), 0.0, accuracy: 0.5)
+        XCTAssertLessThan(listNode.swipeRevealOffset(at: 1), 0.0)
+    }
+
+    @MainActor
+    func testAetherListNodeDispatchesSwipeActionWithoutLegacyListView() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let action = AetherListSwipeAction(
+            key: "archive",
+            title: "Archive",
+            backgroundColor: .systemGray
+        )
+        var selected: [(Int, AnyHashable, Bool)] = []
+        listNode.swipeActionSelected = { index, action, isFullSwipe in
+            selected.append((index, action.key, isFullSwipe))
+        }
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(
+                    index: 0,
+                    item: TestItem(id: 1, height: 44, swipeActions: AetherListSwipeActions(right: [action]))
+                )
+            ],
+            options: [.synchronous]
+        )
+
+        listNode.setSwipeActionsOpened(.right, at: 0, animated: false)
+        listNode.selectSwipeAction("archive", at: 0, isFullSwipe: true)
+
+        XCTAssertEqual(selected.count, 1)
+        XCTAssertEqual(selected[0].0, 0)
+        XCTAssertEqual(selected[0].1, AnyHashable("archive"))
+        XCTAssertTrue(selected[0].2)
+        XCTAssertNil(listNode.revealedSwipeItemIndex)
+    }
+
+    @MainActor
+    func testAetherListNodeReplaysAnimatedDeletionBeforeRecyclingTextureNode() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(index: 0, item: TestItem(id: 1, height: 44)),
+                AetherListInsertItem(index: 1, item: TestItem(id: 2, height: 44))
+            ],
+            options: [.synchronous]
+        )
+
+        let removedNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        listNode.transaction(
+            deleteIndices: [
+                AetherListDeleteItem(index: 0, animation: .scale)
+            ],
+            options: [.animateInsertions]
+        )
+
+        var isVisibleNode = false
+        listNode.forEachVisibleItemNode { node in
+            if node === removedNode {
+                isVisibleNode = true
+            }
+        }
+
+        XCTAssertEqual(listNode.itemCount, 1)
+        XCTAssertFalse(isVisibleNode)
+        XCTAssertNotNil(removedNode.supernode)
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.45))
+
+        XCTAssertNil(removedNode.supernode)
+    }
+
+    @MainActor
+    func testAetherListNodeReordersTextureRowsWithoutLegacyListView() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 180)
+        listNode.preloadPages = 0
+        listNode.allowsReorder = true
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var moved: [(Int, Int)] = []
+        var completed: [(Int, Int, Bool)] = []
+        listNode.didMoveItem = { moved.append(($0, $1)) }
+        listNode.reorderCompleted = { completed.append(($0, $1, $2)) }
+        let items: [AetherListItem] = (0..<4).map { TestItem(id: $0, height: 40) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        let firstNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+
+        XCTAssertTrue(listNode.performReorderMoveForTesting(from: 0, to: 2))
+
+        XCTAssertTrue(listNode.nodeForItem(at: 2) === firstNode)
+        XCTAssertEqual(firstNode.item?.stableId, AnyHashable(0))
+        XCTAssertEqual(moved.count, 1)
+        XCTAssertEqual(moved[0].0, 0)
+        XCTAssertEqual(moved[0].1, 2)
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertTrue(completed[0].2)
+        XCTAssertEqual(listNode.displayedItemRange.loadedRange, 0..<4)
+    }
+
+    @MainActor
+    func testAetherListNodeVirtualizesAndReusesTextureRows() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.debugInfo = true
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<100).map { TestItem(id: $0, height: 50) }
+        let inserts = items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) }
+        listNode.transaction(insertIndicesAndItems: inserts, options: [.synchronous])
+
+        XCTAssertLessThanOrEqual(listNode.state.visibleViewCount, 4)
+        XCTAssertNotEqual(listNode.state.visibleViewCount, 100)
+        XCTAssertNotNil(listNode.nodeForItem(at: 0))
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(500, animated: false))
+
+        XCTAssertNil(listNode.nodeForItem(at: 0))
+        XCTAssertNotNil(listNode.nodeForItem(at: 10))
+        XCTAssertLessThanOrEqual(listNode.state.visibleViewCount, 5)
+        XCTAssertGreaterThan(listNode.debugInstrumentation.counters.reusedViews, 0)
+        XCTAssertGreaterThan(listNode.debugInstrumentation.counters.recycledViews, 0)
+    }
+
+    @MainActor
+    func testAetherListNodeDefersTextureRowsUntilSized() throws {
+        let listNode = AetherListNode()
+        listNode.preloadPages = 0
+        _ = listNode.view
+
+        let action = AetherListSwipeAction(
+            key: "archive",
+            title: "Archive",
+            backgroundColor: .systemGray
+        )
+        let items: [AetherListItem] = [
+            TestItem(id: 0, height: 50),
+            TestItem(id: 1, height: 50, swipeActions: AetherListSwipeActions(right: [action]))
+        ]
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map {
+                AetherListInsertItem(index: $0.offset, item: $0.element)
+            },
+            options: [.synchronous]
+        )
+        listNode.setSwipeActionsOpened(.right, at: 1, animated: false)
+
+        XCTAssertEqual(listNode.state.visibleViewCount, 0)
+        XCTAssertNil(listNode.nodeForItem(at: 0))
+        XCTAssertLessThan(listNode.swipeRevealOffset(at: 1), 0)
+
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let firstNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        let swipedNode = try XCTUnwrap(listNode.nodeForItem(at: 1))
+        XCTAssertEqual(firstNode.currentLayout.contentSize.width, 320, accuracy: 0.5)
+        XCTAssertEqual(firstNode.frame, CGRect(x: 0, y: 0, width: 320, height: 50))
+        XCTAssertEqual(swipedNode.frame, CGRect(x: 0, y: 50, width: 320, height: 50))
+        XCTAssertLessThan(swipedNode.view.transform.tx, 0)
+    }
+
+    @MainActor
+    func testAetherListNodeDoesNotCommitTransientZeroWidthDuringDynamicTypeChange() throws {
+        let listNode = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(index: 0, item: TestItem(id: 0, height: 50)),
+                AetherListInsertItem(index: 1, item: TestItem(id: 1, height: 50))
+            ],
+            options: [.synchronous]
+        )
+
+        // UIKit can expose this intermediate geometry while propagating a
+        // preferredContentSizeCategory update through a Texture hierarchy.
+        listNode.frame = .zero
+        NotificationCenter.default.post(name: UIContentSizeCategory.didChangeNotification, object: nil)
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        listNode.layoutIfNeeded()
+
+        let firstNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        let secondNode = try XCTUnwrap(listNode.nodeForItem(at: 1))
+        XCTAssertEqual(firstNode.frame, CGRect(x: 0, y: 0, width: 320, height: 50))
+        XCTAssertEqual(secondNode.frame, CGRect(x: 0, y: 50, width: 320, height: 50))
+    }
+
+    @MainActor
+    func testAetherListNodeSelectionSurvivesVirtualization() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.selectionMode = .multiple
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<20).map { TestItem(id: $0, height: 50, selectable: true) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map {
+                AetherListInsertItem(index: $0.offset, item: $0.element)
+            },
+            options: [.synchronous]
+        )
+
+        listNode.setSelected(true, at: 0, animated: false)
+        XCTAssertEqual(listNode.selectedIndices, [0])
+        XCTAssertTrue(try XCTUnwrap(listNode.nodeForItem(at: 0)).isSelected)
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(500, animated: false))
+        XCTAssertNil(listNode.nodeForItem(at: 0))
+        XCTAssertEqual(listNode.selectedIndices, [0])
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(0, animated: false))
+        XCTAssertTrue(try XCTUnwrap(listNode.nodeForItem(at: 0)).isSelected)
+    }
+
+    @MainActor
+    func testAetherListNodeTapSelectionAndGestureGate() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.selectionMode = .single
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var tappedIndices: [Int] = []
+        var selectionSnapshots: [[Int]] = []
+        listNode.itemTapped = { tappedIndices.append($0) }
+        listNode.selectionChanged = { selectionSnapshots.append($0) }
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(index: 0, item: TestItem(id: 0, height: 50, selectable: true)),
+                AetherListInsertItem(index: 1, item: TestItem(id: 1, height: 50, selectable: true))
+            ],
+            options: [.synchronous]
+        )
+
+        XCTAssertNotNil(listNode.itemNodeForListGesture(at: CGPoint(x: 10, y: 10), gesture: .tap))
+        listNode.itemGestureShouldBegin = { _, index, _, pointInNode in
+            index == 1 && pointInNode.x > 100
+        }
+        XCTAssertNil(listNode.itemNodeForListGesture(at: CGPoint(x: 10, y: 10), gesture: .tap))
+        XCTAssertNil(listNode.itemNodeForListGesture(at: CGPoint(x: 10, y: 60), gesture: .tap))
+        XCTAssertNotNil(listNode.itemNodeForListGesture(at: CGPoint(x: 120, y: 60), gesture: .tap))
+
+        listNode.performTap(at: CGPoint(x: 120, y: 60))
+
+        XCTAssertEqual(tappedIndices, [1])
+        XCTAssertEqual(selectionSnapshots, [[1]])
+        XCTAssertEqual(listNode.selectedIndices, [1])
+        XCTAssertFalse(try XCTUnwrap(listNode.nodeForItem(at: 0)).isSelected)
+        XCTAssertTrue(try XCTUnwrap(listNode.nodeForItem(at: 1)).isSelected)
+    }
+
+    @MainActor
+    func testAetherListNodeBoundaryTriggerCallbackDeduplicatesUntilLeavingEdge() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var contexts: [AetherListBoundaryTriggerContext] = []
+        listNode.boundaryReached = { contexts.append($0) }
+        listNode.boundaryTriggerConfiguration = AetherListBoundaryTriggerConfiguration(
+            topDistance: 40,
+            topItemThreshold: 0
+        )
+        let items: [AetherListItem] = (0..<8).map { TestItem(id: $0, height: 50) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertEqual(contexts.map(\.edge), [.top])
+        XCTAssertEqual(contexts[0].reasons, [.distance, .itemThreshold])
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(120, animated: false))
+        XCTAssertEqual(contexts.count, 1)
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(0, animated: false))
+        XCTAssertEqual(contexts.map(\.edge), [.top, .top])
+    }
+
+    @MainActor
+    func testAetherListNodeBoundaryTriggerCallbackCanRequireUserInitiatedScroll() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var contexts: [AetherListBoundaryTriggerContext] = []
+        listNode.boundaryReached = { contexts.append($0) }
+        listNode.boundaryTriggerConfiguration = AetherListBoundaryTriggerConfiguration(
+            topDistance: 40,
+            triggersDuringProgrammaticScroll: false
+        )
+        let items: [AetherListItem] = (0..<4).map { TestItem(id: $0, height: 50) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertTrue(contexts.isEmpty)
+    }
+
+    @MainActor
+    func testAetherListNodeScrollCallbacksUseTextureRanges() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var displayedRanges: [AetherListDisplayedItemRange] = []
+        var visibleOffsets: [CGFloat] = []
+        var scrollDeltas: [CGFloat] = []
+        listNode.displayedItemRangeChanged = { displayedRanges.append($0) }
+        listNode.visibleContentOffsetChanged = { visibleOffsets.append($0) }
+        listNode.didScrollWithOffset = { delta, _, _, _ in scrollDeltas.append(delta) }
+
+        let items: [AetherListItem] = (0..<10).map { TestItem(id: $0, height: 50) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertEqual(displayedRanges.last?.visibleRange, 0..<2)
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(150, animated: false))
+        XCTAssertEqual(try XCTUnwrap(visibleOffsets.last), 150, accuracy: 0.5)
+        XCTAssertEqual(displayedRanges.last?.visibleRange, 3..<5)
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(200, animated: false))
+        XCTAssertEqual(try XCTUnwrap(visibleOffsets.last), 200, accuracy: 0.5)
+        XCTAssertEqual(try XCTUnwrap(scrollDeltas.last), 50, accuracy: 0.5)
+        XCTAssertEqual(listNode.displayedItemRange.visibleRange, 4..<6)
+    }
+
+    @MainActor
+    func testAetherListNodeScrollHelpersClampAndEnsureVisible() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.minimumVisibleContentOffset = 40
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<10).map { TestItem(id: $0, height: 50) }
+        listNode.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(0, animated: false))
+        XCTAssertEqual(listNode.visibleContentOffset(), 40, accuracy: 0.5)
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(200, animated: false))
+        let node = try XCTUnwrap(listNode.nodeForItem(at: 6))
+        XCTAssertTrue(listNode.ensureItemNodeVisible(node, animated: false, allowIntersection: false, atTop: true))
+        XCTAssertEqual(listNode.visibleContentOffset(), node.frame.minY, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testAetherListNodeRefreshAndOverscrollCallbacksUseScrollNode() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        var refreshCount = 0
+        listNode.refreshHandler = { done in
+            refreshCount += 1
+            done()
+        }
+        listNode.beginRefreshing()
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertFalse(listNode.isRefreshing)
+
+        var topOverscroll: CGFloat = 0.0
+        listNode.topOverscrollChanged = { topOverscroll = $0 }
+        let scrollView = listNode.view.subviews.compactMap { $0 as? UIScrollView }.first!
+        scrollView.setContentOffset(CGPoint(x: 0, y: -24), animated: false)
+        listNode.scrollViewDidScroll(scrollView)
+
+        XCTAssertEqual(topOverscroll, 24, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testAetherListNodePinsTextureHeaderOutsideLoadedRange() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let items: [AetherListItem] = [
+            TestItem(id: 0, height: 30, headerAffinity: .top)
+        ] + (1..<30).map { TestItem(id: $0, height: 40) }
+        let inserts = items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) }
+        listNode.transaction(insertIndicesAndItems: inserts, options: [.synchronous])
+
+        XCTAssertTrue(listNode.setVisibleContentOffset(200, animated: false))
+
+        let headerNode = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        XCTAssertTrue(headerNode.stickyHeaderState.isPinned)
+        XCTAssertEqual(headerNode.frame.minY, 200, accuracy: 0.5)
+        XCTAssertLessThanOrEqual(listNode.state.visibleViewCount, 6)
+    }
+
+    @MainActor
+    func testAetherListNodeAppliesAsyncPreparedLayoutToVisibleTextureNode() {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        listNode.debugInfo = true
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        let item = AsyncPreparedItem(id: 20)
+        listNode.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: item)],
+            options: [.synchronous]
+        )
+
+        let expectation = expectation(description: "texture prepared layout applied")
+        DispatchQueue.main.async {
+            let node = listNode.nodeForItem(at: 0)
+            XCTAssertEqual(node?.frame.height ?? 0, 80, accuracy: 0.5)
+            XCTAssertTrue(item.didApplyPreparedLayout)
+            XCTAssertGreaterThan(listNode.debugInstrumentation.counters.preparedLayoutApplications, 0)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+    }
+
+    @MainActor
+    func testAetherListNodeAppliesTransactionSizeAndInsets() throws {
+        let listNode = AetherListNode()
+        listNode.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        listNode.preloadPages = 0
+        _ = listNode.view
+        listNode.setNeedsLayout()
+        listNode.layoutIfNeeded()
+
+        listNode.transaction(
+            insertIndicesAndItems: [
+                AetherListInsertItem(index: 0, item: TestItem(id: 1, height: 40))
+            ],
+            options: [.synchronous],
+            updateSizeAndInsets: AetherListUpdateSizeAndInsets(
+                size: CGSize(width: 300, height: 120),
+                insets: UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0),
+                headerInsets: UIEdgeInsets(top: 5, left: 0, bottom: 6, right: 0),
+                scrollIndicatorInsets: UIEdgeInsets(top: 2, left: 0, bottom: 3, right: 0),
+                itemOffsetInsets: UIEdgeInsets(top: 7, left: 0, bottom: 11, right: 0),
+                virtualContentInsets: AetherListVirtualContentInsets(top: 3, bottom: 4)
+            )
+        )
+
+        let node = try XCTUnwrap(listNode.nodeForItem(at: 0))
+        XCTAssertEqual(listNode.bounds.size, CGSize(width: 300, height: 120))
+        XCTAssertEqual(listNode.state.visibleSize, CGSize(width: 300, height: 120))
+        XCTAssertEqual(listNode.state.insets, UIEdgeInsets(top: 10, left: 0, bottom: 20, right: 0))
+        XCTAssertEqual(listNode.state.headerInsets, UIEdgeInsets(top: 5, left: 0, bottom: 6, right: 0))
+        XCTAssertEqual(listNode.state.scrollIndicatorInsets, UIEdgeInsets(top: 2, left: 0, bottom: 3, right: 0))
+        XCTAssertEqual(listNode.state.virtualContentInsets, AetherListVirtualContentInsets(top: 3, bottom: 4))
+        XCTAssertEqual(listNode.state.totalContentHeight, 65, accuracy: 0.5)
+        XCTAssertEqual(node.frame, CGRect(x: 0, y: 10, width: 300, height: 40))
+    }
+
+    @MainActor
+    func testVirtualizationAndReusePoolCounters() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.debugInfo = true
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<100).map { TestItem(id: $0, height: 50) }
+        let inserts = items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) }
+        listView.transaction(insertIndicesAndItems: inserts, options: [.synchronous])
+
+        XCTAssertLessThanOrEqual(listView.state.visibleViewCount, 4)
+        XCTAssertNotEqual(listView.state.visibleViewCount, 100)
+
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 500), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        XCTAssertLessThanOrEqual(listView.state.visibleViewCount, 5)
+        XCTAssertGreaterThan(listView.debugInstrumentation.counters.reusedViews, 0)
+    }
+
+    @MainActor
+    func testVirtualizationSettlesAfterOverestimatedHeights() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<20).map { TestItem(id: $0, height: 10, estimatedHeight: 100) }
+        let inserts = items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) }
+        listView.transaction(insertIndicesAndItems: inserts, options: [.synchronous])
+
+        XCTAssertNotNil(listView.nodeForItem(at: 9))
+        XCTAssertLessThan(listView.state.visibleViewCount, 20)
+    }
+
+    @MainActor
+    func testStationaryRangeTracksStableItemWhenInsertShiftsIndex() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        let items: [TestItem] = (0..<5).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.backingScrollViewForTesting.setContentOffset(CGPoint(x: 0, y: 50), animated: false)
+        listView.scrollViewDidScroll(listView.backingScrollViewForTesting)
+
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: TestItem(id: 99, height: 30))],
+            options: [.synchronous],
+            stationaryItemRange: (1, 1)
+        )
+
+        let anchoredNode = try XCTUnwrap(listView.nodeForItem(at: 2))
+        XCTAssertEqual((anchoredNode.item as? TestItem)?.id, 1)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 80, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testTransactionHandlesInvalidNegativeIndices() throws {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.layoutIfNeeded()
+
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 0, item: TestItem(id: 1, height: 44))],
+            options: [.synchronous]
+        )
+        listView.transaction(
+            deleteIndices: [AetherListDeleteItem(index: -1)],
+            moveIndices: [AetherListMoveItem(fromIndex: -1, toIndex: 0)],
+            insertIndicesAndItems: [AetherListInsertItem(index: -5, item: TestItem(id: 2, height: 44))],
+            updateIndicesAndItems: [AetherListUpdateItem(index: -1, previousIndex: -1, item: TestItem(id: 3, height: 44))],
+            options: [.synchronous]
+        )
+
+        XCTAssertEqual(listView.itemCount, 2)
+        let firstNode = try XCTUnwrap(listView.nodeForItem(at: 0))
+        XCTAssertEqual((firstNode.item as? TestItem)?.id, 2)
+    }
+
+    @MainActor
+    func testStackFromBottomKeepsBottomAnchorWhenAppending() {
+        let listView = makeListNode(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        listView.preloadPages = 0
+        listView.stackFromBottom = true
+        listView.layoutIfNeeded()
+
+        let items: [AetherListItem] = (0..<3).map { TestItem(id: $0, height: 50) }
+        listView.transaction(
+            insertIndicesAndItems: items.enumerated().map { AetherListInsertItem(index: $0.offset, item: $0.element) },
+            options: [.synchronous]
+        )
+        listView.scrollToBottom(animated: false)
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 50, accuracy: 0.5)
+
+        listView.transaction(
+            insertIndicesAndItems: [AetherListInsertItem(index: 3, item: TestItem(id: 3, height: 40))],
+            options: [.synchronous]
+        )
+        XCTAssertEqual(listView.backingScrollViewForTesting.contentOffset.y, 90, accuracy: 0.5)
+    }
+}
+
+private final class TestItem: AetherListItem {
+    let id: Int
+    let height: CGFloat
+    let estimatedHeightValue: CGFloat
+    let headerAffinityValue: AetherListHeaderAffinity
+    let accessoryValue: Any?
+    let headerAccessoryValue: Any?
+    let swipeActionsValue: AetherListSwipeActions
+    let selectableValue: Bool
+
+    init(
+        id: Int,
+        height: CGFloat,
+        estimatedHeight: CGFloat? = nil,
+        headerAffinity: AetherListHeaderAffinity = .none,
+        accessoryItem: Any? = nil,
+        headerAccessoryItem: Any? = nil,
+        swipeActions: AetherListSwipeActions = .none,
+        selectable: Bool = false
+    ) {
+        self.id = id
+        self.height = height
+        self.estimatedHeightValue = estimatedHeight ?? height
+        self.headerAffinityValue = headerAffinity
+        self.accessoryValue = accessoryItem
+        self.headerAccessoryValue = headerAccessoryItem
+        self.swipeActionsValue = swipeActions
+        self.selectableValue = selectable
+    }
+
+    var stableId: AnyHashable { id }
+    var approximateHeight: CGFloat { estimatedHeightValue }
+    var estimatedHeight: CGFloat { estimatedHeightValue }
+    var headerAffinity: AetherListHeaderAffinity { headerAffinityValue }
+    var isFloatingHeader: Bool { headerAffinityValue == .top }
+    var accessoryItem: Any? { accessoryValue }
+    var headerAccessoryItem: Any? { headerAccessoryValue }
+    var swipeActions: AetherListSwipeActions { swipeActionsValue }
+    var selectable: Bool { selectableValue }
+
+    func createNode(
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?
+    ) -> (AetherListItemNode, AetherListItemNodeLayout) {
+        return (TestNode(), layout(width: params.width))
+    }
+
+    func updateNode(
+        _ node: AetherListItemNode,
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?,
+        animation: AetherListItemUpdateAnimation
+    ) -> AetherListItemNodeLayout {
+        return layout(width: params.width)
+    }
+
+    private func layout(width: CGFloat) -> AetherListItemNodeLayout {
+        AetherListItemNodeLayout(contentSize: CGSize(width: width, height: height), insets: .zero)
+    }
+}
+
+private final class TestNode: AetherListItemNode {}
+
+private final class RecordingFrameReplayExecutor<NodeID: Hashable>: AetherListFrameReplayCommandExecuting {
+    private(set) var commands: [AetherListFrameReplayCommand<NodeID>] = []
+
+    func execute(_ command: AetherListFrameReplayCommand<NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingModelMutationExecutor<ItemID: Hashable>: AetherListModelMutationCommandExecuting {
+    private(set) var commands: [AetherListModelMutationCommand<ItemID>] = []
+
+    func execute(_ command: AetherListModelMutationCommand<ItemID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingUpdateMaterializationExecutor<ItemID: Hashable, NodeID: Hashable>: AetherListUpdateMaterializationCommandExecuting {
+    private(set) var commands: [AetherListUpdateMaterializationCommand<ItemID, NodeID>] = []
+
+    func execute(_ command: AetherListUpdateMaterializationCommand<ItemID, NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingVisibleNodeMaterializationExecutor<NodeID: Hashable>: AetherListVisibleNodeMaterializationCommandExecuting {
+    private(set) var commands: [AetherListVisibleNodeMaterializationCommand<NodeID>] = []
+
+    func execute(_ command: AetherListVisibleNodeMaterializationCommand<NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingStickyHeaderExecutor<NodeID: Hashable>: AetherListStickyHeaderCommandExecuting {
+    private(set) var commands: [AetherListStickyHeaderCommand<NodeID>] = []
+
+    func execute(_ command: AetherListStickyHeaderCommand<NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingVirtualizationExecutor<NodeID: Hashable>: AetherListVirtualizationCommandExecuting {
+    private(set) var commands: [AetherListVirtualizationCommand<NodeID>] = []
+
+    func execute(_ command: AetherListVirtualizationCommand<NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingAsyncLayoutExecutor<ItemID: Hashable>: AetherListAsyncLayoutCommandExecuting {
+    private(set) var commands: [AetherListAsyncLayoutCommand<ItemID>] = []
+
+    func execute(_ command: AetherListAsyncLayoutCommand<ItemID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingVisibilityLifecycleExecutor<NodeID: Hashable>: AetherListVisibilityLifecycleCommandExecuting {
+    private(set) var commands: [AetherListVisibilityLifecycleCommand<NodeID>] = []
+
+    func execute(_ command: AetherListVisibilityLifecycleCommand<NodeID>) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingSizeAndInsetsExecutor: AetherListSizeAndInsetsCommandExecuting {
+    private(set) var commands: [AetherListSizeAndInsetsCommand] = []
+
+    func execute(_ command: AetherListSizeAndInsetsCommand) {
+        commands.append(command)
+    }
+}
+
+private final class RecordingScrollAnchoringExecutor: AetherListScrollAnchoringCommandExecuting {
+    private(set) var commands: [AetherListScrollAnchoringCommand] = []
+
+    func execute(_ command: AetherListScrollAnchoringCommand) {
+        commands.append(command)
+    }
+}
+
+private final class ControlHitTestItem: AetherListItem {
+    let id: Int
+
+    init(id: Int) {
+        self.id = id
+    }
+
+    var stableId: AnyHashable { id }
+    var approximateHeight: CGFloat { 44 }
+    var estimatedHeight: CGFloat { 44 }
+
+    func createNode(
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?
+    ) -> (AetherListItemNode, AetherListItemNodeLayout) {
+        return (ControlHitTestNode(frame: .zero), AetherListItemNodeLayout(contentSize: CGSize(width: params.width, height: 44)))
+    }
+
+    func updateNode(
+        _ node: AetherListItemNode,
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?,
+        animation: AetherListItemUpdateAnimation
+    ) -> AetherListItemNodeLayout {
+        return AetherListItemNodeLayout(contentSize: CGSize(width: params.width, height: 44))
+    }
+}
+
+private final class ControlHitTestNode: AetherListItemNode {
+    private let button = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        view.addSubview(button)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        button.frame = CGRect(x: 0, y: 0, width: 80, height: bounds.height)
+    }
+}
+
+private struct BadgeAccessoryItem: AetherListAccessoryItem {
+    let id: String
+    let text: String
+
+    var stableId: AnyHashable { id }
+
+    func makeNode() -> ASDisplayNode {
+        let label = ASTextNode()
+        label.maximumNumberOfLines = 1
+        return label
+    }
+
+    func updateNode(_ node: ASDisplayNode) {
+        (node as? ASTextNode)?.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: {
+                    let paragraphStyle = NSMutableParagraphStyle()
+                    paragraphStyle.alignment = .center
+                    return paragraphStyle
+                }()
+            ]
+        )
+    }
+
+    func size(constrainedTo size: CGSize) -> CGSize {
+        CGSize(width: 24, height: min(20, size.height))
+    }
+}
+
+private final class AsyncPreparedItem: AetherListItem {
+    let id: Int
+    var didApplyPreparedLayout = false
+
+    init(id: Int) {
+        self.id = id
+    }
+
+    var stableId: AnyHashable { id }
+    var approximateHeight: CGFloat { 20 }
+    var estimatedHeight: CGFloat { 20 }
+
+    func createNode(
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?
+    ) -> (AetherListItemNode, AetherListItemNodeLayout) {
+        return (TestNode(), fallbackLayout(width: params.width))
+    }
+
+    func updateNode(
+        _ node: AetherListItemNode,
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?,
+        animation: AetherListItemUpdateAnimation
+    ) -> AetherListItemNodeLayout {
+        return fallbackLayout(width: params.width)
+    }
+
+    @discardableResult
+    func asyncLayout(
+        params: AetherListItemLayoutParams,
+        previousItem: AetherListItem?,
+        nextItem: AetherListItem?,
+        completion: @escaping (AetherListPreparedItemLayout) -> Void
+    ) -> AetherListLayoutTask? {
+        completion(AetherListPreparedItemLayout(
+            layout: AetherListItemNodeLayout(contentSize: CGSize(width: params.width, height: 80)),
+            apply: { [weak self] _ in
+                self?.didApplyPreparedLayout = true
+            }
+        ))
+        return AetherListLayoutTask()
+    }
+
+    private func fallbackLayout(width: CGFloat) -> AetherListItemNodeLayout {
+        AetherListItemNodeLayout(contentSize: CGSize(width: width, height: 20), insets: .zero)
+    }
+}

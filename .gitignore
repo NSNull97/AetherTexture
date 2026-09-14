@@ -1,3 +1,28 @@
+# macOS
+.DS_Store
+
+# Xcode user state
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+CLAUDE*.md
+
+# SwiftPM / xcodebuild artifacts
+.build/
+.swiftpm/
+.claude/
+DerivedData/
+build/
+Example/build/
+
+# DocC local builds
+*.doccarchive
+docs/
+
+# Editor / OS
+.idea/
+*.swp
+*~
 # Xcode
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore

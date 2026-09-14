@@ -1,0 +1,200 @@
+import UIKit
+import ObjectiveC.runtime
+
+/// Internal invalidation channel used by the custom navigation bar. UIKit's
+/// `UIBarButtonItem` does not emit KVO for associated-object-backed properties,
+/// so late provider assignment would otherwise leave the already-rendered
+/// button with its old action and enabled state.
+enum AetherBarButtonItemContextMenuInvalidation {
+    static let didChangeNotification = Notification.Name(
+        "AetherUI.UIBarButtonItemContextMenuItemsProviderDidChange"
+    )
+}
+
+private var aetherContextMenuProviderBoxKey: UInt8 = 0
+private var aetherSeparatesSharedBackgroundKey: UInt8 = 0
+private var aetherHostsCustomViewInGlassControlGroupStorageKey: UInt8 = 0
+
+private extension UIBarButtonItem {
+    var aetherContextMenuProviderBox: AetherContextMenuProviderBox? {
+        get { objc_getAssociatedObject(self, &aetherContextMenuProviderBoxKey) as? AetherContextMenuProviderBox }
+        set { objc_setAssociatedObject(self, &aetherContextMenuProviderBoxKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+
+    var aetherSeparatesSharedBackground: Bool {
+        get { (objc_getAssociatedObject(self, &aetherSeparatesSharedBackgroundKey) as? NSNumber)?.boolValue ?? false }
+        set { objc_setAssociatedObject(self, &aetherSeparatesSharedBackgroundKey, NSNumber(value: newValue), .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+
+    var aetherHostsCustomViewInGlassControlGroupStorage: Bool {
+        get { (objc_getAssociatedObject(self, &aetherHostsCustomViewInGlassControlGroupStorageKey) as? NSNumber)?.boolValue ?? false }
+        set { objc_setAssociatedObject(self, &aetherHostsCustomViewInGlassControlGroupStorageKey, NSNumber(value: newValue), .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
+}
+
+extension UIBarButtonItem {
+    var aetherHostsCustomViewInGlassControlGroup: Bool {
+        get {
+            aetherHostsCustomViewInGlassControlGroupStorage
+        }
+        set {
+            aetherHostsCustomViewInGlassControlGroupStorage = newValue
+        }
+    }
+}
+
+private final class AetherURLImageBarButton: UIButton {
+    static let size = CGSize(width: 38.0, height: 38.0)
+
+    override var intrinsicContentSize: CGSize {
+        Self.size
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        Self.size
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        imageView?.frame = bounds
+    }
+}
+
+// MARK: - UIBarButtonItem + ContextMenu
+
+/// Mirrors UIKit's modern `UIBarButtonItem(title:image:primaryAction:menu:)`
+/// init but takes a AetherUI-flavoured `contextMenuItemsProvider` instead
+/// of `UIMenu` — so a bar item can drop a `ContextMenuController` (with
+/// our custom glass surface, headers, action rows, submenus) without the
+/// caller wiring up `UIBarButtonItem(customView:)` + a button + a long-
+/// press recognizer by hand.
+///
+/// **Behaviour.** When `contextMenuItemsProvider` is non-nil, tapping the
+/// bar item opens the AetherUI context menu, anchored to the bar item's
+/// glass capsule. `primaryAction` is preserved on the underlying
+/// `UIBarButtonItem` (so accessibility / menu builders still see it),
+/// but the navbar's tap handler routes through the menu first — exactly
+/// how UIKit's own `UIBarButtonItem.menu` overrides tap when set.
+///
+/// **How the navbar finds the provider.** Stored as an associated object
+/// on the bar item. `NavigationBarImpl`'s glass-button layout reads it
+/// (`item.contextMenuItemsProvider`)
+/// and replaces the `GlassControlGroup` action with a "show menu" closure
+/// when present.
+public extension UIBarButtonItem {
+    convenience init(imageURL: URL?, target: Any?, action: Selector?) {
+        self.init(
+            imageURL: imageURL,
+            placeholderImage: UIImage(systemName: "person.crop.circle.fill"),
+            target: target,
+            action: action
+        )
+    }
+
+    convenience init(imageURL: URL?, placeholderImage: UIImage?, target: Any?, action: Selector?) {
+        let button = AetherURLImageBarButton(type: .custom)
+        button.frame = CGRect(origin: .zero, size: AetherURLImageBarButton.size)
+        button.layer.cornerRadius = AetherURLImageBarButton.size.height / 2.0
+        button.clipsToBounds = true
+        button.backgroundColor = UIColor.secondarySystemFill
+        button.tintColor = .label
+        button.contentHorizontalAlignment = .fill
+        button.contentVerticalAlignment = .fill
+        button.configurationUpdateHandler = { button in
+            button.alpha = 1.0
+            button.imageView?.alpha = 1.0
+        }
+        button.imageView?.contentMode = .scaleAspectFill
+        button.imageView?.clipsToBounds = true
+        button.setImage(placeholderImage, for: .normal)
+        if let target, let action {
+            button.addTarget(target, action: action, for: .touchUpInside)
+        }
+
+        self.init(customView: button)
+        aetherHostsCustomViewInGlassControlGroup = true
+
+        guard let imageURL else {
+            return
+        }
+
+        URLSession.shared.dataTask(with: imageURL) { [weak button] data, _, _ in
+            guard let data, let image = UIImage(data: data) else {
+                return
+            }
+            DispatchQueue.main.async {
+                button?.setImage(image.withRenderingMode(.alwaysOriginal), for: .normal)
+                button?.setNeedsLayout()
+            }
+        }.resume()
+    }
+
+    /// Convenience for "title/image bar item that opens a AetherUI
+    /// context menu on tap". `primaryAction` is optional and preserved
+    /// for non-tap entry points (accessibility, keyboard activation).
+    convenience init(
+        title: String? = nil,
+        image: UIImage? = nil,
+        primaryAction: UIAction? = nil,
+        contextMenuItemsProvider: (() -> [ContextMenuItem])? = nil
+    ) {
+        if #available(iOS 14.0, *) {
+            self.init(title: title, image: image, primaryAction: primaryAction, menu: nil)
+        } else if let image = image {
+            // iOS 13 fallback — `primaryAction` is dropped (the
+            // closure-style action API is iOS 14+). Bar-button items
+            // on iOS 13 dispatch via `target`/`action`; callers who
+            // need a primary action there can wire it after init via
+            // `target` / `action`.
+            self.init(image: image, style: .plain, target: nil, action: nil)
+        } else {
+            self.init(title: title ?? "", style: .plain, target: nil, action: nil)
+        }
+        self.contextMenuItemsProvider = contextMenuItemsProvider
+    }
+
+    /// Provider closure that returns the menu items to show when the
+    /// bar item is tapped. Stored as an associated object so attaching
+    /// it doesn't require subclassing `UIBarButtonItem` and survives
+    /// any `UINavigationItem` round-trips.
+    ///
+    /// Set this on a bar item created with any of UIKit's existing
+    /// inits to get the same "tap → AetherUI context menu" behaviour
+    /// without using the dedicated convenience init above.
+    var contextMenuItemsProvider: (() -> [ContextMenuItem])? {
+        get {
+            aetherContextMenuProviderBox?.provider
+        }
+        set {
+            aetherContextMenuProviderBox = newValue.map(AetherContextMenuProviderBox.init(provider:))
+            NotificationCenter.default.post(
+                name: AetherBarButtonItemContextMenuInvalidation.didChangeNotification,
+                object: self
+            )
+        }
+    }
+
+    /// AetherUI equivalent of iOS 26's `hidesSharedBackground`.
+    ///
+    /// When true, this bar item is rendered in its own floating glass
+    /// background instead of being merged into the adjacent shared capsule.
+    /// Set it on the `UIBarButtonItem` before assigning it through
+    /// `navigationItem.leftBarButtonItems` / `rightBarButtonItems`.
+    var separatesSharedBackground: Bool {
+        get {
+            aetherSeparatesSharedBackground
+        }
+        set {
+            aetherSeparatesSharedBackground = newValue
+        }
+    }
+}
+
+/// Box around the `() -> [ContextMenuItem]` closure so the associated
+/// object stores a stable reference-typed value.
+private final class AetherContextMenuProviderBox {
+    let provider: () -> [ContextMenuItem]
+    init(provider: @escaping () -> [ContextMenuItem]) {
+        self.provider = provider
+    }
+}
