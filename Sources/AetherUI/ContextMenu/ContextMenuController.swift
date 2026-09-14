@@ -33,8 +33,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         openDuration: AetherMotion.contextMenu.presentation.duration,
         closeDuration: AetherMotion.contextMenu.dismissal.duration
     )
-    private static let previewOpenDuration: TimeInterval = 0.34
-    private static let previewDismissDuration: TimeInterval = 0.34
+    private static let previewOpenDuration: TimeInterval = 0.306
+    private static let previewDismissDuration: TimeInterval = 0.306
     private static let previewDismissMenuScale: CGFloat = 0.82
     private static let previewDismissMenuOffsetY: CGFloat = 14.0
     private static let previewDismissAccessoryScale: CGFloat = 0.84
@@ -1449,7 +1449,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     // MARK: - Inline submenu (Yandex-Music-style overlay)
 
-    private static let submenuTransitionDuration: TimeInterval = 0.42
+    private static let submenuTransitionDuration: TimeInterval = 0.378
     private static let submenuTransitionDamping: CGFloat = 0.85
     /// Alpha applied to the parent actions view while a submenu card is open.
     /// The dimmed parent stays visible so the user has visual context, but

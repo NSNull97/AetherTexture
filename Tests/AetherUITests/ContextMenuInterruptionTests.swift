@@ -72,10 +72,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         if frame == 0 || frame == 120 {
                             XCTAssertEqual(opening, sample(.closing))
                         } else {
-                            if opening.headAlpha > 0 {
-                                XCTAssertTrue(opening.headFrame.intersects(opening.bodyFrame), "Seed fields must stay connected")
-                                XCTAssertTrue((0.18...0.38).contains(raw))
-                            }
+                            XCTAssertEqual(opening.headAlpha, 0, "Opening must never expose a second source lobe")
                             XCTAssertEqual(opening.bridgeRadius, 0)
                             XCTAssertEqual(opening.bodyAlpha, 1)
                             XCTAssertGreaterThan(opening.bodyFrame.width, 0)
@@ -107,15 +104,47 @@ final class ContextMenuInterruptionTests: XCTestCase {
         let seed = sample(.zero, 0.28)
         XCTAssertEqual(seed.bodyRotation, 0)
         XCTAssertEqual(seed.headRotation, 0)
-        XCTAssertGreaterThan(seed.headAlpha, 0)
-        XCTAssertFalse(seed.bodyFrame.contains(seed.headFrame), "The early silhouette must deform, not just rotate a capsule")
-        XCTAssertEqual(sample(.zero, 0.40).headAlpha, 0, "The accepted later opening keeps one lens")
+        XCTAssertEqual(seed.headAlpha, 0)
+        XCTAssertLessThan(seed.bodyCornerRadii.topLeft, seed.bodyCornerRadii.bottomRight * 0.75,
+            "The source end must be narrower than the leading belly")
+        XCTAssertLessThan(lens.bodyCornerRadii.topLeft, lens.bodyCornerRadii.bottomRight * 0.75,
+            "Asymmetry must survive from the seed into the growing menu")
+        let arriving = sample(.zero, 0.40)
+        XCTAssertEqual(arriving.headAlpha, 0)
+        XCTAssertEqual(arriving.bodyFrame.midX, source.minX + 255 * 0.5, accuracy: 0.0001,
+            "The compact drop must reach the destination centre before most of the widening")
+        XCTAssertLessThan(arriving.bodyFrame.width, 255 * 0.65)
         XCTAssertEqual(sample(.zero, 0.28, reduceMotion: true).bodyRotation, 0)
         for height: CGFloat in [160, 470] {
             for frame in 0...120 {
                 let value = sample(.zero, CGFloat(frame) / 120, height: height)
                 XCTAssertGreaterThan(value.bodyFrame.height, 0)
                 XCTAssertLessThanOrEqual(value.bodyFrame.height, height + 0.0001)
+            }
+        }
+    }
+
+    func testOpeningDropMirrorsWithItsAnchorWithoutLosingAsymmetry() {
+        let source = CGRect(x: 100, y: 100, width: 88, height: 44)
+        func sample(_ unit: CGPoint, _ t: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
+            let target = CGRect(x: source.minX - 167 * unit.x,
+                                y: source.minY - 426 * unit.y, width: 255, height: 470)
+            return contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
+                anchor: .init(unitPoint: unit), direction: .opening, rawProgress: t, reduceMotion: false)
+        }
+        for frame in 20...80 {
+            let t = CGFloat(frame) / 100
+            let left = sample(.zero, t)
+            let right = sample(CGPoint(x: 1, y: 0), t)
+            let up = sample(CGPoint(x: 0, y: 1), t)
+            XCTAssertEqual(left.bodyFrame.width, right.bodyFrame.width, accuracy: 0.0001)
+            XCTAssertEqual(left.bodyFrame.midX + right.bodyFrame.midX, 2 * source.midX, accuracy: 0.0001)
+            XCTAssertEqual(left.bodyFrame.midY + up.bodyFrame.midY, 2 * source.midY, accuracy: 0.0001)
+            XCTAssertEqual(left.bodyCornerRadii.topLeft, right.bodyCornerRadii.topRight, accuracy: 0.0001)
+            XCTAssertEqual(left.bodyCornerRadii.topLeft, up.bodyCornerRadii.bottomLeft, accuracy: 0.0001)
+            if (0.30...0.54).contains(t) {
+                XCTAssertLessThan(left.bodyCornerRadii.topLeft, left.bodyCornerRadii.bottomRight * 0.75)
             }
         }
     }

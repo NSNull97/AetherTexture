@@ -242,9 +242,9 @@ public enum AetherMotion {
     /// Button/capsule to menu transition. A continuous liquid phase plus
     /// settling time keeps large menus readable at both 60 and 120 Hz.
     public static let contextMenu = SourceMorph(
-        presentation: Spring(duration: 0.52, dampingRatio: 0.86),
-        dismissal: Spring(duration: 0.52, dampingRatio: 0.90),
-        sourceFadeDuration: 0.14,
+        presentation: Spring(duration: 0.468, dampingRatio: 0.86),
+        dismissal: Spring(duration: 0.468, dampingRatio: 0.90),
+        sourceFadeDuration: 0.126,
         contentBlurRadius: 14.0,
         contentRevealStart: 0.12,
         contentRevealEnd: 0.72
