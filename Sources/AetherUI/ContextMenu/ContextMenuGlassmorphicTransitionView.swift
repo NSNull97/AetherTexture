@@ -1788,7 +1788,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         sharpMenuSnapshotView.alpha = 0
         liveMenuContentView.alpha = 1
         updateSurfaceSDFDistortion(rawT: 1)
-        updateContentSDFDistortion(rawT: 1, liveMix: 1)
+        updateContentSDFDistortion(rawT: 1)
         contentRevealProgressChanged?(1)
         CATransaction.commit()
     }
@@ -1802,7 +1802,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let metrics = currentMetrics(rawT: 0)
         apply(metrics: metrics, rawT: 0)
         updateSurfaceSDFDistortion(rawT: 0)
-        updateContentSDFDistortion(rawT: 0, liveMix: 0)
+        updateContentSDFDistortion(rawT: 0)
         contentRevealProgressChanged?(0)
         CATransaction.commit()
         interruptedCollapse = nil
@@ -2159,9 +2159,6 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         }
         let liveT = weights.live
         let reveal = interruptedReveal ?? contextMenuBloomRevealProgress(for: weights)
-        let liveMix = reveal > 0.0001
-            ? min(1.0, (liveT / reveal) * (liveT / reveal))
-            : 0.0
         let flow = Self.normalize(flowVector)
         let normal = CGPoint(x: -flow.y, y: flow.x)
         let pull = contextMenuBloomSample(
@@ -2251,7 +2248,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             )
         }
         updateContentSDFDistortion(
-            rawT: contentT, liveMix: liveMix,
+            rawT: contentT,
             interruptionBlend: interruptedCollapse == nil ? nil : interruptedBlend
         )
         displayedContentReveal = reveal
@@ -2285,13 +2282,16 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
 
+    internal var contentRefractionForTesting: (isInstalled: Bool, displacement: CGFloat, blur: CGFloat) {
+        (contentSDFFilter != nil, displayedContentDistortion.displacement, displayedContentDistortion.blur)
+    }
+
     private func installContentDistortionFilterIfAvailable() {
-        guard usesOpticalDistortion, contentSDFFilter == nil,
-              !finalMenuGlassSurfaceView.usesNativeContentLensing else { return }
+        guard usesOpticalDistortion, contentSDFFilter == nil else { return }
         if #available(iOS 26.0, *), let filter = LensSDFFilter() {
             let size = targetMenuFrameInOverlay.size
             filter.install(
-                on: snapshotContainer.layer,
+                on: finalMenuGlassSurfaceView.contentView.layer,
                 size: size,
                 cornerRadius: min(finalCornerRadius, min(size.width, size.height) * 0.5),
                 preserveExistingFilters: false
@@ -2362,23 +2362,19 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     private func updateContentSDFLayout() {
         if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter {
-            let size = snapshotContainer.bounds.size
+            let size = finalMenuGlassSurfaceView.bounds.size
+            let radius = displayedGlassmorphicSample?.bodyCornerRadii.average ?? finalCornerRadius
             filter.updateLayout(
                 size: size,
-                cornerRadius: min(finalCornerRadius, min(size.width, size.height) * 0.5)
+                cornerRadius: min(radius, min(size.width, size.height) * 0.5)
             )
         }
     }
 
-    private func updateContentSDFDistortion(rawT: CGFloat, liveMix: CGFloat, interruptionBlend: CGFloat? = nil) {
-        // The native descriptor may become active on the first sized layout.
-        // Remove a provisional fallback rather than refracting glyphs twice.
-        if finalMenuGlassSurfaceView.usesNativeContentLensing {
-            if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter { filter.uninstall() }
-            contentSDFFilter = nil
-            displayedContentDistortion = .zero
-            return
-        }
+    private func updateContentSDFDistortion(rawT: CGFloat, interruptionBlend: CGFloat? = nil) {
+        // Native foreground lensing supplies the resting rim. This transient
+        // lens follows the moving body and refracts the common content host,
+        // so snapshot/live handoffs cannot turn it off or split the glyphs.
         if #available(iOS 26.0, *), let filter = contentSDFFilter as? LensSDFFilter {
             guard !UIAccessibility.isReduceMotionEnabled else {
                 filter.setDisplacementHeight(0)
@@ -2400,15 +2396,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             }
 
             let t = max(0, min(1, rawT))
-            let phase = Self.smootherstep(0.20, 0.90, t)
-            let lensBell = sin(.pi * phase)
-            let snapshotVisibility = max(0.0, min(1.0, snapshotContainer.alpha))
-            let liveDecay = 1.0 - Self.smootherstep(0.35, 1.0, liveMix)
-            let intensity = max(
-                0.0,
-                lensBell * sqrt(snapshotVisibility) * liveDecay
+            let phase = Self.smootherstep(0.16, 1.0, t)
+            let lensBell = pow(sin(.pi * phase), 2)
+            let visibility = contextMenuBloomRevealProgress(
+                for: contextMenuBloomClosingContentWeights(at: t)
             )
-            let minimumSide = min(snapshotContainer.bounds.width, snapshotContainer.bounds.height)
+            let intensity = t > 0 && t < 1 ? lensBell * sqrt(visibility) : 0
+            let size = finalMenuGlassSurfaceView.bounds.size
+            let minimumSide = min(size.width, size.height)
             let peakDisplacement = min(48.0, max(36.0, minimumSide * 0.18))
 
             apply(displacement: peakDisplacement * intensity, blur: 2.7 * intensity)

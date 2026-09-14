@@ -461,6 +461,56 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
+    func testContentRefractionSurvivesNativeLensingAndReturnsToZero() throws {
+        let host = makeHost(appearance: .liquidGlassV1)
+        defer { host.tearDownGlassEffects() }
+        #if APPSTORE_SAFE
+        XCTAssertFalse(host.contentRefractionForTesting.isInstalled)
+        #else
+        guard #available(iOS 26.0, *) else { return }
+        XCTAssertTrue(host.contentRefractionForTesting.isInstalled)
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, 0)
+        let contentViews = try menuContentViews(in: host)
+        XCTAssertFalse(host.finalMenuGlassSurfaceView.contentView.layer.filters?.isEmpty ?? true)
+        XCTAssertTrue(contentViews.allSatisfy { $0.layer.filters?.isEmpty ?? true },
+                      "One parent lens must cover both snapshots and live content")
+        host.animateExpand(duration: 0.52, damping: 0.86)
+        host.advanceAnimation(to: 1)
+        var openingPeak: CGFloat = 0
+        for frame in 1...64 {
+            host.advanceAnimation(to: 1 + Double(frame) / 120)
+            openingPeak = max(openingPeak, host.contentRefractionForTesting.displacement)
+        }
+        XCTAssertGreaterThan(openingPeak, 20)
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, 0)
+        XCTAssertEqual(host.contentRefractionForTesting.blur, 0)
+        host.animateCollapse(duration: 0.52, damping: 0.90)
+        host.advanceAnimation(to: 2)
+        var closingPeak: CGFloat = 0
+        for frame in 1...64 {
+            host.advanceAnimation(to: 2 + Double(frame) / 120)
+            closingPeak = max(closingPeak, host.contentRefractionForTesting.displacement)
+        }
+        XCTAssertGreaterThan(closingPeak, 20)
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, 0)
+        XCTAssertEqual(host.sourceProxyContainer.transform, .identity)
+        #endif
+    }
+
+    func testReversingOpeningPreservesDisplayedRefraction() {
+        let host = makeHost(appearance: .liquidGlassV1)
+        defer { host.tearDownGlassEffects() }
+        host.animateExpand(duration: 0.52, damping: 0.86)
+        host.advanceAnimation(to: 1)
+        for frame in 1...32 { host.advanceAnimation(to: 1 + Double(frame) / 120) }
+        let before = host.contentRefractionForTesting
+        host.animateCollapse(duration: 0.52, damping: 0.90)
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, before.displacement, accuracy: 0.000001)
+        XCTAssertEqual(host.contentRefractionForTesting.blur, before.blur, accuracy: 0.000001)
+        host.cancelOrDismiss()
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, 0)
+    }
+
     private func makeHost(appearance: AetherAppearanceStyle, menuHeight: CGFloat = 380, sourceWidth: CGFloat = 94) -> ContextMenuGlassmorphicTransitionView {
         let host = ContextMenuGlassmorphicTransitionView(
             sourceFrameInOverlay: CGRect(x: 18, y: 70, width: sourceWidth, height: 44),
