@@ -35,7 +35,10 @@ final class ContextMenuInterruptionTests: XCTestCase {
             if sample.headAlpha > 0.001 {
                 XCTAssertTrue(sample.headFrame.intersects(sample.bodyFrame), "The returning shoulder must stay joined to the drop")
             }
-            XCTAssertEqual(sample.bridgeRadius, 0)
+            if sample.bridgeRadius > 0 {
+                XCTAssertTrue(sample.headFrame.contains(sample.bridgeStart))
+                XCTAssertTrue(sample.bodyFrame.contains(sample.neckBulbCenter))
+            }
             XCTAssertEqual(sample.bodyAlpha, 1)
             if let previous {
                 XCTAssertLessThan(abs(sample.bodyFrame.minY-previous.minY), 6)
@@ -73,14 +76,39 @@ final class ContextMenuInterruptionTests: XCTestCase {
                             XCTAssertEqual(opening, sample(.closing))
                         } else {
                             XCTAssertEqual(opening.headAlpha, 0, "Opening must never expose a second source lobe")
-                            XCTAssertEqual(opening.bridgeRadius, 0)
+                            if opening.bridgeRadius > 0 {
+                                XCTAssertTrue(opening.bodyFrame.contains(opening.neckBulbCenter),
+                                    "The neck must terminate inside the same body, never as a detached bead")
+                                let reach = hypot(opening.bridgeStart.x - opening.bodyFrame.midX,
+                                                  opening.bridgeStart.y - opening.bodyFrame.midY)
+                                XCTAssertLessThanOrEqual(reach, min(opening.bodyFrame.width, opening.bodyFrame.height) * 0.30 + 44 * 0.60 + 0.0001)
+                            }
                             XCTAssertEqual(opening.bodyAlpha, 1)
                             XCTAssertGreaterThan(opening.bodyFrame.width, 0)
                             XCTAssertGreaterThan(opening.bodyFrame.height, 0)
-                            if raw < 0.3 { XCTAssertLessThanOrEqual(opening.bodyFrame.width, width) }
+                            if raw < 0.3, width > 44 * 1.6 {
+                                XCTAssertLessThanOrEqual(opening.bodyFrame.width, width)
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    func testRoundTriggerGrowsAFullBellyBeforeMenuExpansion() {
+        let source = CGRect(x: 320, y: 70, width: 44, height: 44)
+        for height: CGFloat in [160, 470] {
+            let target = CGRect(x: 109, y: 70, width: 255, height: height)
+            for step in 20...34 {
+                let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                    outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
+                    anchor: .init(unitPoint: CGPoint(x: 1, y: 0)), direction: .opening,
+                    rawProgress: CGFloat(step) / 100, reduceMotion: false)
+                XCTAssertGreaterThanOrEqual(sample.bodyFrame.width / sample.bodyFrame.height, 0.80,
+                    "The circular source must become a full drop, not a slender upright strip")
+                XCTAssertGreaterThanOrEqual(sample.bodyFrame.width, source.width)
+                XCTAssertEqual(sample.headAlpha, 0, "Volume must belong to the drop, not a second source bead")
             }
         }
     }
@@ -105,6 +133,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(seed.bodyRotation, 0)
         XCTAssertEqual(seed.headRotation, 0)
         XCTAssertEqual(seed.headAlpha, 0)
+        XCTAssertGreaterThan(seed.bridgeRadius, 5, "The opening must retain a liquid neck without a separate source bead")
         XCTAssertLessThan(seed.bodyCornerRadii.topLeft, seed.bodyCornerRadii.bottomRight * 0.75,
             "The source end must be narrower than the leading belly")
         XCTAssertLessThan(lens.bodyCornerRadii.topLeft, lens.bodyCornerRadii.bottomRight * 0.75,
@@ -159,6 +188,20 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 XCTAssertLessThan(left.bodyCornerRadii.topLeft, left.bodyCornerRadii.bottomRight * 0.75)
             }
         }
+    }
+
+    func testWideMenuReturnKeepsALiquidNeckBetweenBellyAndSource() {
+        let source = CGRect(x: 18, y: 70, width: 94, height: 44)
+        let target = CGRect(x: 18, y: 70, width: 255, height: 160)
+        let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+            outerFrame: target, outerCornerRadii: .uniform(27), sourceRadius: 22, targetRadius: 27,
+            anchor: .detect(source: source, target: target), direction: .closing,
+            rawProgress: 0.45, reduceMotion: false)
+        XCTAssertGreaterThan(sample.bridgeRadius, 5)
+        XCTAssertTrue(sample.headFrame.contains(sample.bridgeStart))
+        XCTAssertTrue(sample.bodyFrame.contains(sample.neckBulbCenter))
+        XCTAssertGreaterThan(sample.bodyFrame.midY, sample.headFrame.midY + 15)
+        XCTAssertLessThan(sample.bridgeRadius * 2, sample.bodyFrame.width * 0.6)
     }
 
     func testOpeningDoesNotRoundACustomSourceBeforeItsCaptionFades() {

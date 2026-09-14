@@ -232,7 +232,10 @@ private func contextMenuReferenceOpeningGeometry(
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let directionX = 1 - 2 * anchor.unitPoint.x
     let directionY = 1 - 2 * anchor.unitPoint.y
-    let diameter = min(source.width * 0.82, source.height * 1.45)
+    // The round trigger also gains volume as it leaves its resting frame.
+    // Shrinking every source to 82% made its seed a thin 36×64 strip;
+    // reference frames keep a full belly, roughly 0.8 of the seed's height.
+    let diameter = min(max(source.width * 0.82, source.height * 1.20), source.height * 1.45)
     let eggHeight = source.height * 1.45
     let egg = CGRect(
         x: source.midX - diameter * 0.5,
@@ -724,11 +727,31 @@ func contextMenuGlassmorphicGeometrySample(
         let geometry = contextMenuReferenceOpeningGeometry(source: source, target: target,
             sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
             progress: rawProgress, reduceMotion: reduceMotion)
-        return .init(headFrame: geometry.frame, bodyFrame: geometry.frame,
+        // Pull a tapered remnant out of the SAME body. A separate source
+        // bead created a forked silhouette; these two submerged segments
+        // instead form one short trailing neck, absorbed before the platter
+        // settles. Its exposed length is bounded even for very tall menus.
+        let body = geometry.frame
+        let center = CGPoint(x: body.midX, y: body.midY)
+        let sourceCenter = CGPoint(x: source.midX, y: source.midY)
+        let dx = sourceCenter.x - center.x
+        let dy = sourceCenter.y - center.y
+        let distance = hypot(dx, dy)
+        let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.26)
+            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.40, end: 0.64))
+        let side = min(body.width, body.height)
+        let reach = min(distance, side * 0.30 + source.height * 0.60) * neck
+        let fraction = distance > 0.001 ? reach / distance : 0
+        let tip = CGPoint(x: center.x + dx * fraction, y: center.y + dy * fraction)
+        let join = CGPoint(x: center.x + dx * fraction * 0.65, y: center.y + dy * fraction * 0.65)
+        let rawRadius = min(source.height * 0.28, side * 0.26) * neck
+        let radius = rawRadius > 1.25 ? rawRadius : 0
+        return .init(headFrame: geometry.frame, bodyFrame: body,
             headRotation: 0, bodyRotation: 0,
             headRadius: sourceRadius, bodyCornerRadii: geometry.cornerRadii,
-            bridgeStart: source.origin, bridgeEnd: source.origin, bridgeRadius: 0,
-            neckBulbCenter: source.origin, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
+            bridgeStart: tip, bridgeEnd: join, bridgeRadius: radius,
+            neckBulbCenter: center, neckBulbRadius: radius * 1.75,
+            headAlpha: 0, bodyAlpha: 1)
     }
     let outer = contextMenuBloomGeometrySample(
         source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
@@ -986,7 +1009,7 @@ private func contextMenuClosingGlassmorphicGeometrySample(
         let centrePull = contextMenuBloomSmoothRange(elapsed, start: 0.18, end: 0.66)
         let centreX = bodyFrame.midX + (source.midX - bodyFrame.midX) * centrePull
         let verticalSign: CGFloat = unit.y < 0.5 ? 1 : -1
-        let bellyY = source.midY + verticalSign * source.height * 0.64
+        let bellyY = source.midY + verticalSign * source.height * 0.95
         let centreY = bodyFrame.midY + (bellyY - bodyFrame.midY) * compact
         let finalY = centreY + (source.midY - centreY) * retract
         let frame = CGRect(x: centreX - resolvedWidth / 2, y: finalY - resolvedHeight / 2,
@@ -1004,10 +1027,18 @@ private func contextMenuClosingGlassmorphicGeometrySample(
         let headY = frame.midY + (source.midY - frame.midY) * shoulder
         let headFrame = CGRect(x: centreX - headWidth / 2, y: headY - headHeight / 2,
                                width: headWidth, height: headHeight)
+        let neck = contextMenuBloomSmoothRange(elapsed, start: 0.30, end: 0.48)
+            * (1 - contextMenuBloomSmoothRange(elapsed, start: 0.74, end: 0.94))
+        let rawNeckRadius = min(source.height * 0.21, frame.width * 0.16) * neck
+        let radiusOfNeck = rawNeckRadius > 1.25 ? rawNeckRadius : 0
+        let neckStart = CGPoint(x: headFrame.midX, y: headFrame.midY)
+        let neckEnd = CGPoint(x: frame.midX, y: frame.midY)
+        let neckJoin = CGPoint(x: (neckStart.x + neckEnd.x) * 0.5,
+                               y: (neckStart.y + neckEnd.y) * 0.5)
         return .init(headFrame: headFrame, bodyFrame: frame, headRotation: 0, bodyRotation: 0,
             headRadius: min(sourceRadius, headHeight / 2), bodyCornerRadii: .uniform(radius),
-            bridgeStart: sourceCenter, bridgeEnd: sourceCenter, bridgeRadius: 0,
-            neckBulbCenter: sourceCenter, neckBulbRadius: 0,
+            bridgeStart: neckStart, bridgeEnd: neckJoin, bridgeRadius: radiusOfNeck,
+            neckBulbCenter: neckEnd, neckBulbRadius: radiusOfNeck * 1.25,
             headAlpha: shoulder, bodyAlpha: 1)
     }
 

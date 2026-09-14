@@ -968,7 +968,7 @@ final class AetherMotionTests: XCTestCase {
                     XCTAssertGreaterThan(sample.neckBulbRadius, sample.bridgeRadius)
                 }
             }
-            XCTAssertEqual(sawActiveNeck, direction == .closing, "Only dismissal retains a separate connected source neck")
+            XCTAssertTrue(sawActiveNeck, "Both directions must transfer glass through a connected neck")
 
             let reducedSample = contextMenuGlassmorphicSample(
                 rawProgress: 0.5,
