@@ -2634,10 +2634,10 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             let leftAvailableWidth = max(1.0, width * 0.5 - leftStart)
             let rightAvailableWidth = max(1.0, width * 0.5 - rightInset - glassSideInset)
 
-            if buttonMorphTransitionOverride == nil || leftButtonContainer.bounds.height.isZero {
+            if (buttonMorphTransitionOverride == nil || leftButtonContainer.bounds.height.isZero) && !glassButtonGroups(for: .left).contains(where: { $0.isFinishingContentRemoval }) {
                 updateButtonChromeFrame(view: leftButtonContainer, frame: CGRect(x: leftStart, y: glassY, width: leftAvailableWidth, height: glassButtonHeight), transition: geometryTransition)
             }
-            if buttonMorphTransitionOverride == nil || rightButtonContainer.bounds.height.isZero {
+            if (buttonMorphTransitionOverride == nil || rightButtonContainer.bounds.height.isZero) && !glassButtonGroups(for: .right).contains(where: { $0.isFinishingContentRemoval }) {
                 updateButtonChromeFrame(view: rightButtonContainer, frame: CGRect(x: width * 0.5, y: glassY, width: rightAvailableWidth, height: glassButtonHeight), transition: geometryTransition)
             }
 
@@ -3009,6 +3009,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         guard let glassContainer = buttonGlassContainer(for: container) else {
             return
         }
+        if size.width <= 0, glassContainer.contentView.subviews.contains(where: {
+            ($0 as? GlassControlGroup)?.isFinishingContentRemoval == true
+        }) { return }
         let resolvedSize = CGSize(width: max(0.0, size.width), height: max(0.0, size.height))
         transition.updateFrame(view: glassContainer, frame: CGRect(origin: .zero, size: resolvedSize))
         glassContainer.update(

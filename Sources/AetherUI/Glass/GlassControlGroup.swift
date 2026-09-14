@@ -255,6 +255,8 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         fatalError("init(coder:) has not been implemented")
     }
 
+    internal private(set) var isFinishingContentRemoval = false
+
     // MARK: - Update
 
     public func update(
@@ -267,6 +269,12 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         minWidth: CGFloat = 44.0,
         transition: ContainedViewLayoutTransition = .immediate
     ) -> CGSize {
+        // Navigation can lay out the same empty target several times during
+        // a pop. That is not a new removal and must not erase the live exit.
+        if items.isEmpty, self.items.isEmpty, isFinishingContentRemoval {
+            return .zero
+        }
+        isFinishingContentRemoval = false
         updateGeneration += 1
         let generation = updateGeneration
         let previousNaturalSize = naturalSize
@@ -469,6 +477,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                 if controlsView.bounds.size == .zero {
                     controlsView.frame = CGRect(origin: .zero, size: previousSize)
                 }
+                isFinishingContentRemoval = true
                 let exitTransition = softItemTransition(for: transition, appearing: false)
                 animateMaterialPulse(
                     kind: .disappearance,
@@ -480,6 +489,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                     guard let self, self.updateGeneration == generation else {
                         return
                     }
+                    self.isFinishingContentRemoval = false
                     self.backgroundView.isHidden = true
                     self.backgroundView.alpha = 1.0
                     self.backgroundView.frame = .zero

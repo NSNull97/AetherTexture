@@ -6,6 +6,76 @@ import UIKit
 final class NavigationGlassMaterializationTests: XCTestCase {
     private let transition = ContainedViewLayoutTransition.animated(duration: 0.34, curve: .navigationFluidMorph)
 
+    func testRealPopToEmptyRootRetainsOutgoingGroupsUntilDissolve() async throws {
+        guard !UIAccessibility.isReduceMotionEnabled else { throw XCTSkip("Requires navigation animation") }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let data = NavigationBarPresentationData(theme: NavigationBarTheme(style: .glass))
+        let root = AetherViewController(navigationBarPresentationData: data)
+        let navigation = AetherNavigationController(rootViewController: root)
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        navigation.loadViewIfNeeded()
+        let containerLayout = ContainerViewLayout(size: window.bounds.size,
+            safeInsets: UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0),
+            additionalInsets: .zero, statusBarHeight: 47)
+        navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+        let detail = AetherViewController(navigationBarPresentationData: data)
+        detail.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "A long menu title", style: .plain, target: nil, action: nil)
+        navigation.pushViewController(detail, animated: false)
+        navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+        let bar = try XCTUnwrap(navigation.navigationBar as? NavigationBarImpl)
+        func groups(_ view: UIView) -> [GlassControlGroup] {
+            (view as? GlassControlGroup).map { [$0] } ?? view.subviews.flatMap(groups)
+        }
+        let outgoing = groups(bar.debugButtonLayer).filter { !$0.items.isEmpty }
+        XCTAssertEqual(outgoing.count, 2)
+        navigation.popViewController(animated: true)
+        let started = expectation(description: "Pop has begun dissolving both sides")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+            for group in outgoing {
+                XCTAssertNotNil(group.superview)
+                XCTAssertTrue(group.isFinishingContentRemoval)
+                XCTAssertGreaterThan(group.bounds.width, 0)
+            }
+            started.fulfill()
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let finished = expectation(description: "Exit owns cleanup")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            for group in outgoing {
+                XCTAssertFalse(group.isFinishingContentRemoval)
+                XCTAssertEqual(group.bounds.size, .zero)
+            }
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+    }
+
+    func testEmptyTargetRelayoutPreservesWholeButtonDisappearance() throws {
+        let bar = makeBar()
+        let source = NavigationBarItem()
+        source.rightBarButtonItem = UIBarButtonItem(title: "A long menu button", style: .plain, target: nil, action: nil)
+        bar.item = source
+        layout(bar)
+        let group = try XCTUnwrap(descendant(GlassControlGroup.self, in: bar.debugButtonLayer))
+        let originalFrame = group.convert(group.bounds, to: bar.debugButtonLayer)
+        let surface = try XCTUnwrap(descendant(GlassBackgroundView.self, in: group))
+        let target = NavigationBarItem()
+        bar.withButtonMorphTransition(transition) {
+            bar.item = target
+            layout(bar, transition: transition)
+        }
+        XCTAssertTrue(group.isFinishingContentRemoval)
+        layout(bar)
+        layout(bar)
+        XCTAssertTrue(group.isFinishingContentRemoval)
+        XCTAssertFalse(surface.isHidden, "An empty-target layout must not erase the outgoing material")
+        XCTAssertEqual(group.convert(group.bounds, to: bar.debugButtonLayer), originalFrame)
+        XCTAssertGreaterThan(surface.bounds.width, 44)
+    }
+
     func testReinsertionRevealsRestingSurfaceWithoutZeroBoundsGrowth() throws {
         let group = GlassControlGroup(appearanceStyle: .liquidGlassV1)
         let icon = try XCTUnwrap(UIImage(systemName: "line.3.horizontal.decrease"))

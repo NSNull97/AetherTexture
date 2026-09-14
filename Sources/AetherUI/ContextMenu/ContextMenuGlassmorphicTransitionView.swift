@@ -1137,6 +1137,38 @@ func contextMenuGlassmorphicGeometrySample(
         }
     }
 
+    if direction == .closing, source.width > source.height * 1.6 {
+        let elapsed = 1 - raw
+        let settle = contextMenuBloomSmoothRange(elapsed, start: 0.48, end: 0.94)
+        // The returning wide source is already the lower carrier. Registering
+        // a second wide head above it creates an L-shaped union and then two
+        // lateral bulges when the native compositor joins the surfaces.
+        let frame = CGRect(
+            x: bodyFrame.minX + (source.minX - bodyFrame.minX) * settle,
+            y: bodyFrame.minY + (source.minY - bodyFrame.minY) * settle,
+            width: bodyFrame.width + (source.width - bodyFrame.width) * settle,
+            height: bodyFrame.height + (source.height - bodyFrame.height) * settle
+        )
+        let radius = min(frame.width, frame.height) * 0.5
+        let roundness = contextMenuBloomSmoothRange(elapsed, start: 0.02, end: 0.50)
+        let freeRadius = targetRadius + (radius - targetRadius) * roundness
+        let attachedRadius = targetRadius + (sourceRadius - targetRadius) * settle
+        var corners = ContextMenuBloomCornerRadii.uniform(freeRadius)
+        if unit.y < 0.5 {
+            corners = .init(topLeft: unit.x < 0.5 ? attachedRadius : freeRadius,
+                            topRight: unit.x >= 0.5 ? attachedRadius : freeRadius,
+                            bottomLeft: freeRadius, bottomRight: freeRadius)
+        } else {
+            corners = .init(topLeft: freeRadius, topRight: freeRadius,
+                            bottomLeft: unit.x < 0.5 ? attachedRadius : freeRadius,
+                            bottomRight: unit.x >= 0.5 ? attachedRadius : freeRadius)
+        }
+        return .init(headFrame: source, bodyFrame: frame, headRotation: 0, bodyRotation: 0,
+            headRadius: sourceRadius, bodyCornerRadii: corners,
+            bridgeStart: sourceCenter, bridgeEnd: sourceCenter, bridgeRadius: 0,
+            neckBulbCenter: sourceCenter, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
+    }
+
     var headWidth = max(1.0, source.width * headScale)
     var headHeight = max(1.0, source.height * headScale)
     let sourceAnchor = CGPoint(
@@ -1617,12 +1649,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     private let sharpMenuSnapshotView = UIImageView()
     private let highlightView = UIView()
     private let highlightLayer = CAGradientLayer()
-    private let progressDriverView = UIView(frame: .zero)
     private var surfaceSDFFilter: AnyObject?
     private var contentSDFFilter: AnyObject?
 
     private var progress: CGFloat = 0
-    private var progressAnimator: UIViewPropertyAnimator?
+    private var animationDuration: TimeInterval = 0
+    private var animationElapsed: TimeInterval = 0
+    private var animationTimestamp: TimeInterval?
     private var progressDisplayLink: CADisplayLink?
     private var animationFrom: CGFloat = 0
     private var animationTo: CGFloat = 0
@@ -1678,10 +1711,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         backgroundColor = .clear
         clipsToBounds = false
         layer.masksToBounds = false
-        progressDriverView.frame = CGRect(x: -4, y: -4, width: 1, height: 1)
-        progressDriverView.backgroundColor = .clear
-        progressDriverView.isUserInteractionEnabled = false
-        addSubview(progressDriverView)
+
 
         shadowView.backgroundColor = .clear
         shadowView.isUserInteractionEnabled = false
@@ -2298,16 +2328,6 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             values: [0.0, 2.5, 4.0, 1.5, 0.0, 0.0],
             at: contentT
         )
-        let blurredCrossScale = contextMenuBloomSample(
-            times: [0.16, 0.36, 0.54, 0.74, 0.92],
-            values: [0.960, 0.965, 0.985, 1.006, 1.0],
-            at: contentT
-        )
-        let blurredAlongScale = contextMenuBloomSample(
-            times: [0.16, 0.36, 0.54, 0.74, 0.92],
-            values: [1.075, 1.065, 1.035, 0.996, 1.0],
-            at: contentT
-        )
         let sharpCrossScale = contextMenuBloomSample(
             times: [0.34, 0.52, 0.70, 0.86, 0.92],
             values: [0.985, 0.988, 0.997, 1.003, 1.0],
@@ -2391,26 +2411,18 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             blurredMenuSnapshotView.alpha = 0.0
             sharpMenuSnapshotView.alpha = 0.0
         }
-        blurredMenuSnapshotView.transform = directionalTransform(
-            pull: pull,
-            arc: arc,
-            alongScale: blurredAlongScale,
-            crossScale: blurredCrossScale
-        )
-        sharpMenuSnapshotView.transform = directionalTransform(
-            pull: pull,
-            arc: arc,
-            alongScale: sharpAlongScale,
-            crossScale: sharpCrossScale
-        )
         liveMenuContentView.alpha = liveT
-        let liveDistortion = 0.25 * (1.0 - liveMix)
-        liveMenuContentView.transform = directionalTransform(
-            pull: pull * liveDistortion,
-            arc: arc * liveDistortion,
-            alongScale: 1.0 + (sharpAlongScale - 1.0) * liveDistortion,
-            crossScale: 1.0 + (sharpCrossScale - 1.0) * liveDistortion
+        // Sharp/live/blurred copies describe the same rows. Their common
+        // deformation belongs to the carrier, never to individual copies.
+        let deformation: CGFloat = isOpening ? 1 : 0.25
+        let sharedTransform = directionalTransform(
+            pull: pull * deformation, arc: arc * deformation,
+            alongScale: 1 + (sharpAlongScale - 1) * deformation,
+            crossScale: 1 + (sharpCrossScale - 1) * deformation
         )
+        blurredMenuSnapshotView.transform = sharedTransform
+        sharpMenuSnapshotView.transform = sharedTransform
+        liveMenuContentView.transform = sharedTransform.concatenating(snapshotContainer.transform)
         if let state = interruptedCollapse {
             let captured = state.contentRendering
             snapshotContainer.transform = Self.interpolate(
@@ -2585,14 +2597,15 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                     0.0,
                     distortionIn * distortionOut * sqrt(snapshotVisibility)
                 )
-                apply(displacement: 42.0 * intensity, blur: 1.5 * intensity)
+                let snapshotOnly = 1.0 - Self.smootherstep(0.0, 0.08, liveMix)
+                apply(displacement: 42.0 * intensity * snapshotOnly, blur: 1.5 * intensity * snapshotOnly)
                 return
             }
 
             let phase = Self.smootherstep(0.20, 0.90, t)
             let lensBell = sin(.pi * phase)
             let snapshotVisibility = max(0.0, min(1.0, snapshotContainer.alpha))
-            let liveDecay = 1.0 - Self.smootherstep(0.82, 0.98, liveMix)
+            let liveDecay = 1.0 - Self.smootherstep(0.0, 0.08, liveMix)
             let intensity = max(
                 0.0,
                 lensBell * sqrt(snapshotVisibility) * liveDecay
@@ -2812,11 +2825,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         dampingRatio: CGFloat,
         completion: (() -> Void)?
     ) {
-        // The CA presentation transform can be up to one display-link tick
-        // ahead of the geometry currently on screen. When direction changes,
-        // reverse from the last geometry we actually drew; sampling the newer
-        // driver value here would create one forward frame before collapse.
-        let wasAnimating = progressAnimator != nil || progressDisplayLink != nil
+        // A reversal starts at the last frame actually drawn, preserving
+        // both geometry and content ownership through an interrupted opening.
+        let wasAnimating = progressDisplayLink != nil
         let visibleProgress = wasAnimating ? lastAppliedProgress : progress
         cancelAnimation()
         // An explicitly sampled/frozen frame can also differ from the idle
@@ -2868,47 +2879,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         _ = dampingRatio
         animationCompletion = completion
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        progressDriverView.layer.removeAllAnimations()
-        progressDriverView.transform = CGAffineTransform(translationX: progress, y: 0)
-        CATransaction.commit()
-
-        // Geometry already applies its measured, direction-specific sampled
-        // profile in `currentMetrics`; the driver itself stays linear.
-        let timing = UICubicTimingParameters(
-            controlPoint1: CGPoint(x: 0.0, y: 0.0),
-            controlPoint2: CGPoint(x: 1.0, y: 1.0)
-        )
-        let animator = UIViewPropertyAnimator(duration: max(0.001, duration), timingParameters: timing)
-        animator.addAnimations { [weak self] in
-            self?.progressDriverView.transform = CGAffineTransform(translationX: target, y: 0)
-        }
-        animator.addCompletion { [weak self, weak animator] _ in
-            guard let self,
-                  let animator,
-                  self.progressAnimator === animator else {
-                return
-            }
-
-            self.stopProgressDisplayLink()
-            self.progressAnimator = nil
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            self.progressDriverView.layer.removeAllAnimations()
-            self.progressDriverView.transform = CGAffineTransform(translationX: target, y: 0)
-            self.progress = max(0, min(1, target))
-            self.updateGeometry(progress: self.progress)
-            CATransaction.commit()
-            self.interruptedCollapse = nil
-
-            let completion = self.animationCompletion
-            self.animationCompletion = nil
-            completion?()
-        }
-        progressAnimator = animator
+        // One display clock owns both progress and drawing. Sampling a second
+        // CA animator's presentation layer can repeat a frame then skip ahead.
+        animationDuration = max(0.001, duration)
+        animationElapsed = 0
+        animationTimestamp = nil
+        updateGeometry(progress: progress)
         startProgressDisplayLink()
-        animator.startAnimation()
     }
 
     private func startProgressDisplayLink() {
@@ -2941,26 +2918,34 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     private func cancelAnimation() {
-        sampleProgressDriver()
-        progressAnimator?.stopAnimation(true)
-        progressAnimator = nil
-        progressDriverView.layer.removeAllAnimations()
         stopProgressDisplayLink()
+        animationTimestamp = nil
         animationCompletion = nil
     }
 
     @objc
     private func handleDisplayLink(_ link: CADisplayLink) {
-        sampleProgressDriver()
-        updateGeometry(progress: progress)
+        advanceAnimation(to: link.targetTimestamp)
     }
 
-    private func sampleProgressDriver() {
-        let sampled = progressDriverView.layer.presentation()?.affineTransform().tx
-            ?? progressDriverView.transform.tx
-        let lowerBound = min(animationFrom, animationTo) - 0.12
-        let upperBound = max(animationFrom, animationTo) + 0.14
-        progress = max(lowerBound, min(upperBound, sampled))
+    internal func advanceAnimation(to timestamp: TimeInterval) {
+        guard progressDisplayLink != nil else { return }
+        let previousTimestamp = animationTimestamp
+        animationTimestamp = timestamp
+        guard let previous = previousTimestamp else { return }
+        // Do not consume the whole liquid phase after a main-thread stall.
+        // Normal 60/120 Hz callbacks retain their actual frame intervals.
+        animationElapsed += min(max(0, timestamp - previous), 1.0 / 30.0)
+        let fraction = min(1, animationElapsed / animationDuration)
+        progress = animationFrom + (animationTo - animationFrom) * fraction
+        updateGeometry(progress: progress)
+        if fraction >= 1 {
+            stopProgressDisplayLink()
+            interruptedCollapse = nil
+            let completion = animationCompletion
+            animationCompletion = nil
+            completion?()
+        }
     }
 
     private func configureShadowLayer(_ layer: CALayer) {

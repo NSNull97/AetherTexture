@@ -30,8 +30,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     // MARK: - Animation constants
 
     internal static let glassmorphicTiming = ContextMenuGlassmorphicTiming(
-        openDuration: 0.32,
-        closeDuration: 0.32
+        openDuration: AetherMotion.contextMenu.presentation.duration,
+        closeDuration: AetherMotion.contextMenu.dismissal.duration
     )
     private static let previewOpenDuration: TimeInterval = 0.34
     private static let previewDismissDuration: TimeInterval = 0.34
@@ -666,10 +666,9 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         actionsView.setRevealProgress(1)
         platterHost.liveMenuContentView.addSubview(actionsView)
         platterHost.prepareMenuContentSnapshots(from: actionsView)
-        actionsView.setRevealProgress(0)
-        platterHost.contentRevealProgressChanged = { [weak actionsView] progress in
-            actionsView?.setRevealProgress(progress)
-        }
+        // The host already stages live/sharp/blurred content. Applying a
+        // second row-level translation only to the live copy separates it
+        // from its snapshots and doubles glyphs during the handoff.
 
         self.glassmorphicHost = platterHost
         self.menuContainer = platterHost.finalMenuGlassSurfaceView

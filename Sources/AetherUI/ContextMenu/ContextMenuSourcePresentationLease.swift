@@ -173,9 +173,13 @@ final class SourcePresentationLease {
     }
 
     fileprivate static func makeProxyView(from sourceView: UIView) -> UIView {
-        if let snapshot = sourceView.snapshotView(afterScreenUpdates: false) {
-            snapshot.frame = CGRect(origin: .zero, size: sourceView.bounds.size)
-            return snapshot
+        // A UIKit snapshot is a compositor replica; rendering its CALayer
+        // again can produce an empty image on device. Capture pixels while
+        // the real content is still present, before the lease suppresses it.
+        if let image = AetherContentMaterialization.captureContent(of: sourceView) {
+            let imageView = UIImageView(image: image)
+            imageView.frame = CGRect(origin: .zero, size: sourceView.bounds.size)
+            return imageView
         }
 
         let renderer = UIGraphicsImageRenderer(bounds: sourceView.bounds)

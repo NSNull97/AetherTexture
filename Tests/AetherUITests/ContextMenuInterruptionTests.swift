@@ -4,6 +4,46 @@ import UIKit
 
 @MainActor
 final class ContextMenuInterruptionTests: XCTestCase {
+    func testDisplayClockDoesNotSkipLiquidPhaseAfterStallAndCompletesOnce() {
+        let host = makeHost(appearance: .legacy)
+        defer { host.tearDownGlassEffects() }
+        var completions = 0
+        host.animateExpand(duration: 0.42, damping: 0.86) { completions += 1 }
+        host.advanceAnimation(to: 1)
+        host.advanceAnimation(to: 2)
+        XCTAssertEqual(completions, 0, "A delayed callback must not jump straight to the menu")
+        for frame in 1...60 { host.advanceAnimation(to: 2 + Double(frame) / 120) }
+        XCTAssertEqual(completions, 1)
+        host.advanceAnimation(to: 4)
+        XCTAssertEqual(completions, 1)
+    }
+
+    func testWideButtonCollapseKeepsOneCarrierUntilSourceHandoff() {
+        let source = CGRect(x: 220, y: 70, width: 160, height: 44)
+        let target = CGRect(x: 125, y: 70, width: 255, height: 470)
+        let anchor = ContextMenuBloomAnchor.detect(source: source, target: target)
+        var previous: CGRect?
+        for step in 1..<420 {
+            let t = CGFloat(step) / 420
+            let outer = contextMenuBloomGeometrySample(source: source, target: target,
+                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .closing,
+                rawProgress: 1-t, reduceMotion: false)
+            let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
+                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .closing,
+                rawProgress: 1-t, reduceMotion: false)
+            XCTAssertEqual(sample.headAlpha, 0)
+            XCTAssertEqual(sample.bridgeRadius, 0)
+            XCTAssertEqual(sample.bodyAlpha, 1)
+            if let previous {
+                XCTAssertLessThan(abs(sample.bodyFrame.minY-previous.minY), 6)
+                XCTAssertLessThan(abs(sample.bodyFrame.height-previous.height), 8)
+            }
+            if t > 0.95 { XCTAssertEqual(sample.bodyFrame, source) }
+            previous = sample.bodyFrame
+        }
+    }
+
     func testClosingContractionStartsOnTheFirstReferenceFrameAndReboundsFromSourceSizedEgg() {
         let source = CGRect(x: 18, y: 70, width: 106, height: 44)
         let target = CGRect(x: 18, y: 70, width: 230, height: 160)
@@ -157,7 +197,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
 
     func testReturningSourceMaskHasNoHolesWhereNativeLobesOverlap() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("Native merged glass requires iOS 26") }
-        let host = makeHost(appearance: .liquidGlassV1)
+        let host = makeHost(appearance: .liquidGlassV1, sourceWidth: 44)
         defer { host.tearDownGlassEffects() }
         var checkedPixels = 0
         var mismatchedPixels = 0
@@ -236,9 +276,9 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    private func makeHost(appearance: AetherAppearanceStyle, menuHeight: CGFloat = 380) -> ContextMenuGlassmorphicTransitionView {
+    private func makeHost(appearance: AetherAppearanceStyle, menuHeight: CGFloat = 380, sourceWidth: CGFloat = 94) -> ContextMenuGlassmorphicTransitionView {
         let host = ContextMenuGlassmorphicTransitionView(
-            sourceFrameInOverlay: CGRect(x: 18, y: 70, width: 94, height: 44),
+            sourceFrameInOverlay: CGRect(x: 18, y: 70, width: sourceWidth, height: 44),
             targetMenuFrameInOverlay: CGRect(x: 18, y: 70, width: 255, height: menuHeight),
             finalCornerRadius: 27, sourceCornerRadius: 22,
             sourceMode: .leasedGlassSource, isDark: false, appearanceStyle: appearance

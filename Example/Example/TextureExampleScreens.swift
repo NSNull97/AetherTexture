@@ -2437,6 +2437,7 @@ private final class TextureSearchAccessoryView: NavigationBarContentView {
 /// Fixed content and a one-shot timeline make simulator recordings repeatable.
 /// Ordinary launches never schedule this timeline.
 private final class TextureAnimationReferenceController: AetherViewController {
+    private var regressionMode: Bool { ProcessInfo.processInfo.arguments.contains("--animation-regression") }
     private let autoplay: Bool
     private let isDetail: Bool
     private let showsCamera: Bool
@@ -2481,6 +2482,14 @@ private final class TextureAnimationReferenceController: AetherViewController {
             installMenuChrome()
         }
 
+        if regressionMode {
+            view.backgroundColor = UIColor(red: 0.03, green: 0.17, blue: 0.30, alpha: 1)
+            navigationItem.title = nil
+            navigationItem.titleView = nil
+            navigationBarItem.backButtonBadgeText = nil
+            navigationItem.leftBarButtonItems = nil
+            navigationItem.rightBarButtonItem = isDetail ? UIBarButtonItem(title: "A very long menu title", style: .plain, target: nil, action: nil) : nil
+        }
         scrollView.alwaysBounceVertical = true
         view.addSubview(scrollView)
         stack.axis = .vertical
@@ -2513,6 +2522,17 @@ private final class TextureAnimationReferenceController: AetherViewController {
         super.viewDidAppear(animated)
         guard autoplay, !didStartAutoplay else { return }
         didStartAutoplay = true
+        if regressionMode {
+            schedule(after: 1) { $0.openDetail(showsCamera: true) }
+            schedule(after: 2) { $0.detailController?.showMenu(trailing: true) }
+            schedule(after: 4) { $0.detailController?.activeMenu?.dismiss() }
+            schedule(after: 5) { $0.detailController?.pop() }
+            schedule(after: 7) { $0.openDetail(showsCamera: true) }
+            schedule(after: 8) { $0.detailController?.showMenu(trailing: true) }
+            schedule(after: 10) { $0.detailController?.activeMenu?.dismiss() }
+            schedule(after: 11) { $0.detailController?.pop() }
+            return
+        }
         schedule(after: 1) { $0.showMenu(trailing: false) }
         schedule(after: 3) { $0.activeMenu?.dismiss() }
         schedule(after: 4) { $0.showMenu(trailing: true) }
