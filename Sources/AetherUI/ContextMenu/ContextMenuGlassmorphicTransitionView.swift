@@ -603,322 +603,56 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
     }
 }
 
-/// Opening uses one connected mass after the initial egg impulse. The seed
-/// remains embedded in the carrier as its compact attachment shoulder while
-/// the belly grows, then retires only after the body has swallowed it. The two
-/// native surfaces always overlap; there is no detached cap or explicit tail.
-private func contextMenuOpeningSingleMassMorphSample(
-    source: CGRect,
-    target: CGRect,
-    outerFrame: CGRect,
+/// Both directions sample the same silhouette. Reversing the clock now
+/// reverses the actual liquid motion, including shoulder/neck ownership.
+func contextMenuGlassmorphicGeometrySample(
+    source: CGRect, target: CGRect, outerFrame: CGRect,
     outerCornerRadii: ContextMenuBloomCornerRadii,
-    sourceRadius: CGFloat,
-    anchor: ContextMenuBloomAnchor,
-    rawProgress: CGFloat
+    sourceRadius: CGFloat, targetRadius: CGFloat,
+    anchor: ContextMenuBloomAnchor, direction: ContextMenuBloomDirection,
+    rawProgress: CGFloat, reduceMotion: Bool
 ) -> ContextMenuGlassmorphicGeometrySample {
-    let raw = max(0.0, min(1.0, rawProgress))
-    let liquidT = contextMenuOpeningLiquidProgress(raw)
-    let unit = CGPoint(
-        x: max(0.0, min(1.0, anchor.unitPoint.x)),
-        y: max(0.0, min(1.0, anchor.unitPoint.y))
-    )
-    let sourceCenter = CGPoint(x: source.midX, y: source.midY)
-    let sourceMinSide = max(1.0, min(source.width, source.height))
-
-    let horizontalExitSign: CGFloat = unit.x >= 0.75 ? -1.0 : (unit.x <= 0.25 ? 1.0 : 0.0)
-    let verticalExitSign: CGFloat = unit.y <= 0.25 ? 1.0 : (unit.y >= 0.75 ? -1.0 : 0.0)
-    var semanticExit = CGPoint(
-        x: horizontalExitSign * (verticalExitSign == 0.0 ? 1.0 : 0.22),
-        y: verticalExitSign
-    )
-    let semanticLength = hypot(semanticExit.x, semanticExit.y)
-    if semanticLength > 0.001 {
-        semanticExit.x /= semanticLength
-        semanticExit.y /= semanticLength
+    let outer = contextMenuBloomGeometrySample(
+        source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
+        anchor: anchor, direction: .closing, rawProgress: rawProgress, reduceMotion: reduceMotion)
+    let sample = contextMenuClosingGlassmorphicGeometrySample(
+        source: source, target: target, outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
+        sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
+        direction: .closing, rawProgress: rawProgress, reduceMotion: reduceMotion)
+    let transform = contextMenuLiquidRecoilTransform(source: source, anchor: anchor,
+        rawProgress: rawProgress, reduceMotion: reduceMotion)
+    let radiusScale = min(transform.a, transform.d)
+    func radii(_ r: ContextMenuBloomCornerRadii) -> ContextMenuBloomCornerRadii {
+        .init(topLeft: r.topLeft * radiusScale, topRight: r.topRight * radiusScale,
+              bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale)
     }
-
-    let targetCenter = CGPoint(x: target.midX, y: target.midY)
-    var destinationFlow = CGPoint(
-        x: targetCenter.x - sourceCenter.x,
-        y: targetCenter.y - sourceCenter.y
-    )
-    let destinationLength = hypot(destinationFlow.x, destinationFlow.y)
-    if destinationLength > 0.001 {
-        destinationFlow.x /= destinationLength
-        destinationFlow.y /= destinationLength
-    } else {
-        destinationFlow = semanticExit
-    }
-
-    func point(from origin: CGPoint, direction: CGPoint, distance: CGFloat) -> CGPoint {
-        CGPoint(
-            x: origin.x + direction.x * distance,
-            y: origin.y + direction.y * distance
-        )
-    }
-
-    func quadratic(
-        from start: CGPoint,
-        control: CGPoint,
-        to end: CGPoint,
-        progress: CGFloat
-    ) -> CGPoint {
-        let t = max(0.0, min(1.0, progress))
-        let inverse = 1.0 - t
-        return CGPoint(
-            x: inverse * inverse * start.x + 2.0 * inverse * t * control.x + t * t * end.x,
-            y: inverse * inverse * start.y + 2.0 * inverse * t * control.y + t * t * end.y
-        )
-    }
-
-    func shiftedInside(_ frame: CGRect, bounds: CGRect) -> CGRect {
-        var result = frame
-        if result.width <= bounds.width {
-            result.origin.x = max(bounds.minX, min(bounds.maxX - result.width, result.minX))
-        }
-        if result.height <= bounds.height {
-            result.origin.y = max(bounds.minY, min(bounds.maxY - result.height, result.minY))
-        }
-        return result
-    }
-
-    func scalar(_ lhs: CGFloat, _ rhs: CGFloat, progress: CGFloat) -> CGFloat {
-        lhs + (rhs - lhs) * progress
-    }
-
-    // Compact the label capsule before the egg pulls away. Hold that width
-    // until the belly absorbs it; restoring the original width at retirement
-    // made a shelf protrude from the growing menu.
-    let eggIn = contextMenuBloomSmoothRange(liquidT, start: 0.025, end: 0.075)
-    let eggOut = 1.0 - contextMenuBloomSmoothRange(liquidT, start: 0.13, end: 0.23)
-    let egg = eggIn * eggOut
-    let seedTravelT = contextMenuBloomSample(
-        times: [0.025, 0.065, 0.11, 0.17],
-        values: [0.0, 0.30, 0.76, 1.0],
-        at: liquidT
-    )
-    let seedPathControl = point(
-        from: sourceCenter,
-        direction: semanticExit,
-        distance: sourceMinSide * 0.28
-    )
-    let seedPathEnd = point(
-        from: sourceCenter,
-        direction: destinationFlow,
-        distance: sourceMinSide * 0.38
-    )
-    var seedCenter = quadratic(
-        from: sourceCenter,
-        control: seedPathControl,
-        to: seedPathEnd,
-        progress: seedTravelT
-    )
-    var seedFlow = CGPoint(
-        x: semanticExit.x + (destinationFlow.x - semanticExit.x) * seedTravelT,
-        y: semanticExit.y + (destinationFlow.y - semanticExit.y) * seedTravelT
-    )
-    let seedFlowLength = hypot(seedFlow.x, seedFlow.y)
-    if seedFlowLength > 0.001 {
-        seedFlow.x /= seedFlowLength
-        seedFlow.y /= seedFlowLength
-    } else {
-        seedFlow = semanticExit
-    }
-
-    // The reference seed is an egg, not a long capsule. A real rotation now
-    // supplies the diagonal pull, so it no longer needs exaggerated axial
-    // stretch to imply direction.
-    let majorScale = 1.0 + 0.40 * egg
-    let minorScale = 1.0 / majorScale
-    // Keep the seed's real principal axes and rotate the surface itself.
-    // Converting an oriented ellipse into an axis-aligned bounding box made
-    // the centre follow a curve while the glass still read as a flat vertical
-    // scale. The compact seed keeps its area during directional stretch.
-    let compactWidth = min(source.width, sourceMinSide * 1.60)
-    let seedWidth = max(1.0, scalar(source.width, compactWidth, progress: eggIn) * minorScale)
-    let seedHeight = max(1.0, source.height * majorScale)
-    let seedFlowAngle = atan2(seedFlow.y, seedFlow.x)
-    let seedAxisRotation = seedFlowAngle - .pi * 0.5
-    let headRotation = seedAxisRotation * egg
-    var seedFrame = CGRect(
-        x: seedCenter.x - seedWidth * 0.5,
-        y: seedCenter.y - seedHeight * 0.5,
-        width: seedWidth,
-        height: seedHeight
-    )
-    let motionBounds = source.union(target).union(outerFrame)
-    seedFrame = shiftedInside(seedFrame, bounds: motionBounds)
-    seedCenter = CGPoint(x: seedFrame.midX, y: seedFrame.midY)
-    let seedRadius = min(sourceRadius, min(seedFrame.width, seedFrame.height) * 0.5)
-
-    // The carrier first follows the moving egg, then accelerates into the
-    // measured top-trailing-pinned outer frame.  Because the seed itself is
-    // already down-leading, this interpolation is a curved pull rather than
-    // a stationary scale from the button corner.
-    // The body is still practically coincident with the egg when it becomes
-    // visible. Its wider velocity window lets the belly grow over several
-    // 120 Hz frames while the seed remains embedded as the attachment shoulder.
-    let carrierT = contextMenuBloomSmoothRange(liquidT, start: 0.09, end: 0.22)
-    var bodyFrame = CGRect(
-        x: scalar(seedFrame.minX, outerFrame.minX, progress: carrierT),
-        y: scalar(seedFrame.minY, outerFrame.minY, progress: carrierT),
-        width: scalar(seedFrame.width, outerFrame.width, progress: carrierT),
-        height: scalar(seedFrame.height, outerFrame.height, progress: carrierT)
-    )
-
-    // Menus with only a few rows can have an almost square destination.  If
-    // their target aspect is inherited immediately, the drop skips the
-    // reference's height-first pear and reads as a rounded-square scale. Keep
-    // the same area/energy during the liquid phase but redistribute it along
-    // the flow axis; release that constraint as the platter starts settling.
-    let pearIn = contextMenuBloomSmoothRange(liquidT, start: 0.105, end: 0.19)
-    let pearOut = 1.0 - contextMenuBloomSmoothRange(liquidT, start: 0.22, end: 0.44)
-    let pearShape = pearIn * pearOut
-    let currentAspect = bodyFrame.width / max(1.0, bodyFrame.height)
-    let liquidAspect = min(currentAspect, 0.78)
-    let bodyArea = max(1.0, bodyFrame.width * bodyFrame.height)
-    let pearWidth = sqrt(bodyArea * liquidAspect)
-    let pearHeight = bodyArea / pearWidth
-    let bodyCenterBeforePear = CGPoint(x: bodyFrame.midX, y: bodyFrame.midY)
-    let resolvedBodyWidth = scalar(bodyFrame.width, pearWidth, progress: pearShape)
-    let resolvedBodyHeight = scalar(bodyFrame.height, pearHeight, progress: pearShape)
-    bodyFrame = CGRect(
-        x: bodyCenterBeforePear.x - resolvedBodyWidth * 0.5,
-        y: bodyCenterBeforePear.y - resolvedBodyHeight * 0.5,
-        width: resolvedBodyWidth,
-        height: resolvedBodyHeight
-    )
-
-    // The reference drop does not grow in place at the source corner.  Its
-    // whole mass first falls down-leading, then the destination pulls it back
-    // into the final platter.  This transient translation is deliberately a
-    // bell rather than an offset baked into the endpoint, so the measured
-    // menu frame remains exact after the liquid phase.
-    // Let the carrier gain volume before its lower edge starts falling.  Keeping
-    // this slightly behind the size handoff removes the single-frame vertical
-    // snap while preserving the compact, bottom-pulled seed.
-    let fallIn = contextMenuBloomSmoothRange(liquidT, start: 0.105, end: 0.235)
-    let fallOut = 1.0 - contextMenuBloomSmoothRange(liquidT, start: 0.32, end: 0.60)
-    let fall = fallIn * fallOut
-    let turnT = contextMenuBloomSmoothRange(liquidT, start: 0.105, end: 0.22)
-    var carrierFlow = CGPoint(
-        x: semanticExit.x + (destinationFlow.x - semanticExit.x) * turnT,
-        y: semanticExit.y + (destinationFlow.y - semanticExit.y) * turnT
-    )
-    let carrierFlowLength = hypot(carrierFlow.x, carrierFlow.y)
-    if carrierFlowLength > 0.001 {
-        carrierFlow.x /= carrierFlowLength
-        carrierFlow.y /= carrierFlowLength
-    } else {
-        carrierFlow = semanticExit
-    }
-    let fallDistance = sourceMinSide * 0.76 * fall
-    bodyFrame = bodyFrame.offsetBy(
-        dx: carrierFlow.x * fallDistance,
-        dy: carrierFlow.y * fallDistance
-    )
-    bodyFrame = shiftedInside(bodyFrame, bounds: motionBounds)
-    let bodyCenter = CGPoint(x: bodyFrame.midX, y: bodyFrame.midY)
-    // The destination surface inherits the seed's angle during ownership,
-    // then straightens only after its belly has begun to gain volume. This
-    // makes the handoff one continuous curved mass instead of a rotated tail
-    // being replaced by an axis-aligned rounded rectangle.
-    // Only the compact shoulder carries the physical tilt. Once the belly
-    // becomes broad, rotating its whole rectangular backing would enlarge
-    // the visual bbox and read as a card swinging in. Straighten during the
-    // seed-to-pear handoff; the asymmetric radii keep the curved pull alive.
-    let bodyStraightenT = contextMenuBloomSmoothRange(liquidT, start: 0.105, end: 0.18)
-    let bodyRotation = seedAxisRotation * (1.0 - bodyStraightenT)
-
-    // Three free corners remain fully inflated during the pear phase.  Only
-    // the top-trailing attachment tightens toward the destination radius,
-    // preserving a compact shoulder while the belly grows down-leading.
-    let birthRadius = min(bodyFrame.width, bodyFrame.height) * 0.5
-    let shoulderT = contextMenuBloomSmoothRange(liquidT, start: 0.105, end: 0.20)
-    let cornerSettleT = contextMenuBloomSmoothRange(liquidT, start: 0.24, end: 0.58)
-    func freeRadius(_ targetRadius: CGFloat) -> CGFloat {
-        birthRadius + (targetRadius - birthRadius) * cornerSettleT
-    }
-    func attachedRadius(_ targetRadius: CGFloat) -> CGFloat {
-        // The attachment is compact, but it remains a rounded shoulder of
-        // the same drop. Letting it collapse straight to the final 27 pt
-        // corner while the belly is still circular creates a square notch.
-        let compactRadius = min(
-            birthRadius,
-            max(targetRadius * 0.58, birthRadius * 0.28)
-        )
-        let pearRadius = birthRadius + (compactRadius - birthRadius) * shoulderT
-        return pearRadius + (targetRadius - pearRadius) * cornerSettleT
-    }
-    var bodyCornerRadii = ContextMenuBloomCornerRadii(
-        topLeft: freeRadius(outerCornerRadii.topLeft),
-        topRight: freeRadius(outerCornerRadii.topRight),
-        bottomLeft: freeRadius(outerCornerRadii.bottomLeft),
-        bottomRight: freeRadius(outerCornerRadii.bottomRight)
-    )
-    if unit.x >= 0.75, unit.y <= 0.25 {
-        bodyCornerRadii = ContextMenuBloomCornerRadii(
-            topLeft: bodyCornerRadii.topLeft,
-            topRight: attachedRadius(outerCornerRadii.topRight),
-            bottomLeft: bodyCornerRadii.bottomLeft,
-            bottomRight: bodyCornerRadii.bottomRight
-        )
-    } else if unit.x <= 0.25, unit.y <= 0.25 {
-        bodyCornerRadii = ContextMenuBloomCornerRadii(
-            topLeft: attachedRadius(outerCornerRadii.topLeft),
-            topRight: bodyCornerRadii.topRight,
-            bottomLeft: bodyCornerRadii.bottomLeft,
-            bottomRight: bodyCornerRadii.bottomRight
-        )
-    } else if unit.x >= 0.75, unit.y >= 0.75 {
-        bodyCornerRadii = ContextMenuBloomCornerRadii(
-            topLeft: bodyCornerRadii.topLeft,
-            topRight: bodyCornerRadii.topRight,
-            bottomLeft: bodyCornerRadii.bottomLeft,
-            bottomRight: attachedRadius(outerCornerRadii.bottomRight)
-        )
-    } else if unit.x <= 0.25, unit.y >= 0.75 {
-        bodyCornerRadii = ContextMenuBloomCornerRadii(
-            topLeft: bodyCornerRadii.topLeft,
-            topRight: bodyCornerRadii.topRight,
-            bottomLeft: attachedRadius(outerCornerRadii.bottomLeft),
-            bottomRight: bodyCornerRadii.bottomRight
-        )
-    }
-
-    // Native glass lobes are opaque whenever registered. The body becomes
-    // available while coincident with the seed, but the seed stays registered
-    // as an embedded shoulder until the growing belly fully contains it. This
-    // gives the container effect overlapping fields to flow together without
-    // ever manufacturing a detached bridge.
-    let bodyOwnershipT = contextMenuBloomSmoothRange(liquidT, start: 0.062, end: 0.105)
-    let headRetirementT = contextMenuBloomSmoothRange(liquidT, start: 0.16, end: 0.245)
-    let transportCenter = CGPoint(
-        x: (seedCenter.x + bodyCenter.x) * 0.5,
-        y: (seedCenter.y + bodyCenter.y) * 0.5
-    )
-    return ContextMenuGlassmorphicGeometrySample(
-        headFrame: seedFrame,
-        bodyFrame: bodyFrame,
-        headRotation: headRotation,
-        bodyRotation: bodyRotation,
-        headRadius: seedRadius,
-        bodyCornerRadii: bodyCornerRadii,
-        bridgeStart: transportCenter,
-        bridgeEnd: transportCenter,
-        bridgeRadius: 0.0,
-        neckBulbCenter: transportCenter,
-        neckBulbRadius: 0.0,
-        headAlpha: 1.0 - headRetirementT,
-        bodyAlpha: bodyOwnershipT
-    )
+    return .init(headFrame: sample.headFrame.applying(transform),
+        bodyFrame: sample.bodyFrame.applying(transform),
+        headRotation: sample.headRotation, bodyRotation: sample.bodyRotation,
+        headRadius: sample.headRadius * radiusScale, bodyCornerRadii: radii(sample.bodyCornerRadii),
+        bridgeStart: sample.bridgeStart.applying(transform), bridgeEnd: sample.bridgeEnd.applying(transform),
+        bridgeRadius: sample.bridgeRadius * radiusScale,
+        neckBulbCenter: sample.neckBulbCenter.applying(transform), neckBulbRadius: sample.neckBulbRadius * radiusScale,
+        headAlpha: sample.headAlpha, bodyAlpha: sample.bodyAlpha)
 }
 
-/// Resolves the direction-specific topology inside the gross bloom bounds.
-/// Opening becomes one connected seed/shoulder/carrier mass with guaranteed
-/// overlap; closing retains the source/body/neck composition used by its
-/// return flow.
-func contextMenuGlassmorphicGeometrySample(
+/// A small, area-preserving damped recoil. The sine window gives both ends
+/// zero displacement and velocity; it cannot snap on or move the anchor.
+func contextMenuLiquidRecoilTransform(source: CGRect, anchor: ContextMenuBloomAnchor,
+                                     rawProgress: CGFloat, reduceMotion: Bool) -> CGAffineTransform {
+    guard !reduceMotion else { return .identity }
+    let t = contextMenuBloomNormalize(1 - rawProgress, start: 0.38, end: 0.98)
+    guard t > 0, t < 1 else { return .identity }
+    let wave = exp(-2.5 * t) * sin(2.6 * .pi * t) * pow(sin(.pi * t), 2) / 0.22
+    let scaleY = 1 + 0.045 * wave
+    let scaleX = 1 / scaleY
+    let pivot = CGPoint(x: source.minX + source.width * anchor.unitPoint.x,
+                        y: source.minY + source.height * anchor.unitPoint.y)
+    return .init(a: scaleX, b: 0, c: 0, d: scaleY,
+                 tx: pivot.x * (1 - scaleX), ty: pivot.y * (1 - scaleY))
+}
+
+private func contextMenuClosingGlassmorphicGeometrySample(
     source: CGRect,
     target: CGRect,
     outerFrame: CGRect,
@@ -996,17 +730,6 @@ func contextMenuGlassmorphicGeometrySample(
         )
     }
 
-    if direction == .opening {
-        return contextMenuOpeningSingleMassMorphSample(
-            source: source,
-            target: target,
-            outerFrame: outerFrame,
-            outerCornerRadii: outerCornerRadii,
-            sourceRadius: sourceRadius,
-            anchor: anchor,
-            rawProgress: raw
-        )
-    }
 
     let phase: CGFloat
     let surfaceTensionStrength: CGFloat
@@ -1987,16 +1710,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         displayedGlassmorphicSample = glassSample
 
         let surfaceTension = max(0.0, min(1.0, glassSample.bridgeRadius / 15.0))
-        var glassSpacing: CGFloat
-        if animationDirection >= 0.0, interruptedCollapse == nil {
-            // Opening uses overlapping seed/shoulder/carrier fields. A wide
-            // compositor reach would manufacture a detached halo outside that
-            // intentionally connected mass.
-            glassSpacing = 0.0
-        } else {
-            // Closing intentionally keeps the longer measured neck.
-            glassSpacing = 18.0 + 4.0 * surfaceTension
-        }
+        var glassSpacing: CGFloat = 18.0 + 4.0 * surfaceTension
         let interruptionBlend = interruptedCollapse.map {
             Self.smootherstep(0.0, 0.35, interruptedCollapseRunProgress(rawT: rawT, startProgress: $0.rawProgress))
         }
@@ -2046,11 +1760,6 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         var renderedHeadAlpha: CGFloat
         if usesOpaqueNativeLobes {
             renderedHeadAlpha = glassSample.headAlpha <= 0.001 ? 0.0 : 1.0
-        } else if animationDirection >= 0.0, !UIAccessibility.isReduceMotionEnabled {
-            // Legacy glass cannot merge overlapping fields. Let its existing
-            // single-platter fallback own the overlap instead of drawing two
-            // translucent shells; native iOS 26 keeps the embedded shoulder.
-            renderedHeadAlpha = glassSample.headAlpha * (1.0 - glassSample.bodyAlpha)
         } else {
             renderedHeadAlpha = glassSample.headAlpha
         }
@@ -2078,34 +1787,28 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             : [shadowPath]
         updateSourceContentMask(paths: sourceMaskPaths)
         sourceProxyContainer.transform = .identity
-        if animationDirection < 0 {
-            if let state = interruptedCollapse {
-                let t = contextMenuBloomSmootherstep(interruptedCollapseRunProgress(
-                    rawT: rawT, startProgress: state.rawProgress
-                ))
-                sourceProxyContainer.frame = CGRect(
-                    x: Self.lerp(state.sourceContentFrame.minX, startFrame.minX, t),
-                    y: Self.lerp(state.sourceContentFrame.minY, startFrame.minY, t),
-                    width: startFrame.width, height: startFrame.height
-                )
-            } else {
-                let attached = contextMenuBloomAnchoredFrame(
-                    contentSize: startFrame.size,
-                    in: glassMorphContainer.isUsingNativeContainerEffect
-                        ? (glassSample.headAlpha > 0.001 ? glassSample.bodyFrame.union(glassSample.headFrame) : glassSample.bodyFrame)
-                        : metrics.frame,
-                    anchor: bloomAnchor
-                )
-                let t = Self.smootherstep(0.40, 0.78, 1.0 - rawT)
-                sourceProxyContainer.frame = CGRect(
-                    x: Self.lerp(attached.minX, startFrame.minX, t),
-                    y: Self.lerp(attached.minY, startFrame.minY, t),
-                    width: startFrame.width, height: startFrame.height
-                )
-            }
+        if let state = interruptedCollapse {
+            let t = contextMenuBloomSmootherstep(interruptedCollapseRunProgress(
+                rawT: rawT, startProgress: state.rawProgress
+            ))
+            sourceProxyContainer.frame = CGRect(
+                x: Self.lerp(state.sourceContentFrame.minX, startFrame.minX, t),
+                y: Self.lerp(state.sourceContentFrame.minY, startFrame.minY, t),
+                width: startFrame.width, height: startFrame.height
+            )
         } else {
-            sourceProxyContainer.frame = contextMenuBloomAnchoredFrame(
-                contentSize: startFrame.size, in: glassSample.headFrame, anchor: bloomAnchor
+            let attached = contextMenuBloomAnchoredFrame(
+                contentSize: startFrame.size,
+                in: glassMorphContainer.isUsingNativeContainerEffect
+                    ? (glassSample.headAlpha > 0.001 ? glassSample.bodyFrame.union(glassSample.headFrame) : glassSample.bodyFrame)
+                    : metrics.frame,
+                anchor: bloomAnchor
+            )
+            let t = Self.smootherstep(0.40, 0.78, 1.0 - rawT)
+            sourceProxyContainer.frame = CGRect(
+                x: Self.lerp(attached.minX, startFrame.minX, t),
+                y: Self.lerp(attached.minY, startFrame.minY, t),
+                width: startFrame.width, height: startFrame.height
             )
         }
         for proxySubview in sourceProxyContainer.subviews {
@@ -2209,7 +1912,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     private func sourceContentTransform(rawT: CGFloat) -> CGAffineTransform {
-        guard animationDirection < 0, !UIAccessibility.isReduceMotionEnabled else { return .identity }
+        guard !UIAccessibility.isReduceMotionEnabled else { return .identity }
         if let state = interruptedCollapse {
             let t = Self.smootherstep(0.0, 0.68, interruptedCollapseRunProgress(
                 rawT: rawT, startProgress: state.rawProgress
@@ -2261,7 +1964,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         }
         return contextMenuSourceMaterializationSample(
             rawProgress: rawT,
-            direction: animationDirection < 0 ? .closing : .opening,
+            direction: .closing,
             menuHeight: targetMenuFrameInOverlay.height,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
@@ -2294,10 +1997,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         // reaches an exact endpoint, so completion does not cause a one-frame
         // brightness snap when the snapshots are removed.
         let contentT = contentTimelineProgress(rawT: rawT)
-        let isOpening = animationDirection >= 0.0 && interruptedCollapse == nil
-        var weights = isOpening
-            ? contextMenuBloomContentWeights(at: contentT)
-            : contextMenuBloomClosingContentWeights(at: contentT)
+        var weights = contextMenuBloomClosingContentWeights(at: contentT)
         var interruptedBlend: CGFloat = 0
         var interruptedReveal: CGFloat?
         if let state = interruptedCollapse {
@@ -2383,41 +2083,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
         let snapshotAlpha = weights.snapshotContainer
         snapshotContainer.alpha = snapshotAlpha
-        if isOpening, !UIAccessibility.isReduceMotionEnabled, snapshotAlpha > 0.0001 {
-            // The reference does not reveal a fixed final canvas through a
-            // growing crop. Its rows are optically compressed into the drop
-            // and expand with it. Scale around the bloom attachment so the
-            // content and glass keep one shared top-trailing origin.
-            let targetSize = snapshotContainer.bounds.size
-            let carrierSize = finalMenuGlassSurfaceView.bounds.size
-            let scaleX = min(
-                1.0,
-                max(0.12, carrierSize.width / max(1.0, targetSize.width))
-            )
-            let scaleY = min(
-                1.0,
-                max(0.12, carrierSize.height / max(1.0, targetSize.height))
-            )
-            let localAnchor = CGPoint(
-                x: targetSize.width * bloomAnchor.unitPoint.x,
-                y: targetSize.height * bloomAnchor.unitPoint.y
-            )
-            let center = CGPoint(x: targetSize.width * 0.5, y: targetSize.height * 0.5)
-            let anchorVector = CGPoint(
-                x: localAnchor.x - center.x,
-                y: localAnchor.y - center.y
-            )
-            snapshotContainer.transform = CGAffineTransform(
-                a: scaleX,
-                b: 0.0,
-                c: 0.0,
-                d: scaleY,
-                tx: anchorVector.x * (1.0 - scaleX),
-                ty: anchorVector.y * (1.0 - scaleY)
-            )
-        } else {
-            snapshotContainer.transform = .identity
-        }
+        snapshotContainer.transform = .identity
         if snapshotAlpha > 0.0001 {
         // Child alphas are normalized because the container supplies the
         // common opacity. Equal-power gains soften the source-over midpoint
@@ -2432,7 +2098,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         liveMenuContentView.alpha = liveT
         // Sharp/live/blurred copies describe the same rows. Their common
         // deformation belongs to the carrier, never to individual copies.
-        let deformation: CGFloat = isOpening ? 1 : 0.25
+        let deformation: CGFloat = 0.25
         let sharedTransform = directionalTransform(
             pull: pull * deformation, arc: arc * deformation,
             alongScale: 1 + (sharpAlongScale - 1) * deformation,
@@ -2466,7 +2132,6 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     private func contentTimelineProgress(rawT: CGFloat) -> CGFloat {
         let t = max(0.0, min(1.0, rawT))
-        guard animationDirection < 0 else { return t }
         if let interruptedCollapse {
             let runT = interruptedCollapseRunProgress(
                 rawT: t,
@@ -2552,22 +2217,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             let finalDecay = 1.0 - Self.smootherstep(0.58, 0.96, t)
             let sourceFade = Self.smootherstep(0.04, 0.20, t)
             let intensity = max(0, lensBell * visibleIn * max(finalDecay, 0.0) * sourceFade)
-            if animationDirection >= 0.0, interruptedCollapse == nil {
-                // The transport lobe begins smaller than the old fixed 30 pt
-                // displacement. Cap refraction to its current diameter so
-                // the filter cannot manufacture a spike that reads as the
-                // removed explicit tail.
-                let minimumSide = min(
-                    finalMenuGlassSurfaceView.bounds.width,
-                    finalMenuGlassSurfaceView.bounds.height
-                )
-                let bodyReady = Self.smootherstep(0.08, 0.22, t)
-                let peakDisplacement = min(30.0, max(0.0, minimumSide * 0.14))
-                let peakBlur = min(1.8, max(0.0, minimumSide * 0.018))
-                apply(displacement: peakDisplacement * intensity * bodyReady, blur: peakBlur * intensity * bodyReady)
-            } else {
-                apply(displacement: 30.0 * intensity, blur: 1.8 * intensity)
-            }
+            apply(displacement: 30.0 * intensity, blur: 1.8 * intensity)
         }
     }
 
@@ -2603,23 +2253,6 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             }
 
             let t = max(0, min(1, rawT))
-            let isOpening = animationDirection >= 0.0 && interruptedCollapse == nil
-            if isOpening {
-                // Strong enough to bend the early rows, but short and compact
-                // enough that they remain visible inside the growing drop.
-                // Closing keeps its established longer 48 pt dissolve below.
-                let distortionIn = Self.smootherstep(0.10, 0.24, t)
-                let distortionOut = 1.0 - Self.smootherstep(0.62, 0.90, t)
-                let snapshotVisibility = max(0.0, min(1.0, snapshotContainer.alpha))
-                let intensity = max(
-                    0.0,
-                    distortionIn * distortionOut * sqrt(snapshotVisibility)
-                )
-                let snapshotOnly = 1.0 - Self.smootherstep(0.0, 0.08, liveMix)
-                apply(displacement: 42.0 * intensity * snapshotOnly, blur: 1.5 * intensity * snapshotOnly)
-                return
-            }
-
             let phase = Self.smootherstep(0.20, 0.90, t)
             let lensBell = sin(.pi * phase)
             let snapshotVisibility = max(0.0, min(1.0, snapshotContainer.alpha))
@@ -2682,11 +2315,17 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             sourceRadius: startCornerRadius,
             targetRadius: finalCornerRadius,
             anchor: bloomAnchor,
-            direction: animationDirection < 0 ? .closing : .opening,
+            direction: .closing,
             rawProgress: rawT,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
-        return Metrics(frame: sample.frame, cornerRadii: sample.cornerRadii)
+        let recoil = contextMenuLiquidRecoilTransform(source: startFrame, anchor: bloomAnchor,
+            rawProgress: rawT, reduceMotion: UIAccessibility.isReduceMotionEnabled)
+        let radiusScale = min(recoil.a, recoil.d)
+        let r = sample.cornerRadii
+        return Metrics(frame: sample.frame.applying(recoil), cornerRadii: .init(
+            topLeft: r.topLeft * radiusScale, topRight: r.topRight * radiusScale,
+            bottomLeft: r.bottomLeft * radiusScale, bottomRight: r.bottomRight * radiusScale))
     }
 
     private func currentGlassmorphicSample(
@@ -2726,7 +2365,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             sourceRadius: startCornerRadius,
             targetRadius: finalCornerRadius,
             anchor: bloomAnchor,
-            direction: animationDirection < 0 ? .closing : .opening,
+            direction: .closing,
             rawProgress: rawT,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )

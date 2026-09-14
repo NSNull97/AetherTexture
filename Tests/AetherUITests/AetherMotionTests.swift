@@ -123,7 +123,7 @@ final class AetherMotionTests: XCTestCase {
             sourceRadius: 22.5,
             targetRadius: 27.0,
             anchor: anchor,
-            direction: direction,
+            direction: .closing,
             rawProgress: rawProgress,
             reduceMotion: reduceMotion
         )
@@ -722,178 +722,6 @@ final class AetherMotionTests: XCTestCase {
         }
     }
 
-    func testContextMenuGlassmorphicOpeningHasSeedOnlyEggStageBeforeCarrierOwnershipTransfer() throws {
-        let source = CGRect(x: 309, y: 92, width: 46, height: 45)
-        let sourceCenter = CGPoint(x: source.midX, y: source.midY)
-        let sourceMinSide = min(source.width, source.height)
-        let sampleCount = 2_000
-        let samples = (0...sampleCount).map { index in
-            let progress = CGFloat(index) / CGFloat(sampleCount)
-            return (
-                progress: progress,
-                morph: contextMenuGlassmorphicSample(
-                    rawProgress: progress,
-                    direction: .opening
-                ).morph
-            )
-        }
-
-        let seedOnlySamples = samples.filter {
-            $0.morph.bodyAlpha <= 0.001
-                && $0.morph.bridgeRadius <= 0.5
-                && $0.morph.neckBulbRadius <= 0.5
-                && $0.morph.headAlpha >= 0.999
-        }
-        let egg = try XCTUnwrap(seedOnlySamples.max { lhs, rhs in
-            let lhsVerticalBias = lhs.morph.headFrame.height / source.height
-                - lhs.morph.headFrame.width / source.width
-            let rhsVerticalBias = rhs.morph.headFrame.height / source.height
-                - rhs.morph.headFrame.width / source.width
-            return lhsVerticalBias < rhsVerticalBias
-        })
-        let firstBodyBirth = try XCTUnwrap(samples.first {
-            $0.morph.bodyAlpha > 0.001
-        })
-
-        let eggCenter = CGPoint(
-            x: egg.morph.headFrame.midX,
-            y: egg.morph.headFrame.midY
-        )
-        let leadingTravel = sourceCenter.x - eggCenter.x
-        let downwardTravel = eggCenter.y - sourceCenter.y
-        let verticalScale = egg.morph.headFrame.height / source.height
-        let horizontalScale = egg.morph.headFrame.width / source.width
-
-        XCTAssertLessThan(egg.progress, firstBodyBirth.progress)
-        XCTAssertEqual(egg.morph.bodyAlpha, 0.0, accuracy: 0.001)
-        XCTAssertEqual(egg.morph.bridgeRadius, 0.0, accuracy: 0.001)
-        XCTAssertEqual(egg.morph.neckBulbRadius, 0.0, accuracy: 0.001)
-        XCTAssertGreaterThan(
-            egg.morph.headFrame.height - source.height,
-            sourceMinSide * 0.08,
-            "The source must become a visible vertical egg before carrier ownership transfers"
-        )
-        XCTAssertGreaterThan(
-            verticalScale - horizontalScale,
-            1.0 / sourceMinSide,
-            "The seed grew uniformly instead of stretching vertically"
-        )
-        XCTAssertGreaterThan(leadingTravel, sourceMinSide * 0.015)
-        XCTAssertGreaterThan(downwardTravel, sourceMinSide * 0.08)
-        XCTAssertGreaterThan(
-            downwardTravel,
-            leadingTravel,
-            "The early seed must be pulled predominantly from the bottom"
-        )
-    }
-
-    func testContextMenuGlassmorphicOpeningKeepsSeedEmbeddedUntilCarrierAbsorbsIt() {
-        let sampleCount = 4_000
-        var sawSharedOwnership = false
-        var sawEmbeddedShoulder = false
-        var sawRetirement = false
-        var headHasRetired = false
-        var previousHeadAlpha: CGFloat = 1.0
-        var previousBodyAlpha: CGFloat = 0.0
-
-        for index in 0...sampleCount {
-            let progress = CGFloat(index) / CGFloat(sampleCount)
-            let sample = contextMenuGlassmorphicSample(
-                rawProgress: progress,
-                direction: .opening
-            ).morph
-
-            XCTAssertLessThanOrEqual(sample.headAlpha, previousHeadAlpha + 0.000_001)
-            XCTAssertGreaterThanOrEqual(sample.bodyAlpha + 0.000_001, previousBodyAlpha)
-            XCTAssertGreaterThanOrEqual(sample.headAlpha, 0.0)
-            XCTAssertLessThanOrEqual(sample.headAlpha, 1.0)
-            XCTAssertGreaterThanOrEqual(sample.bodyAlpha, 0.0)
-            XCTAssertLessThanOrEqual(sample.bodyAlpha, 1.0)
-            XCTAssertEqual(sample.bridgeRadius, 0.0, accuracy: 0.001)
-            XCTAssertEqual(sample.neckBulbRadius, 0.0, accuracy: 0.001)
-            XCTAssertEqual(sample.bridgeStart, sample.bridgeEnd)
-            XCTAssertEqual(sample.bridgeStart, sample.neckBulbCenter)
-
-            if sample.headAlpha > 0.001, sample.bodyAlpha > 0.001 {
-                sawSharedOwnership = true
-                XCTAssertTrue(
-                    sample.headFrame.intersects(sample.bodyFrame),
-                    "Ownership surfaces separated at raw \(progress)"
-                )
-                if sample.bodyAlpha >= 0.999, sample.headAlpha >= 0.999 {
-                    sawEmbeddedShoulder = true
-                }
-            }
-
-            if headHasRetired {
-                XCTAssertEqual(
-                    sample.headAlpha,
-                    0.0,
-                    accuracy: 0.001,
-                    "Opening seed reappeared after carrier ownership completed"
-                )
-            } else if sample.headAlpha <= 0.001 {
-                headHasRetired = true
-                sawRetirement = true
-            }
-            previousHeadAlpha = sample.headAlpha
-            previousBodyAlpha = sample.bodyAlpha
-        }
-
-        XCTAssertTrue(sawSharedOwnership)
-        XCTAssertTrue(sawEmbeddedShoulder)
-        XCTAssertTrue(sawRetirement)
-    }
-
-    func testContextMenuGlassmorphicOpeningKeepsPearForNearSquareDestination() {
-        let source = CGRect(x: 309, y: 92, width: 46, height: 45)
-        let target = CGRect(x: 100, y: 92, width: 255, height: 245)
-        let anchor = ContextMenuBloomAnchor.topTrailing
-        let progress: CGFloat = 117.0 / 320.0
-        let outer = contextMenuBloomGeometrySample(
-            source: source,
-            target: target,
-            sourceRadius: 22.5,
-            targetRadius: 27.0,
-            anchor: anchor,
-            direction: .opening,
-            rawProgress: progress,
-            reduceMotion: false
-        )
-        let sample = contextMenuGlassmorphicGeometrySample(
-            source: source,
-            target: target,
-            outerFrame: outer.frame,
-            outerCornerRadii: outer.cornerRadii,
-            sourceRadius: 22.5,
-            targetRadius: 27.0,
-            anchor: anchor,
-            direction: .opening,
-            rawProgress: progress,
-            reduceMotion: false
-        )
-        let sourceCenter = CGPoint(x: source.midX, y: source.midY)
-        let carrierCenter = CGPoint(x: sample.bodyFrame.midX, y: sample.bodyFrame.midY)
-        let aspect = sample.bodyFrame.width / sample.bodyFrame.height
-        let attachedRadius = sample.bodyCornerRadii.topRight
-        let freeRadius = sample.bodyCornerRadii.topLeft
-
-        XCTAssertLessThanOrEqual(aspect, 0.80)
-        XCTAssertEqual(
-            sample.bodyFrame.width * sample.bodyFrame.height,
-            outer.frame.width * outer.frame.height,
-            accuracy: outer.frame.width * outer.frame.height * 0.002
-        )
-        XCTAssertLessThan(carrierCenter.x, sourceCenter.x - 45.0 * 0.8)
-        XCTAssertGreaterThan(carrierCenter.y, sourceCenter.y + 45.0 * 0.8)
-        XCTAssertLessThan(attachedRadius, freeRadius * 0.75)
-        XCTAssertGreaterThanOrEqual(attachedRadius, freeRadius * 0.24)
-        XCTAssertEqual(sample.headAlpha, 0.0, accuracy: 0.001)
-        XCTAssertEqual(sample.bodyAlpha, 1.0, accuracy: 0.001)
-        XCTAssertEqual(sample.bridgeRadius, 0.0, accuracy: 0.001)
-        XCTAssertEqual(sample.neckBulbRadius, 0.0, accuracy: 0.001)
-    }
-
     func testContextMenuGlassmorphicOpeningVisibleUnionIsContinuousAt120Hz() throws {
         let duration = ContextMenuController.glassmorphicTiming.openDuration
         let frameCount = Int(ceil(duration * 120.0))
@@ -936,35 +764,6 @@ final class AetherMotionTests: XCTestCase {
         }
     }
 
-    func testContextMenuGlassmorphicOpeningCarriesRealFlowAngleThroughOwnership() {
-        let duration: CGFloat = 0.32 // Reference phase positions; runtime tempo is tested separately.
-        let seed = contextMenuGlassmorphicSample(
-            rawProgress: (50.0 / 1_000.0) / duration,
-            direction: .opening
-        ).morph
-        XCTAssertGreaterThan(seed.headRotation, 0.12)
-        XCTAssertGreaterThan(seed.headFrame.height, seed.headFrame.width * 1.8)
-        XCTAssertEqual(seed.bodyRotation, seed.headRotation, accuracy: 0.04)
-
-        let transientCarrier = contextMenuGlassmorphicSample(
-            rawProgress: (66.0 / 1_000.0) / duration,
-            direction: .opening
-        ).morph
-        XCTAssertGreaterThan(transientCarrier.bodyRotation, 0.08)
-
-        let acceleratedPear = contextMenuGlassmorphicSample(
-            rawProgress: (83.0 / 1_000.0) / duration,
-            direction: .opening
-        ).morph
-        XCTAssertEqual(acceleratedPear.bodyRotation, 0.0, accuracy: 0.001)
-
-        let upright = contextMenuGlassmorphicSample(
-            rawProgress: (150.0 / 1_000.0) / duration,
-            direction: .opening
-        ).morph
-        XCTAssertEqual(upright.bodyRotation, 0.0, accuracy: 0.001)
-    }
-
     func testContextMenuGlassmorphicKeepsVisibleUnionInsideTopTrailingPinnedOuterBounds() {
         let source = CGRect(x: 309, y: 92, width: 46, height: 45)
         let checkpoints: [CGFloat] = [0.0, 0.36, 0.48, 0.58, 0.70, 0.82, 1.0]
@@ -994,55 +793,7 @@ final class AetherMotionTests: XCTestCase {
         }
     }
 
-    func testContextMenuGlassmorphicUsesDirectionSpecificHeadNeckTimingAtMeasuredCheckpoints() {
-        let source = CGRect(x: 309, y: 92, width: 46, height: 45)
-        let opening = contextMenuGlassmorphicSample(rawProgress: 0.52, direction: .opening).morph
-        let closing = contextMenuGlassmorphicSample(rawProgress: 0.42, direction: .closing).morph
-
-        XCTAssertEqual(opening.headAlpha, 0.0, accuracy: 0.001)
-        XCTAssertEqual(opening.bodyAlpha, 1.0, accuracy: 0.001)
-        XCTAssertEqual(opening.bridgeRadius, 0.0)
-        XCTAssertEqual(opening.neckBulbRadius, 0.0)
-        XCTAssertEqual(opening.bridgeStart, opening.bridgeEnd)
-        XCTAssertEqual(opening.bridgeStart, opening.neckBulbCenter)
-        XCTAssertGreaterThan(opening.bodyFrame.width, opening.headFrame.width)
-        XCTAssertGreaterThan(opening.bodyFrame.height, opening.headFrame.height)
-        XCTAssertGreaterThan(closing.headAlpha, 0.01, "Missing closing head")
-        XCTAssertGreaterThan(closing.bodyAlpha, 0.01, "Missing closing body")
-        XCTAssertGreaterThan(closing.bridgeRadius, 1.0, "Missing closing neck")
-        XCTAssertGreaterThan(closing.headFrame.width, 1.0, "Collapsed closing head")
-        XCTAssertGreaterThan(closing.bodyFrame.width, closing.headFrame.width)
-        XCTAssertGreaterThan(closing.bodyFrame.height, closing.headFrame.height)
-        XCTAssertNotEqual(closing.bridgeStart, closing.bridgeEnd)
-        let normalizedClosingHeadArea = (closing.headFrame.width / source.width)
-            * (closing.headFrame.height / source.height)
-        XCTAssertLessThanOrEqual(normalizedClosingHeadArea, 1.08)
-
-        let absorbedOpening = contextMenuGlassmorphicSample(
-            rawProgress: 0.72,
-            direction: .opening
-        ).morph
-        XCTAssertLessThan(absorbedOpening.headAlpha, 0.01)
-        XCTAssertEqual(absorbedOpening.bridgeRadius, 0.0, accuracy: 0.001)
-
-        let lateClosing = contextMenuGlassmorphicSample(
-            rawProgress: 0.10,
-            direction: .closing
-        ).morph
-        XCTAssertGreaterThan(lateClosing.headAlpha, 0.9)
-        XCTAssertGreaterThan(lateClosing.bodyAlpha, 0.01)
-        XCTAssertGreaterThan(lateClosing.bridgeRadius, 0.5)
-    }
-
     func testContextMenuGlassmorphicUsesThickerBodySideContinuationDuringNeckPhase() {
-        let opening = contextMenuGlassmorphicSample(
-            rawProgress: 0.50,
-            direction: .opening
-        ).morph
-        XCTAssertEqual(opening.bridgeRadius, 0.0)
-        XCTAssertEqual(opening.neckBulbRadius, 0.0)
-        XCTAssertEqual(opening.bridgeStart, opening.bridgeEnd)
-        XCTAssertEqual(opening.bridgeStart, opening.neckBulbCenter)
 
         let sample = contextMenuGlassmorphicSample(
             rawProgress: 0.42,
@@ -1097,14 +848,6 @@ final class AetherMotionTests: XCTestCase {
     }
 
     func testContextMenuGlassmorphicTopTrailingTailExitsBottomLeadingThenCurvesInward() {
-        let opening = contextMenuGlassmorphicSample(
-            rawProgress: 0.50,
-            direction: .opening
-        ).morph
-        XCTAssertEqual(opening.bridgeRadius, 0.0)
-        XCTAssertEqual(opening.neckBulbRadius, 0.0)
-        XCTAssertEqual(opening.bridgeStart, opening.bridgeEnd)
-        XCTAssertEqual(opening.bridgeStart, opening.neckBulbCenter)
 
         let progress: CGFloat = 0.42
         let sample = contextMenuGlassmorphicSample(
@@ -1201,34 +944,6 @@ final class AetherMotionTests: XCTestCase {
         XCTAssertEqual(reduced.neckBulbRadius, 0.0)
     }
 
-    func testContextMenuGlassmorphicBulbHasDirectionSpecificTimingAndEarlyOpeningAbsorption() {
-        let progress: CGFloat = 0.50
-        let opening = contextMenuGlassmorphicSample(
-            rawProgress: progress,
-            direction: .opening
-        ).morph
-        let closing = contextMenuGlassmorphicSample(
-            rawProgress: 0.42,
-            direction: .closing
-        ).morph
-
-        XCTAssertEqual(opening.bridgeRadius, 0.0, accuracy: 0.001)
-        XCTAssertEqual(opening.neckBulbRadius, 0.0, accuracy: 0.001)
-        XCTAssertEqual(opening.bridgeStart, opening.bridgeEnd)
-        XCTAssertEqual(opening.bridgeStart, opening.neckBulbCenter)
-        XCTAssertGreaterThan(closing.bridgeRadius, 0.5)
-        XCTAssertGreaterThan(closing.neckBulbRadius, closing.bridgeRadius)
-        XCTAssertNotEqual(opening.neckBulbCenter, closing.neckBulbCenter)
-
-        let absorbedOpening = contextMenuGlassmorphicSample(
-            rawProgress: 0.58,
-            direction: .opening
-        ).morph
-        XCTAssertLessThan(absorbedOpening.headAlpha, 0.01)
-        XCTAssertEqual(absorbedOpening.bridgeRadius, 0.0, accuracy: 0.001)
-        XCTAssertEqual(absorbedOpening.neckBulbRadius, 0.0, accuracy: 0.001)
-    }
-
     func testContextMenuGlassmorphicRegistersBridgeAndBulbTogetherAndRemovesThemForReduceMotion() {
         let sampleCount = 4_000
 
@@ -1253,12 +968,7 @@ final class AetherMotionTests: XCTestCase {
                     XCTAssertGreaterThan(sample.neckBulbRadius, sample.bridgeRadius)
                 }
             }
-            switch direction {
-            case .opening:
-                XCTAssertFalse(sawActiveNeck, "Opening must remain a single carrier without a bridge")
-            case .closing:
-                XCTAssertTrue(sawActiveNeck, "Missing active neck phase for closing")
-            }
+            XCTAssertTrue(sawActiveNeck, "Both directions must traverse the same connected neck")
 
             let reducedSample = contextMenuGlassmorphicSample(
                 rawProgress: 0.5,
@@ -1268,45 +978,6 @@ final class AetherMotionTests: XCTestCase {
             XCTAssertEqual(reducedSample.bridgeRadius, 0.0)
             XCTAssertEqual(reducedSample.neckBulbRadius, 0.0)
         }
-    }
-
-    func testContextMenuGlassmorphicKeepsClosingNeckConnectedCloserToEndpointAndForLonger() {
-        let sampleCount = 2_000
-        let visibleThreshold: CGFloat = 0.5
-
-        func visibleWindow(
-            for direction: ContextMenuBloomDirection
-        ) -> (start: CGFloat, end: CGFloat, span: CGFloat) {
-            let activeElapsedProgress = (0...sampleCount).compactMap { index -> CGFloat? in
-                let rawProgress = CGFloat(index) / CGFloat(sampleCount)
-                let radius = contextMenuGlassmorphicSample(
-                    rawProgress: rawProgress,
-                    direction: direction
-                ).morph.bridgeRadius
-                guard radius > visibleThreshold else { return nil }
-                return direction == .opening ? rawProgress : 1.0 - rawProgress
-            }
-            guard
-                let first = activeElapsedProgress.min(),
-                let last = activeElapsedProgress.max()
-            else {
-                return (0.0, 0.0, 0.0)
-            }
-            return (first, last, last - first)
-        }
-
-        let opening = visibleWindow(for: .opening)
-        let closing = visibleWindow(for: .closing)
-        let openingSeconds = opening.span * CGFloat(ContextMenuController.glassmorphicTiming.openDuration)
-        let closingSeconds = closing.span * CGFloat(ContextMenuController.glassmorphicTiming.closeDuration)
-
-        XCTAssertEqual(opening.start, 0.0)
-        XCTAssertEqual(opening.end, 0.0)
-        XCTAssertEqual(opening.span, 0.0)
-        XCTAssertGreaterThan(closing.span, opening.span)
-        XCTAssertGreaterThan(closingSeconds, openingSeconds)
-        XCTAssertGreaterThan(closing.end, 0.90)
-        XCTAssertGreaterThan(closing.end, opening.end)
     }
 
     func testContextMenuGlassmorphicInterpolationPreservesEndpoints() {

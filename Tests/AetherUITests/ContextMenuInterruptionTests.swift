@@ -49,20 +49,66 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testWideOpeningCompactsIntoAnEggBeforePlatterGrowth() {
-        for width: CGFloat in [106, 160, 240] {
-            let source = CGRect(x: 380 - width, y: 70, width: width, height: 44)
-            let target = CGRect(x: 125, y: 70, width: 255, height: 470)
-            let anchor = ContextMenuBloomAnchor.detect(source: source, target: target)
-            let outer = contextMenuBloomGeometrySample(source: source, target: target,
-                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .opening,
-                rawProgress: 0.16, reduceMotion: false)
-            let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
-                outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
-                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .opening,
-                rawProgress: 0.16, reduceMotion: false)
-            XCTAssertLessThan(sample.headFrame.width, source.width * 0.65)
-            XCTAssertLessThan(sample.headFrame.width / sample.headFrame.height, 1.2)
+    func testOpeningReversesClosingForEverySurfaceAndAnchor() {
+        for width: CGFloat in [44, 106, 160, 240] {
+            for height: CGFloat in [160, 470] {
+                for unit in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0.5, y: 1)] {
+                    let anchor = ContextMenuBloomAnchor(unitPoint: unit)
+                    let source = CGRect(x: 40, y: 70, width: width, height: 44)
+                    let target = CGRect(x: 40 - (255-width)*unit.x,
+                        y: 70 - (height-44)*unit.y, width: 255, height: height)
+                    for frame in 0...120 {
+                        let raw = CGFloat(frame) / 120
+                        func sample(_ direction: ContextMenuBloomDirection) -> ContextMenuGlassmorphicGeometrySample {
+                            let outer = contextMenuBloomGeometrySample(source: source, target: target,
+                                sourceRadius: 22, targetRadius: 27, anchor: anchor,
+                                direction: direction, rawProgress: raw, reduceMotion: false)
+                            return contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                                outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
+                                sourceRadius: 22, targetRadius: 27, anchor: anchor,
+                                direction: direction, rawProgress: raw, reduceMotion: false)
+                        }
+                        XCTAssertEqual(sample(.opening), sample(.closing))
+                    }
+                }
+            }
+        }
+    }
+
+    func testRecoilPreservesAreaAndAnchorWithSmoothRestingEndpoints() {
+        let source = CGRect(x: 220, y: 70, width: 160, height: 44)
+        let pivot = CGPoint(x: source.maxX, y: source.minY)
+        var minimum: CGFloat = 1
+        var maximum: CGFloat = 1
+        for frame in 0...1000 {
+            let raw = CGFloat(frame) / 1000
+            let transform = contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
+                rawProgress: raw, reduceMotion: false)
+            XCTAssertEqual(transform.a * transform.d, 1, accuracy: 0.000001)
+            XCTAssertEqual(pivot.applying(transform).x, pivot.x, accuracy: 0.000001)
+            XCTAssertEqual(pivot.applying(transform).y, pivot.y, accuracy: 0.000001)
+            XCTAssertLessThan(abs(transform.d - 1), 0.08)
+            minimum = min(minimum, transform.d); maximum = max(maximum, transform.d)
+            if raw < 0.02 || raw > 0.62 { XCTAssertEqual(transform, .identity) }
+            XCTAssertEqual(contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
+                rawProgress: raw, reduceMotion: true), .identity)
+        }
+        XCTAssertLessThan(minimum, 0.99)
+        XCTAssertGreaterThan(maximum, 1.01)
+    }
+
+    func testOpeningReversesRenderedContentWithoutIndependentGlyphZoom() throws {
+        for appearance in AetherAppearanceStyle.allCases {
+            let host = makeHost(appearance: appearance)
+            defer { host.tearDownGlassEffects() }
+            for frame in 0...60 {
+                let raw = CGFloat(frame) / 60
+                host.setProgress(raw, direction: .opening)
+                let views = try menuContentViews(in: host) + [host.sourceProxyContainer, host.finalMenuGlassSurfaceView]
+                let opening = views.map(ViewRendering.init)
+                host.setProgress(raw, direction: .closing)
+                for (view, expected) in zip(views, opening) { assertRendering(view, equals: expected) }
+            }
         }
     }
 
@@ -158,9 +204,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 sourceRadius: 22.5, targetRadius: 27, anchor: .topTrailing, direction: .closing,
                 rawProgress: 1 - frame.elapsed, reduceMotion: false
             )
-            XCTAssertEqual(shape.bodyFrame.width, frame.width * 255 / 378, accuracy: 3)
-            XCTAssertEqual(shape.bodyFrame.height, frame.height * 378 / 577, accuracy: 3)
-            XCTAssertEqual(shape.bodyFrame.minY - source.minY, frame.drop * 378 / 577, accuracy: 3)
+            // Preserve the measured trajectory beneath the separately bounded recoil.
+            let recoil = contextMenuLiquidRecoilTransform(source: source, anchor: .topTrailing,
+                rawProgress: 1 - frame.elapsed, reduceMotion: false)
+            let measuredBody = shape.bodyFrame.applying(recoil.inverted())
+            XCTAssertEqual(measuredBody.width, frame.width * 255 / 378, accuracy: 3)
+            XCTAssertEqual(measuredBody.height, frame.height * 378 / 577, accuracy: 3)
+            XCTAssertEqual(measuredBody.minY - source.minY, frame.drop * 378 / 577, accuracy: 3)
             XCTAssertLessThan(shape.bodyFrame.height / shape.bodyFrame.width, 2,
                               "The filter menu collapsed into a tall narrow pillar")
         }
@@ -178,7 +228,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
         var samples: [CGFloat] = []
         host.contentRevealProgressChanged = { samples.append($0) }
-        host.setProgress(0.40)
+        host.setProgress(0.68)
         let originalReveal = try XCTUnwrap(samples.last)
         XCTAssertGreaterThan(originalReveal, 0)
         XCTAssertLessThan(originalReveal, 1)
@@ -206,7 +256,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
     func testRepeatedLayoutDoesNotResizeTransformedSnapshotContents() throws {
         let host = makeHost(appearance: .legacy)
         defer { host.tearDownGlassEffects() }
-        host.setProgress(0.40)
+        host.setProgress(0.68)
         let views = try menuContentViews(in: host)
         let before = views.map(ViewRendering.init)
 
