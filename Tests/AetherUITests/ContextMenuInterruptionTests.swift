@@ -18,7 +18,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(completions, 1)
     }
 
-    func testWideButtonCollapseKeepsOneCarrierUntilSourceHandoff() {
+    func testWideButtonCollapseKeepsConnectedDropAndRetractsUnderSource() {
         let source = CGRect(x: 220, y: 70, width: 160, height: 44)
         let target = CGRect(x: 125, y: 70, width: 255, height: 470)
         let anchor = ContextMenuBloomAnchor.detect(source: source, target: target)
@@ -32,15 +32,37 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
                 sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .closing,
                 rawProgress: 1-t, reduceMotion: false)
-            XCTAssertEqual(sample.headAlpha, 0)
+            if sample.headAlpha > 0.001 {
+                XCTAssertTrue(sample.headFrame.intersects(sample.bodyFrame), "The returning shoulder must stay joined to the drop")
+            }
             XCTAssertEqual(sample.bridgeRadius, 0)
             XCTAssertEqual(sample.bodyAlpha, 1)
             if let previous {
                 XCTAssertLessThan(abs(sample.bodyFrame.minY-previous.minY), 6)
                 XCTAssertLessThan(abs(sample.bodyFrame.height-previous.height), 8)
             }
-            if t > 0.95 { XCTAssertEqual(sample.bodyFrame, source) }
+            if t > 0.98 {
+                XCTAssertEqual(sample.headFrame, source)
+                XCTAssertTrue(source.contains(sample.bodyFrame))
+            }
             previous = sample.bodyFrame
+        }
+    }
+
+    func testWideOpeningCompactsIntoAnEggBeforePlatterGrowth() {
+        for width: CGFloat in [106, 160, 240] {
+            let source = CGRect(x: 380 - width, y: 70, width: width, height: 44)
+            let target = CGRect(x: 125, y: 70, width: 255, height: 470)
+            let anchor = ContextMenuBloomAnchor.detect(source: source, target: target)
+            let outer = contextMenuBloomGeometrySample(source: source, target: target,
+                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .opening,
+                rawProgress: 0.16, reduceMotion: false)
+            let sample = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                outerFrame: outer.frame, outerCornerRadii: outer.cornerRadii,
+                sourceRadius: 22, targetRadius: 27, anchor: anchor, direction: .opening,
+                rawProgress: 0.16, reduceMotion: false)
+            XCTAssertLessThan(sample.headFrame.width, source.width * 0.65)
+            XCTAssertLessThan(sample.headFrame.width / sample.headFrame.height, 1.2)
         }
     }
 
@@ -259,17 +281,18 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(maskFrame.height, renderedFrame.height, accuracy: 0.000001)
     }
 
-    func testReturningTextFitsTheCompactBodyBeforeExpandingBackToItsButton() {
+    func testReturningTextStaysLegibleWhileExpandingBackToItsButton() {
         for appearance in AetherAppearanceStyle.allCases {
             let host = makeHost(appearance: appearance, menuHeight: 160)
             defer { host.tearDownGlassEffects() }
             host.setProgress(0.45, direction: .closing)
-            let body = host.finalMenuGlassSurfaceView.convert(host.finalMenuGlassSurfaceView.bounds, to: host)
             let source = host.sourceProxyContainer
             XCTAssertLessThan(source.transform.a, 1)
             XCTAssertEqual(source.transform.d, 1)
-            XCTAssertEqual(source.frame.width, body.width, accuracy: 0.001)
-            XCTAssertEqual(source.frame.midX, body.midX, accuracy: 0.001)
+            // The shoulder can be wider than the retracting belly. Fitting
+            // the label only to the belly squeezed it into a narrow stripe.
+            XCTAssertGreaterThanOrEqual(source.frame.width, source.bounds.width * 0.72)
+            XCTAssertLessThanOrEqual(source.frame.width, source.bounds.width)
             host.setProgress(0, direction: .closing)
             XCTAssertEqual(source.transform, .identity)
             XCTAssertEqual(source.bounds.size, CGSize(width: 94, height: 44))

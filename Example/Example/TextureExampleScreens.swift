@@ -2483,6 +2483,7 @@ private final class TextureAnimationReferenceController: AetherViewController {
         }
 
         if regressionMode {
+            displayNavigationBar = isDetail
             view.backgroundColor = UIColor(red: 0.03, green: 0.17, blue: 0.30, alpha: 1)
             navigationItem.title = nil
             navigationItem.titleView = nil

@@ -79,6 +79,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
     private var rootContainer: RootContainer?
     private var overlayContainers: [NavigationOverlayContainer] = []
     private var sharedNavigationBar: NavigationBarImpl?
+    private let hiddenNavigationBarItem = NavigationBarItem()
     private weak var sharedNavigationBarController: AetherViewController?
     private var isUpdatingSharedNavigationBar: Bool = false
     private var interactiveNavigationBarTransition: NavigationBarInteractiveTransition?
@@ -1185,9 +1186,11 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             bar.updatePresentationData(presentationData, transition: transition)
         }
 
+        bar.prepareButtonLayerVisibility(visible: controller.displayNavigationBar,
+                                         transition: buttonMorphTransition)
         let updateNavigationItem = {
-            bar.item = controller.navigationBarItem
-            bar.previousItem = self.previousAction(for: controller, in: stack)
+            bar.item = controller.displayNavigationBar ? controller.navigationBarItem : self.hiddenNavigationBarItem
+            bar.previousItem = controller.displayNavigationBar ? self.previousAction(for: controller, in: stack) : nil
         }
         if let buttonMorphTransition {
             bar.withButtonMorphTransition(buttonMorphTransition, updateNavigationItem)

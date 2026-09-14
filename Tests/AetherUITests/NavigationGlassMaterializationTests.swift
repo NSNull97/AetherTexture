@@ -53,6 +53,117 @@ final class NavigationGlassMaterializationTests: XCTestCase {
         await fulfillment(of: [finished], timeout: 2)
     }
 
+    func testRealPopToHiddenRootKeepsOutgoingButtonsOnScreenWhileDissolving() async throws {
+        guard !UIAccessibility.isReduceMotionEnabled else { throw XCTSkip("Requires navigation animation") }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let data = NavigationBarPresentationData(theme: NavigationBarTheme(style: .glass))
+        let root = AetherViewController(navigationBarPresentationData: data)
+        root.displayNavigationBar = false
+        root.navigationBarItem.rightBarButtonItem = UIBarButtonItem(title: "Hidden action", style: .plain, target: nil, action: nil)
+        let navigation = AetherNavigationController(rootViewController: root)
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        navigation.loadViewIfNeeded()
+        let containerLayout = ContainerViewLayout(size: window.bounds.size,
+            safeInsets: UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0),
+            additionalInsets: .zero, statusBarHeight: 47)
+        navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+        let detail = AetherViewController(navigationBarPresentationData: data)
+        detail.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "A long menu title", style: .plain, target: nil, action: nil)
+        navigation.pushViewController(detail, animated: false)
+        navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+        let bar = try XCTUnwrap(navigation.navigationBar as? NavigationBarImpl)
+        func groups(_ view: UIView) -> [GlassControlGroup] {
+            (view as? GlassControlGroup).map { [$0] } ?? view.subviews.flatMap(groups)
+        }
+        let outgoing = groups(bar.debugButtonLayer).filter { !$0.items.isEmpty }
+        XCTAssertEqual(outgoing.count, 2)
+        let originalFrames = outgoing.map { $0.convert($0.bounds, to: window) }
+        navigation.popViewController(animated: true)
+        let started = expectation(description: "Pop has begun dissolving both sides")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            navigation.containerLayoutUpdated(containerLayout, transition: .immediate)
+            for (index, group) in outgoing.enumerated() {
+                XCTAssertEqual(group.convert(group.bounds, to: window), originalFrames[index])
+                var ancestor: UIView? = group
+                while let current = ancestor {
+                    if current !== group { XCTAssertFalse(current.isHidden); XCTAssertGreaterThan(current.layer.presentation()?.opacity ?? current.layer.opacity, 0.01) }
+                    ancestor = current.superview
+                }
+                XCTAssertNotNil(group.superview)
+                XCTAssertTrue(group.isFinishingContentRemoval)
+                XCTAssertGreaterThan(group.bounds.width, 0)
+            }
+            started.fulfill()
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let finished = expectation(description: "Exit owns cleanup")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            for group in outgoing {
+                XCTAssertFalse(group.isFinishingContentRemoval)
+                XCTAssertEqual(group.bounds.size, .zero)
+            }
+            XCTAssertEqual(bar.debugButtonLayer.alpha, 0)
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+    }
+
+    func testInteractiveHiddenRootExitOutlivesScreenSettleAndCancelsOnPush() async throws {
+        guard !UIAccessibility.isReduceMotionEnabled else { throw XCTSkip("Requires navigation animation") }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let data = NavigationBarPresentationData(theme: NavigationBarTheme(style: .glass))
+        let root = AetherViewController(navigationBarPresentationData: data)
+        root.displayNavigationBar = false
+        let navigation = AetherNavigationController(rootViewController: root)
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let layout = ContainerViewLayout(size: window.bounds.size,
+            safeInsets: UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0),
+            additionalInsets: .zero, statusBarHeight: 47)
+        navigation.containerLayoutUpdated(layout, transition: .immediate)
+        let detail = AetherViewController(navigationBarPresentationData: data)
+        detail.navigationBarItem.rightBarButtonItem = UIBarButtonItem(title: "Menu", style: .plain, target: nil, action: nil)
+        navigation.pushViewController(detail, animated: false)
+        navigation.containerLayoutUpdated(layout, transition: .immediate)
+        let bar = try XCTUnwrap(navigation.navigationBar as? NavigationBarImpl)
+        let container = try XCTUnwrap(descendant(NavigationContainer.self, in: navigation.view))
+        let frame = bar.debugButtonLayer.frame
+        // Exercise the same callbacks as the gesture recognizer, including a
+        // cancelled drag and a screen settle shorter than the chrome clock.
+        container.navigationBarTransitionBegan?(.pop, detail, root, layout, true)
+        container.navigationBarTransitionProgress?(0.45, .immediate)
+        XCTAssertEqual(bar.debugButtonLayer.frame, frame)
+        XCTAssertEqual(bar.debugButtonLayer.alpha, 1)
+        container.navigationBarTransitionResolutionBegan?(false, .immediate)
+        container.navigationBarTransitionEnded?(false)
+        XCTAssertEqual(bar.debugButtonLayer.frame, frame)
+        XCTAssertEqual(bar.debugButtonLayer.alpha, 1)
+        container.navigationBarTransitionBegan?(.pop, detail, root, layout, true)
+        container.navigationBarTransitionResolutionBegan?(true, .animated(duration: 0.05, curve: .easeInOut))
+        container.navigationBarTransitionEnded?(true)
+        XCTAssertEqual(bar.debugButtonLayer.frame, frame)
+        XCTAssertEqual(bar.debugButtonLayer.alpha, 1)
+        let retained = expectation(description: "Chrome survives the short screen settle")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertEqual(bar.debugButtonLayer.frame, frame)
+            XCTAssertEqual(bar.debugButtonLayer.alpha, 1)
+            // Re-entry cancels the old hidden-bar cleanup.
+            bar.prepareButtonLayerVisibility(visible: true, transition: self.transition)
+            bar.alpha = 1
+            retained.fulfill()
+        }
+        await fulfillment(of: [retained], timeout: 2)
+        let restored = expectation(description: "Stale exit cannot hide new chrome")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            XCTAssertEqual(bar.debugButtonLayer.alpha, 1)
+            restored.fulfill()
+        }
+        await fulfillment(of: [restored], timeout: 2)
+    }
+
     func testEmptyTargetRelayoutPreservesWholeButtonDisappearance() throws {
         let bar = makeBar()
         let source = NavigationBarItem()
@@ -173,6 +284,7 @@ final class NavigationGlassMaterializationTests: XCTestCase {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let presentationData = NavigationBarPresentationData(theme: NavigationBarTheme(style: .glass))
         let root = AetherViewController(navigationBarPresentationData: presentationData)
+        root.displayNavigationBar = false
         root.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Edit", style: .plain, target: nil, action: nil)
         let navigation = AetherNavigationController(rootViewController: root)
         window.rootViewController = navigation

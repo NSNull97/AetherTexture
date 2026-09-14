@@ -497,6 +497,33 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     private var barButtonContextMenuProviderObserver: NSObjectProtocol?
     private var buttonsRowAlpha: CGFloat = 1.0
     private var currentButtonsRowFrame: CGRect = .zero
+    private var outgoingButtonLayerFrame: CGRect?
+    private var outgoingButtonLayerCleanup: DispatchWorkItem?
+
+    /// The page's bar can move offscreen before its fixed-duration button
+    /// exit finishes (notably an interactive pop to a hidden root bar).
+    /// Keep only the external chrome at its source position during that exit.
+    internal func prepareButtonLayerVisibility(visible: Bool, transition: ContainedViewLayoutTransition?) {
+        if visible {
+            outgoingButtonLayerCleanup?.cancel()
+            outgoingButtonLayerCleanup = nil
+            outgoingButtonLayerFrame = nil
+        } else if outgoingButtonLayerFrame == nil,
+                  isButtonLayerExternallyHosted, buttonLayer.alpha > 0.01,
+                  let transition, transition.isAnimated,
+                  !UIAccessibility.isReduceMotionEnabled {
+            outgoingButtonLayerFrame = buttonLayer.frame
+            let cleanup = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.outgoingButtonLayerFrame = nil
+                self.outgoingButtonLayerCleanup = nil
+                self.updateButtonLayerFrame(self.currentButtonsRowFrame, transition: .immediate)
+                self.updateButtonLayerEffectiveVisibility()
+            }
+            outgoingButtonLayerCleanup = cleanup
+            DispatchQueue.main.asyncAfter(deadline: .now() + transition.duration, execute: cleanup)
+        }
+    }
     internal var hostsNavigationItemTitleView: Bool = true {
         didSet {
             guard oldValue != hostsNavigationItemTitleView else {
@@ -832,6 +859,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     }
 
     private func buttonLayerFrame(for rowFrame: CGRect) -> CGRect {
+        if let outgoingButtonLayerFrame { return outgoingButtonLayerFrame }
         guard let buttonLayerHostView else {
             return rowFrame
         }
@@ -939,8 +967,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             return
         }
 
-        buttonLayer.isHidden = isButtonLayerExternallyHosted ? isHidden : false
-        buttonLayer.alpha = buttonsRowAlpha * (isButtonLayerExternallyHosted ? alpha : 1.0)
+        let retainsOutgoingChrome = outgoingButtonLayerFrame != nil && isButtonLayerExternallyHosted
+        buttonLayer.isHidden = isButtonLayerExternallyHosted && !retainsOutgoingChrome ? isHidden : false
+        buttonLayer.alpha = buttonsRowAlpha * (isButtonLayerExternallyHosted && !retainsOutgoingChrome ? alpha : 1.0)
     }
 
     internal func bringButtonLayerToFrontIfNeeded() {

@@ -686,8 +686,9 @@ private func contextMenuOpeningSingleMassMorphSample(
         lhs + (rhs - lhs) * progress
     }
 
-    // 17 ms impulse -> 33 ms egg.  The seed keeps its area while deforming;
-    // the following growth belongs to this same silhouette, not a second cap.
+    // Compact the label capsule before the egg pulls away. Hold that width
+    // until the belly absorbs it; restoring the original width at retirement
+    // made a shelf protrude from the growing menu.
     let eggIn = contextMenuBloomSmoothRange(liquidT, start: 0.025, end: 0.075)
     let eggOut = 1.0 - contextMenuBloomSmoothRange(liquidT, start: 0.13, end: 0.23)
     let egg = eggIn * eggOut
@@ -732,8 +733,9 @@ private func contextMenuOpeningSingleMassMorphSample(
     // Keep the seed's real principal axes and rotate the surface itself.
     // Converting an oriented ellipse into an axis-aligned bounding box made
     // the centre follow a curve while the glass still read as a flat vertical
-    // scale. The area remains constant because major * minor == 1.
-    let seedWidth = max(1.0, source.width * minorScale)
+    // scale. The compact seed keeps its area during directional stretch.
+    let compactWidth = min(source.width, sourceMinSide * 1.60)
+    let seedWidth = max(1.0, scalar(source.width, compactWidth, progress: eggIn) * minorScale)
     let seedHeight = max(1.0, source.height * majorScale)
     let seedFlowAngle = atan2(seedFlow.y, seedFlow.x)
     let seedAxisRotation = seedFlowAngle - .pi * 0.5
@@ -1139,34 +1141,45 @@ func contextMenuGlassmorphicGeometrySample(
 
     if direction == .closing, source.width > source.height * 1.6 {
         let elapsed = 1 - raw
-        let settle = contextMenuBloomSmoothRange(elapsed, start: 0.48, end: 0.94)
-        // The returning wide source is already the lower carrier. Registering
-        // a second wide head above it creates an L-shaped union and then two
-        // lateral bulges when the native compositor joins the surfaces.
-        let frame = CGRect(
-            x: bodyFrame.minX + (source.minX - bodyFrame.minX) * settle,
-            y: bodyFrame.minY + (source.minY - bodyFrame.minY) * settle,
-            width: bodyFrame.width + (source.width - bodyFrame.width) * settle,
-            height: bodyFrame.height + (source.height - bodyFrame.height) * settle
-        )
-        let radius = min(frame.width, frame.height) * 0.5
-        let roundness = contextMenuBloomSmoothRange(elapsed, start: 0.02, end: 0.50)
-        let freeRadius = targetRadius + (radius - targetRadius) * roundness
-        let attachedRadius = targetRadius + (sourceRadius - targetRadius) * settle
-        var corners = ContextMenuBloomCornerRadii.uniform(freeRadius)
-        if unit.y < 0.5 {
-            corners = .init(topLeft: unit.x < 0.5 ? attachedRadius : freeRadius,
-                            topRight: unit.x >= 0.5 ? attachedRadius : freeRadius,
-                            bottomLeft: freeRadius, bottomRight: freeRadius)
-        } else {
-            corners = .init(topLeft: freeRadius, topRight: freeRadius,
-                            bottomLeft: unit.x < 0.5 ? attachedRadius : freeRadius,
-                            bottomRight: unit.x >= 0.5 ? attachedRadius : freeRadius)
-        }
-        return .init(headFrame: source, bodyFrame: frame, headRotation: 0, bodyRotation: 0,
-            headRadius: sourceRadius, bodyCornerRadii: corners,
+        // A wide trigger returns as a compact drop and then spreads across
+        // the source capsule. Keep the returning shoulder centred over the
+        // belly: aligning both lobes to the trailing edge made an L-shaped
+        // shelf, while a single rounded rectangle erased the liquid waist.
+        let compact = contextMenuBloomSmoothRange(elapsed, start: 0.22, end: 0.64)
+        let retract = contextMenuBloomSmoothRange(elapsed, start: 0.62, end: 0.98)
+        let compactWidth = min(source.width * 0.72, source.height * 1.90)
+        let width = bodyFrame.width + (compactWidth - bodyFrame.width) * compact
+        let height = bodyFrame.height + (source.height * 1.30 - bodyFrame.height) * compact
+        let endWidth = source.height * 0.55
+        let endHeight = source.height * 0.55
+        let resolvedWidth = width + (endWidth - width) * retract
+        let resolvedHeight = height + (endHeight - height) * retract
+        let centrePull = contextMenuBloomSmoothRange(elapsed, start: 0.18, end: 0.66)
+        let centreX = bodyFrame.midX + (source.midX - bodyFrame.midX) * centrePull
+        let verticalSign: CGFloat = unit.y < 0.5 ? 1 : -1
+        let bellyY = source.midY + verticalSign * source.height * 0.64
+        let centreY = bodyFrame.midY + (bellyY - bodyFrame.midY) * compact
+        let finalY = centreY + (source.midY - centreY) * retract
+        let frame = CGRect(x: centreX - resolvedWidth / 2, y: finalY - resolvedHeight / 2,
+                           width: resolvedWidth, height: resolvedHeight)
+        let roundness = contextMenuBloomSmoothRange(elapsed, start: 0.02, end: 0.48)
+        let radius = targetRadius + (min(frame.width, frame.height) / 2 - targetRadius) * roundness
+
+        // Born inside the belly, the shoulder reaches the source before the
+        // last underside retracts. Its content can focus during that tail.
+        let shoulder = contextMenuBloomSmoothRange(elapsed, start: 0.36, end: 0.66)
+        let initialHeadWidth = min(source.width, frame.width * 0.7)
+        let headWidth = initialHeadWidth + (source.width - initialHeadWidth) * shoulder
+        let initialHeadHeight = min(source.height, frame.height)
+        let headHeight = initialHeadHeight + (source.height - initialHeadHeight) * shoulder
+        let headY = frame.midY + (source.midY - frame.midY) * shoulder
+        let headFrame = CGRect(x: centreX - headWidth / 2, y: headY - headHeight / 2,
+                               width: headWidth, height: headHeight)
+        return .init(headFrame: headFrame, bodyFrame: frame, headRotation: 0, bodyRotation: 0,
+            headRadius: min(sourceRadius, headHeight / 2), bodyCornerRadii: .uniform(radius),
             bridgeStart: sourceCenter, bridgeEnd: sourceCenter, bridgeRadius: 0,
-            neckBulbCenter: sourceCenter, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
+            neckBulbCenter: sourceCenter, neckBulbRadius: 0,
+            headAlpha: shoulder, bodyAlpha: 1)
     }
 
     var headWidth = max(1.0, source.width * headScale)
@@ -2078,7 +2091,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             } else {
                 let attached = contextMenuBloomAnchoredFrame(
                     contentSize: startFrame.size,
-                    in: glassMorphContainer.isUsingNativeContainerEffect ? glassSample.bodyFrame : metrics.frame,
+                    in: glassMorphContainer.isUsingNativeContainerEffect
+                        ? (glassSample.headAlpha > 0.001 ? glassSample.bodyFrame.union(glassSample.headFrame) : glassSample.bodyFrame)
+                        : metrics.frame,
                     anchor: bloomAnchor
                 )
                 let t = Self.smootherstep(0.40, 0.78, 1.0 - rawT)
@@ -2201,9 +2216,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             ))
             return Self.interpolate(state.sourceContentTransform, .identity, t)
         }
-        let body = finalMenuGlassSurfaceView.convert(finalMenuGlassSurfaceView.bounds, to: self)
-        let scale = min(1.0, max(0.0, body.width / max(1.0, startFrame.width)))
-        let headReturn = Self.smootherstep(0.64, 0.90, 1.0 - rawT)
+        var body = finalMenuGlassSurfaceView.convert(finalMenuGlassSurfaceView.bounds, to: self)
+        if !sourceSeedGlassSurfaceView.isHidden {
+            body = body.union(sourceSeedGlassSurfaceView.convert(sourceSeedGlassSurfaceView.bounds, to: self))
+        }
+        let scale = min(1.0, max(0.72, body.width / max(1.0, startFrame.width)))
+        let headReturn = Self.smootherstep(0.40, 0.68, 1.0 - rawT)
         let scaleX = Self.lerp(scale, 1.0, headReturn)
         // A compact drop is narrower than the complete button. Fit its label
         // inside the upper body, then let it expand/recenter with the source
