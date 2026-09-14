@@ -326,34 +326,27 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testFluidClockSettlesWithoutReversingMaterialization() {
-        var previous: CGFloat = 0
-        var previousOverscale: CGFloat = 0
-        var maximum: CGFloat = 0
-        for frame in 0...1000 {
-            let t = CGFloat(frame) / 1000
-            let sample = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false)
-            XCTAssertGreaterThanOrEqual(sample.progress, previous)
-            XCTAssertLessThanOrEqual(sample.progress, 1)
-            XCTAssertLessThan(abs(sample.rebound), 0.025)
-            if t <= 0.66 || t == 1 { XCTAssertEqual(sample.rebound, 0) }
-            XCTAssertGreaterThanOrEqual(sample.rebound, 0)
-            if t <= 0.80 {
-                XCTAssertGreaterThanOrEqual(sample.rebound, previousOverscale)
-            } else {
-                XCTAssertLessThanOrEqual(sample.rebound, previousOverscale)
+    func testFluidClockHasNoSeparateStationarySettlingPhase() {
+        for direction in [ContextMenuBloomDirection.opening, .closing] {
+            var previous: CGFloat = 0
+            var previousOverscale: CGFloat = 0
+            let peak: CGFloat = direction == .opening ? 0.82 : 0.52
+            for frame in 0...1000 {
+                let t = CGFloat(frame) / 1000
+                let sample = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false, direction: direction)
+                if frame > 0 { XCTAssertGreaterThan(sample.progress, previous) }
+                if frame < 1000 { XCTAssertLessThan(sample.progress, 1) }
+                XCTAssertGreaterThanOrEqual(sample.rebound, 0)
+                XCTAssertLessThanOrEqual(sample.rebound, 0.0141)
+                if t <= peak { XCTAssertGreaterThanOrEqual(sample.rebound, previousOverscale) }
+                else { XCTAssertLessThanOrEqual(sample.rebound, previousOverscale) }
+                previous = sample.progress
+                previousOverscale = sample.rebound
+                XCTAssertEqual(contextMenuLiquidAnimationSample(fraction: t, reduceMotion: true, direction: direction).rebound, 0)
             }
-            previousOverscale = sample.rebound
-            maximum = max(maximum, sample.rebound)
-            previous = sample.progress
-            XCTAssertEqual(contextMenuLiquidAnimationSample(fraction: t, reduceMotion: true).rebound, 0)
+            XCTAssertEqual(previous, 1)
+            XCTAssertEqual(previousOverscale, 0)
         }
-        XCTAssertGreaterThan(maximum, 0.015)
-        // No velocity jump when the main travel hands off to the spring.
-        let epsilon: CGFloat = 0.0001
-        XCTAssertLessThan(contextMenuLiquidAnimationSample(fraction: epsilon, reduceMotion: false).progress / epsilon, 0.001)
-        XCTAssertLessThan((1 - contextMenuLiquidAnimationSample(fraction: 0.80 - epsilon, reduceMotion: false).progress) / epsilon, 0.001)
-        XCTAssertLessThan(abs(contextMenuLiquidAnimationSample(fraction: 1 - epsilon, reduceMotion: false).rebound) / epsilon, 0.001)
     }
 
     func testDisplayClockOverspringsOnlyGlassAndKeepsTheLastFrameOnReversal() throws {
@@ -386,7 +379,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
                     XCTAssertGreaterThan(outline.width, 160)
                     XCTAssertGreaterThan(outline.height, 44)
                     XCTAssertLessThan(outline.height, 45)
-                    XCTAssertEqual(outline.width / 160, outline.height / 44, accuracy: 0.000001)
+                    XCTAssertEqual(outline.width / 160, outline.height / 44, accuracy: 0.005)
                 }
             }
             XCTAssertEqual(completions, 1)

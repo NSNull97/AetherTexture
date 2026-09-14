@@ -4008,6 +4008,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     ) {
         let identifier = UIAction.Identifier("AetherUI.NavigationBar.BarButtonContextMenu")
         button.removeAction(identifiedBy: identifier, for: .touchDown)
+        (button as? HighlightTrackingButton)?.opensContextMenuOnTouchDown = item.contextMenuItemsProvider != nil
         guard item.contextMenuItemsProvider != nil else {
             return
         }

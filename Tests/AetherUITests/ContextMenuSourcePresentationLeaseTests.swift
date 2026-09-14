@@ -3,6 +3,47 @@ import UIKit
 @testable import AetherUI
 
 final class ContextMenuSourcePresentationLeaseTests: XCTestCase {
+    func testLeaseStopsPressedSublayersBeforeCaptureAndRestoresOnlyRestingState() throws {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let group = GlassControlGroup(appearanceStyle: .liquidGlassV2)
+        _ = group.update(items: [.init(id: "menu", content: .text("Caption"), action: {})], transition: .immediate)
+        root.addSubview(group)
+        group.layoutIfNeeded()
+        let button = try XCTUnwrap(group.itemButton(id: "menu"))
+        let highlight = try XCTUnwrap(group.gestureRecognizers?.compactMap { $0 as? GlassHighlightGestureRecognizer }.first)
+        XCTAssertTrue(highlight.beginHighlight(at: CGPoint(x: 20, y: 20), from: button))
+        XCTAssertGreaterThan(group.layer.sublayerTransform.m11, 1)
+        let descriptor = try XCTUnwrap(ContextMenuSourceDescriptor(sourceID: "menu", hitView: button,
+            visualView: group, overlayView: root, sourceCornerRadius: 22, sourceMode: .leasedGlassSource))
+        let lease = try XCTUnwrap(SourcePresentationLease(sourceID: "menu", descriptor: descriptor, overlayView: root))
+        lease.acquire()
+        XCTAssertTrue(CATransform3DIsIdentity(group.layer.sublayerTransform))
+        XCTAssertNil(group.layer.animation(forKey: TouchEffect.transformAnimationKey))
+        XCTAssertFalse(highlight.isEnabled)
+        XCTAssertFalse(highlight.beginHighlight(at: .zero, from: button))
+        lease.release()
+        XCTAssertTrue(highlight.isEnabled)
+        XCTAssertTrue(CATransform3DIsIdentity(group.layer.sublayerTransform))
+        XCTAssertNil(group.layer.animation(forKey: TouchEffect.transformAnimationKey))
+        XCTAssertTrue(highlight.beginHighlight(at: .zero, from: button))
+        highlight.resetVisualState()
+    }
+
+    func testMenuTouchExclusionKeepsOrdinarySiblingPressFeedback() throws {
+        let group = GlassControlGroup(appearanceStyle: .liquidGlassV2)
+        _ = group.update(items: [.init(id: "menu", content: .text("Menu"), action: {}),
+                                .init(id: "plain", content: .text("Plain"), action: {})], transition: .immediate)
+        let menu = try XCTUnwrap(group.itemButton(id: "menu") as? HighlightTrackingButton)
+        let plain = try XCTUnwrap(group.itemButton(id: "plain"))
+        menu.opensContextMenuOnTouchDown = true
+        let highlight = try XCTUnwrap(group.gestureRecognizers?.compactMap { $0 as? GlassHighlightGestureRecognizer }.first)
+        XCTAssertFalse(highlight.beginHighlight(at: .zero, from: menu.subviews.first))
+        XCTAssertTrue(CATransform3DIsIdentity(group.layer.sublayerTransform))
+        XCTAssertTrue(highlight.beginHighlight(at: .zero, from: plain))
+        XCTAssertGreaterThan(group.layer.sublayerTransform.m11, 1)
+        highlight.resetVisualState()
+    }
+
     func testDisabledCaptionLeasePreservesSourceAndAncestorOpacity() throws {
         let root = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let group = GlassControlGroup()

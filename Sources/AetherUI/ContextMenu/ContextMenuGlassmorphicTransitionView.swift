@@ -7,19 +7,22 @@ enum ContextMenuBloomDirection: Equatable {
     case closing
 }
 
-/// The shape reaches its destination before the glass finishes settling.
-/// Content follows the bounded clock; only the surface receives the recoil.
-func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool) -> (progress: CGFloat, rebound: CGFloat) {
+/// The shape keeps travelling throughout the settle. Surface expansion
+/// overlaps that travel instead of starting after a clamped progress clock.
+func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
+                                     direction: ContextMenuBloomDirection = .opening) -> (progress: CGFloat, rebound: CGFloat) {
     let t = max(0, min(1, fraction))
-    let travel = min(1, t / (reduceMotion ? 1 : 0.80))
-    let progress = travel * travel * (3 - 2 * travel)
-    guard !reduceMotion, t > 0.66, t < 1 else { return (progress, 0) }
-    // One broad overscale followed by a monotone return. No counter-pulse:
-    // alternating X/Y compression made the last reference frames shiver.
-    let envelope = t < 0.80
-        ? contextMenuBloomSmoothRange(t, start: 0.66, end: 0.80)
-        : 1 - contextMenuBloomSmoothRange(t, start: 0.80, end: 1)
-    return (progress, 0.020 * envelope)
+    if reduceMotion { return (t * t * (3 - 2 * t), 0) }
+    let progress = contextMenuBloomSample(times: [0, 0.20, 0.50, 0.72, 1],
+                                         values: [0, 0.10, 0.68, 0.99, 1], at: t)
+    // On closing the source shoulder reaches full width much earlier than
+    // the belly retracts. Its overscale must arrive with that shoulder, not
+    // with the end of the menu's clock. Opening settles with the platter.
+    let peak: CGFloat = direction == .opening ? 0.82 : 0.52
+    let start: CGFloat = direction == .opening ? 0.30 : 0.18
+    let envelope = contextMenuBloomSmoothRange(t, start: start, end: peak)
+        * (1 - contextMenuBloomSmoothRange(t, start: peak, end: 1))
+    return (progress, 0.014 * envelope)
 }
 
 /// Independent clocks measured from the first changing dismissal frame.
@@ -2623,7 +2626,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         animationElapsed += min(max(0, timestamp - previous), 1.0 / 30.0)
         let fraction = min(1, animationElapsed / animationDuration)
         let motion = contextMenuLiquidAnimationSample(fraction: fraction,
-            reduceMotion: UIAccessibility.isReduceMotionEnabled)
+            reduceMotion: UIAccessibility.isReduceMotionEnabled,
+            direction: animationDirection >= 0 ? .opening : .closing)
         progress = animationFrom + (animationTo - animationFrom) * motion.progress
         animationSurfaceRebound = motion.rebound * abs(animationTo - animationFrom)
         updateGeometry(progress: progress)

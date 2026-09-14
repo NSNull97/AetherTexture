@@ -30,6 +30,7 @@ final class SourcePresentationLease {
     private let descriptorSetOriginalInteractionEnabled: (_ enabled: Bool) -> Void
     private var isActive = false
     private var didRestore = false
+    private let suspendedHighlights: [(GlassHighlightGestureRecognizer, Bool)]
 
     convenience init?(
         sourceID: AnyHashable,
@@ -74,6 +75,16 @@ final class SourcePresentationLease {
         self.hitIsUserInteractionEnabled = descriptor.hitView === originalView ? nil : descriptor.hitView.isUserInteractionEnabled
         self.descriptorSuppressOriginal = descriptor.suppressOriginal
         self.descriptorSetOriginalInteractionEnabled = descriptor.setOriginalInteractionEnabled
+        // Reset before capturing content. A press uses sublayerTransform,
+        // which is independent of UIView.transform and survives hiding the
+        // source unless its own driver is stopped. Keep it suspended until
+        // the source is restored so the same touch cannot start it again.
+        let highlights = (originalView.gestureRecognizers ?? []).compactMap { $0 as? GlassHighlightGestureRecognizer }
+        self.suspendedHighlights = highlights.map { ($0, $0.isEnabled) }
+        for recognizer in highlights {
+            recognizer.resetVisualState()
+            recognizer.isEnabled = false
+        }
         self.proxyView = descriptor.makeProxyView()
         self.proxyView.isUserInteractionEnabled = false
         self.proxyView.frame = frame
@@ -154,6 +165,10 @@ final class SourcePresentationLease {
         }
         if let hitView, hitView !== originalView, let hitIsUserInteractionEnabled {
             hitView.isUserInteractionEnabled = hitIsUserInteractionEnabled
+        }
+        for (recognizer, wasEnabled) in suspendedHighlights {
+            recognizer.resetVisualState()
+            recognizer.isEnabled = wasEnabled
         }
         CATransaction.commit()
 

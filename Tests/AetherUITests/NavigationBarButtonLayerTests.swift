@@ -595,6 +595,11 @@ final class NavigationBarButtonLayerTests: XCTestCase {
         XCTAssertTrue(group.isUserInteractionEnabled)
         XCTAssertTrue(button.isUserInteractionEnabled)
         XCTAssertTrue(button.allControlEvents.contains(.touchDown))
+        let highlight = try XCTUnwrap(group.gestureRecognizers?.compactMap { $0 as? GlassHighlightGestureRecognizer }.first)
+        XCTAssertFalse(highlight.allowsHighlight(from: button), "Menu touch-down must not also scale the group caption")
+        XCTAssertFalse(highlight.beginHighlight(at: .zero, from: button))
+        XCTAssertTrue(CATransform3DIsIdentity(group.layer.sublayerTransform))
+
 
         barButtonItem.contextMenuItemsProvider = nil
 
@@ -602,6 +607,7 @@ final class NavigationBarButtonLayerTests: XCTestCase {
         XCTAssertFalse(group.isUserInteractionEnabled)
         XCTAssertFalse(button.isUserInteractionEnabled)
         XCTAssertFalse(button.allControlEvents.contains(.touchDown))
+        XCTAssertTrue(highlight.allowsHighlight(from: button))
     }
 
     func testRepeatedAnimatedSameExpansionContentDoesNotAnimateRightChrome() {

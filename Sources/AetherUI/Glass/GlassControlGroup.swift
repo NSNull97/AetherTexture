@@ -1062,6 +1062,15 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             elastic.motionProfile = motionProfile
             elastic.touchEffectView = self
             elastic.highlightContainerView = controlsView
+            elastic.shouldHighlightView = { [weak self] hit in
+                var view = hit
+                while let current = view, current !== self {
+                    if let button = current as? HighlightTrackingButton,
+                       button.opensContextMenuOnTouchDown { return false }
+                    view = current.superview
+                }
+                return true
+            }
             addGestureRecognizer(elastic)
             elasticRecognizer = elastic
         } else if let elasticRecognizer {
@@ -1384,6 +1393,9 @@ private final class GlassControlGroupTextContentView: UIView {
 // Lightweight port of `HighlightTrackingButton` from `submodules/Display/Source/HighlightTrackingButton.swift`.
 
 final class HighlightTrackingButton: UIButton {
+    // A menu takes ownership on touch-down; a simultaneous group press
+    // would scale both the caption snapshot and the restored source.
+    var opensContextMenuOnTouchDown = false
     var highlightedChanged: ((Bool) -> Void)?
     var onTap: (() -> Void)?
 

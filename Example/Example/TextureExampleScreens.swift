@@ -2489,7 +2489,9 @@ private final class TextureAnimationReferenceController: AetherViewController {
             navigationItem.titleView = nil
             navigationBarItem.backButtonBadgeText = nil
             navigationItem.leftBarButtonItems = nil
-            navigationItem.rightBarButtonItem = isDetail ? UIBarButtonItem(title: "A very long menu title", style: .plain, target: nil, action: nil) : nil
+            navigationItem.rightBarButtonItem = isDetail ? UIBarButtonItem(title: "A very long menu title", contextMenuItemsProvider: { [weak self] in
+                self?.filterItems() ?? []
+            }) : nil
         }
         scrollView.alwaysBounceVertical = true
         view.addSubview(scrollView)

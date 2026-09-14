@@ -298,6 +298,15 @@ final class TouchEffect {
 
 public final class GlassHighlightGestureRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
     var highlightContainerView: UIView?
+    var shouldHighlightView: ((UIView?) -> Bool)?
+
+    func allowsHighlight(from view: UIView?) -> Bool {
+        shouldHighlightView?(view) ?? true
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        allowsHighlight(from: touch.view)
+    }
 
     private var touchEffect: TouchEffect?
     private var releasingEffects: [TouchEffect] = []
@@ -374,6 +383,18 @@ public final class GlassHighlightGestureRecognizer: UIGestureRecognizer, UIGestu
             return
         }
         let location = touch.location(in: view)
+        guard beginHighlight(at: location, from: touch.view) else {
+            state = .failed
+            return
+        }
+        self.trackedTouch = touch
+        self.initialTouchLocation = location
+        state = .began
+    }
+
+    @discardableResult
+    func beginHighlight(at location: CGPoint, from hitView: UIView?) -> Bool {
+        guard isEnabled, allowsHighlight(from: hitView), let view = touchEffectView ?? self.view else { return false }
         let effect = TouchEffect(
             view: view,
             highlightContainerView: highlightContainerView,
@@ -381,15 +402,13 @@ public final class GlassHighlightGestureRecognizer: UIGestureRecognizer, UIGestu
         )
         effect.setParameters(parameters, animated: false)
         if let highlightContainerView {
-            effect.setTouchLocation(touch.location(in: highlightContainerView), animated: false)
+            effect.setTouchLocation(view.convert(location, to: highlightContainerView), animated: false)
         }
         effect.setStretchVector(.zero, animated: false)
         self.touchEffect = effect
-        self.trackedTouch = touch
-        self.initialTouchLocation = location
         self.isTouchInside = true
         effect.setIsTracking(true)
-        state = .began
+        return true
     }
 
     public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
