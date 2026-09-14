@@ -89,8 +89,10 @@ public extension UIView {
 
 // MARK: - EffectSettingsContainerView (port of UIViewController+Navigation.m)
 
-/// Host container that carries `lumaMin` / `lumaMax` knobs for nested glass effects.
-/// Mirrors the ObjC class that references from `UIGlassEffect` pipelines.
+/// Compatibility storage for caller-supplied luminance hints.
+/// These values are not consumed by UIKit and do not constrain native glass.
+/// Theme selection is applied separately by the owning renderer; implementing
+/// native luminance control needs a verified adapter for each supported path.
 public final class EffectSettingsContainerView: UIView {
     public var lumaMin: Double = 0.0
     public var lumaMax: Double = 0.0

@@ -44,16 +44,25 @@ final class NativeGlassDescriptorTests: XCTestCase {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { settled.fulfill() }
         await fulfillment(of: [settled], timeout: 2)
         XCTAssertTrue(surface.usesNativeContentLensing)
-        func filterTypes(_ layer: CALayer) -> [String] {
-            let here = (layer.filters ?? []).compactMap { filter -> String? in
-                guard let filter = filter as? NSObject,
-                      filter.responds(to: NSSelectorFromString("type")) else { return nil }
-                return filter.value(forKey: "type") as? String
+        func nativeFilters(_ layer: CALayer) -> [NSObject] {
+            let here = (layer.filters ?? []).compactMap { $0 as? NSObject }.filter {
+                $0.responds(to: NSSelectorFromString("type"))
             }
-            return here + (layer.sublayers ?? []).flatMap(filterTypes)
+            return here + (layer.sublayers ?? []).flatMap(nativeFilters)
         }
-        XCTAssertTrue(filterTypes(window.layer.superlayer ?? window.layer).contains("glassForeground"),
+        let filters = nativeFilters(window.layer.superlayer ?? window.layer)
+        XCTAssertTrue(filters.contains { $0.value(forKey: "type") as? String == "glassForeground" },
             "A descriptor flag alone does not prove native foreground refraction was installed")
+        let backgrounds = filters.filter { $0.value(forKey: "type") as? String == "glassBackground" }
+        XCTAssertFalse(backgrounds.isEmpty)
+        for background in backgrounds {
+            let shadow = try XCTUnwrap(background.value(forKey: "inputShadowOpacity") as? NSNumber)
+            XCTAssertEqual(shadow.doubleValue, 0, accuracy: 0.0001)
+            // The ring-shadow input is present on 27, but absent on 26.
+            if let ring = background.value(forKey: "inputRingShadowOpacity") as? NSNumber {
+                XCTAssertEqual(ring.doubleValue, 0, accuracy: 0.0001)
+            }
+        }
         #endif
     }
 }

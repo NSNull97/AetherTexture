@@ -199,6 +199,13 @@ public final class MenuGlassSurfaceView: UIView {
             scatteringView.backgroundColor = .clear
             return
         }
+        // Native glass already scatters the backdrop and provides key/fill
+        // highlights. A white overlay hides that moving refraction during
+        // the transition, particularly on a dark or detailed background.
+        if usesNativeContentLensing {
+            scatteringView.backgroundColor = .clear
+            return
+        }
         let t = max(0, min(1, progress))
         let baseAlpha: CGFloat = isDark ? 0.015 : 0.025
         let peakAlpha: CGFloat = isDark ? 0.085 : 0.115

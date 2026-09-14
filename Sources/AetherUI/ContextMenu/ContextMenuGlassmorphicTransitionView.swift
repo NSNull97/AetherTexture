@@ -223,9 +223,15 @@ private func contextMenuReferenceOpeningGeometry(
     if t == 0 { return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0) }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
     let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
-    let growth = contextMenuBloomSample(times: [0, 0.30, 0.40, 0.52, 0.66, 0.82, 1],
-                                       values: [0, 0, 0.19, 0.55, 0.90, 1, 1], at: t)
-    let expand = reduceMotion ? contextMenuBloomSmootherstep(t) : growth
+    // The leading edge stretches out first; the sides catch up while the
+    // trailing edge is still near the source. A single width/height clock
+    // makes this phase look like zooming an already formed menu.
+    let times: [CGFloat] = [0, 0.24, 0.34, 0.45, 0.58, 0.72, 0.88, 1]
+    let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSample(
+        times: times, values: [0, 0, 0.07, 0.33, 0.74, 0.98, 1, 1], at: t)
+    let heightT = reduceMotion ? widthT : contextMenuBloomSample(
+        times: times, values: [0, 0, 0.24, 0.58, 0.86, 0.99, 1, 1], at: t)
+    let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let diameter = min(source.width * 0.72, source.height * 1.38)
     let egg = CGRect(x: source.midX - diameter * 0.5,
                      y: source.midY - source.height * 0.61 + (0.5 - anchor.unitPoint.y) * source.height * 0.7,
@@ -233,12 +239,27 @@ private func contextMenuReferenceOpeningGeometry(
     func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b-a)*t }
     let seed = CGRect(x: lerp(source.minX, egg.minX, pinch), y: lerp(source.minY, egg.minY, pinch),
                       width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
-    let frame = CGRect(x: lerp(seed.minX, target.minX, expand), y: lerp(seed.minY, target.minY, expand),
-                       width: lerp(seed.width, target.width, expand), height: lerp(seed.height, target.height, expand))
-    let rounding = reduceMotion ? expand : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.84)
+    let width = lerp(seed.width, target.width, widthT)
+    let height = lerp(seed.height, target.height, heightT)
+    let unit = anchor.unitPoint
+    let frame = CGRect(
+        x: lerp(seed.minX + seed.width * unit.x, target.minX + target.width * unit.x, travel) - width * unit.x,
+        y: lerp(seed.minY + seed.height * unit.y, target.minY + target.height * unit.y, travel) - height * unit.y,
+        width: width, height: height)
+    let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.88)
     let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)
     let radius = lerp(seedRadius, targetRadius, rounding)
-    return .init(frame: frame, cornerRadii: .uniform(radius), widthT: expand, heightT: expand, anchorTravelT: expand)
+    // A slight directional tension follows the flow; it disappears into the
+    // final corner configuration instead of adding a second settling pulse.
+    let tension = reduceMotion ? 0 : pinch * (1 - rounding) * 0.16
+    let leading = radius * (1 + tension)
+    let trailing = radius * (1 - tension)
+    let radii = ContextMenuBloomCornerRadii(
+        topLeft: unit.y < 0.5 ? trailing : leading,
+        topRight: unit.y < 0.5 ? trailing : leading,
+        bottomLeft: unit.y < 0.5 ? leading : trailing,
+        bottomRight: unit.y < 0.5 ? leading : trailing)
+    return .init(frame: frame, cornerRadii: radii, widthT: widthT, heightT: heightT, anchorTravelT: travel)
 }
 
 /// Pure geometry resolver shared by production and tests. `rawProgress` is
@@ -682,7 +703,21 @@ func contextMenuGlassmorphicGeometrySample(
         let geometry = contextMenuReferenceOpeningGeometry(source: source, target: target,
             sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
             progress: rawProgress, reduceMotion: reduceMotion)
-        return .init(headFrame: source, bodyFrame: geometry.frame, headRotation: 0, bodyRotation: 0,
+        let flowX = target.midX - source.midX
+        let flowY = target.midY - source.midY
+        let inclination = -flowX / max(1, hypot(flowX, flowY)) * (flowY < 0 ? -0.30 : 0.30)
+        let pull = contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.32)
+            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.36, end: 0.78))
+        let rotation = reduceMotion ? 0 : inclination * pull
+        // Rotate around the anchored edge rather than letting the bounding
+        // box swing beyond the screen-side/top edge. This compensation is
+        // continuous with the inclination and needs no positional clamp.
+        let rotatedWidth = geometry.frame.width * abs(cos(rotation)) + geometry.frame.height * abs(sin(rotation))
+        let rotatedHeight = geometry.frame.height * abs(cos(rotation)) + geometry.frame.width * abs(sin(rotation))
+        let frame = geometry.frame.offsetBy(
+            dx: (0.5 - anchor.unitPoint.x) * (rotatedWidth - geometry.frame.width),
+            dy: (0.5 - anchor.unitPoint.y) * (rotatedHeight - geometry.frame.height))
+        return .init(headFrame: source, bodyFrame: frame, headRotation: 0, bodyRotation: rotation,
             headRadius: sourceRadius, bodyCornerRadii: geometry.cornerRadii,
             bridgeStart: source.origin, bridgeEnd: source.origin, bridgeRadius: 0,
             neckBulbCenter: source.origin, neckBulbRadius: 0, headAlpha: 0, bodyAlpha: 1)
@@ -2376,7 +2411,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let radius = Self.lerp(22.0, max(targetMenuFrameInOverlay.width, targetMenuFrameInOverlay.height) * 0.70, highlightT)
         let alphaPeak = UIAccessibility.isReduceMotionEnabled ? 0.08 : 0.18
         let alpha = alphaPeak * sin(.pi * Self.smootherstep(0.05, 0.88, rawT))
-        highlightView.alpha = alpha
+        highlightView.alpha = finalMenuGlassSurfaceView.usesNativeContentLensing ? 0 : alpha
         highlightView.bounds = CGRect(x: 0, y: 0, width: radius * 2.0, height: radius * 2.0)
         highlightView.center = localCenter
         highlightLayer.frame = highlightView.bounds

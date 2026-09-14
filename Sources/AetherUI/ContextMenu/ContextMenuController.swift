@@ -290,11 +290,14 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         window.addSubview(host)
         self.hostView = host
 
-        // Dim layer + tap-to-dismiss target. Liquid keeps the custom,
-        // continuously configurable CABackdropLayer renderer; Legacy uses
-        // only the public systemChromeMaterial effect required by its style.
+        // A transparent background still owns outside taps. Zero view alpha
+        // removes it from UIKit hit-testing, even with a recognizer attached.
+        let hasClearBackground = usesLiquidPresentation && preview == nil
         let dim: UIView
-        if blurred {
+        if hasClearBackground {
+            dim = UIView()
+            dim.backgroundColor = .clear
+        } else if blurred {
             if usesLiquidPresentation {
                 dim = ContextMenuDimBlurView(
                     blurRadius: ContextMenuController.dimBlurRadius,
@@ -324,7 +327,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         }
         dim.frame = host.bounds
         dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        dim.alpha = 0
+        dim.alpha = hasClearBackground ? 1 : 0
         dim.isUserInteractionEnabled = catchTapsOutside
         host.addSubview(dim)
         self.dimView = dim
@@ -965,8 +968,12 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             role: .popup,
             traitCollection: source.view?.traitCollection ?? UITraitCollection.current
         ).animationDuration
-        UIView.animate(withDuration: dimDuration, delay: 0, options: [.curveEaseOut]) {
-            dim.alpha = self.usesLiquidPresentation && self.preview == nil ? 0.0 : 1.0
+        if usesLiquidPresentation && preview == nil {
+            dim.alpha = 1
+        } else {
+            UIView.animate(withDuration: dimDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                dim.alpha = 1
+            }
         }
         if let preview, let previewMenuHost {
             animateInPreview(previewMenuHost: previewMenuHost, lift: preview.lift)
@@ -1390,7 +1397,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
 
     // MARK: - Gestures
 
-    @objc private func handleBackgroundTap(_ recognizer: UITapGestureRecognizer) {
+    @objc func handleBackgroundTap(_ recognizer: UITapGestureRecognizer) {
         dismiss()
     }
 

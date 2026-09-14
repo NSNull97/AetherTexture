@@ -28,6 +28,37 @@ final class ContextMenuGlassmorphicTests: XCTestCase {
         }
     }
 
+    func testClearLiquidBackgroundStillReceivesOutsideTaps() throws {
+        for appearance in [AetherAppearanceStyle.liquidGlassV1, .liquidGlassV2] {
+            let fixture = makeFixture()
+            defer { fixture.window.isHidden = true }
+            let menu = makeMenu(source: fixture.source, appearance: appearance)
+            menu.present()
+            defer { menu.dismiss(animated: false) }
+
+            let hit = try XCTUnwrap(fixture.window.hitTest(CGPoint(x: 300, y: 740), with: nil))
+            XCTAssertEqual(hit.backgroundColor?.cgColor.alpha, 0)
+            XCTAssertEqual(hit.alpha, 1)
+            let recognizer = try XCTUnwrap(hit.gestureRecognizers?.compactMap { $0 as? UITapGestureRecognizer }.first,
+                "The clear background must be hit-testable, not the inert overlay host")
+            menu.handleBackgroundTap(recognizer)
+            XCTAssertFalse(menu.isPresentedForTesting)
+        }
+    }
+
+    func testOutsideTapOptOutDoesNotInstallADismissRecognizer() throws {
+        let fixture = makeFixture()
+        defer { fixture.window.isHidden = true }
+        let menu = ContextMenuController(source: .init(view: fixture.source),
+            items: [.action(.init(id: "action", title: "Action"))],
+            appearanceStyle: .liquidGlassV2, catchTapsOutside: false, hasHapticFeedback: false)
+        menu.present()
+        defer { menu.dismiss(animated: false) }
+        let hit = try XCTUnwrap(fixture.window.hitTest(CGPoint(x: 300, y: 740), with: nil))
+        XCTAssertFalse(hit.gestureRecognizers?.contains { $0 is UITapGestureRecognizer } ?? false)
+        XCTAssertTrue(menu.isPresentedForTesting)
+    }
+
     func testDefaultSourceHidesItsOriginalDuringPresentation() {
         XCTAssertTrue(ContextMenuController.Source(view: UIView()).hidesDuringPresentation)
     }
