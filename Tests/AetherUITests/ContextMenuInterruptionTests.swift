@@ -18,6 +18,67 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertEqual(completions, 1)
     }
 
+    func testOpeningSamplesTheSameMotionAt60And120Hz() {
+        let slow = makeHost(appearance: .legacy, menuHeight: 160)
+        let fast = makeHost(appearance: .legacy, menuHeight: 160)
+        defer { slow.tearDownGlassEffects(); fast.tearDownGlassEffects() }
+        for host in [slow, fast] {
+            host.animateExpand(duration: 0.44, damping: 0.86)
+            host.advanceAnimation(to: 1)
+        }
+        for frame in 1...30 {
+            fast.advanceAnimation(to: 1 + Double(2*frame-1) / 120)
+            fast.advanceAnimation(to: 1 + Double(2*frame) / 120)
+            slow.advanceAnimation(to: 1 + Double(frame) / 60)
+            for (a, b) in [(slow.finalMenuGlassSurfaceView, fast.finalMenuGlassSurfaceView),
+                           (slow.liveMenuContentView, fast.liveMenuContentView)] {
+                XCTAssertEqual(a.bounds.width, b.bounds.width, accuracy: 0.000001)
+                XCTAssertEqual(a.bounds.height, b.bounds.height, accuracy: 0.000001)
+                XCTAssertEqual(a.center.x, b.center.x, accuracy: 0.000001)
+                XCTAssertEqual(a.center.y, b.center.y, accuracy: 0.000001)
+                XCTAssertEqual(a.transform.a, b.transform.a, accuracy: 0.000001)
+                XCTAssertEqual(a.transform.d, b.transform.d, accuracy: 0.000001)
+                XCTAssertEqual(a.alpha, b.alpha, accuracy: 0.000001)
+            }
+        }
+        XCTAssertEqual(slow.liveMenuContentView.transform, .identity)
+        XCTAssertEqual(fast.liveMenuContentView.transform, .identity)
+    }
+
+    func testContentOverscaleUsesTheGlassAnchorOnEveryEdge() throws {
+        for unit in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0, y: 1),
+                     CGPoint(x: 1, y: 1), CGPoint(x: 0.5, y: 0)] {
+            let source = CGRect(x: 280, y: 300, width: 88, height: 44)
+            let target = CGRect(x: source.minX - (255-88)*unit.x,
+                y: source.minY - (170-44)*unit.y, width: 255, height: 170)
+            let host = ContextMenuGlassmorphicTransitionView(sourceFrameInOverlay: source,
+                targetMenuFrameInOverlay: target, finalCornerRadius: 27, sourceCornerRadius: 22,
+                sourceMode: .leasedGlassSource, isDark: false, appearanceStyle: .liquidGlassV1)
+            defer { host.tearDownGlassEffects() }
+            host.frame = CGRect(x: 0, y: 0, width: 600, height: 900)
+            host.layoutIfNeeded()
+            host.animateExpand(duration: 0.44, damping: 0.86)
+            host.advanceAnimation(to: 1)
+            for frame in 1...72 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
+            // At the peak, the carrier owns the full overscale while its
+            // rows can still have their small directional lens deformation.
+            XCTAssertEqual(try menuContentViews(in: host)[0].transform.a, 1.022, accuracy: 0.000001)
+            for frame in 73...82 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
+            let glass = host.finalMenuGlassSurfaceView.frame
+            let scale = 1 + contextMenuLiquidAnimationSample(fraction: 0.82, reduceMotion: false).rebound
+            XCTAssertEqual(glass.width / target.width, scale, accuracy: 0.000001)
+            for view in try menuContentViews(in: host) {
+                let rows = view.convert(view.bounds, to: host)
+                XCTAssertEqual(rows.minX, glass.minX, accuracy: 0.000001)
+                XCTAssertEqual(rows.minY, glass.minY, accuracy: 0.000001)
+                XCTAssertEqual(rows.width, glass.width, accuracy: 0.000001)
+                XCTAssertEqual(rows.height, glass.height, accuracy: 0.000001)
+                XCTAssertEqual(view.bounds.size, target.size)
+            }
+            XCTAssertEqual(host.sourceProxyContainer.transform, .identity)
+        }
+    }
+
     func testWideButtonCollapseKeepsConnectedDropAndRetractsUnderSource() {
         let source = CGRect(x: 220, y: 70, width: 160, height: 44)
         let target = CGRect(x: 125, y: 70, width: 255, height: 470)
@@ -491,6 +552,31 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
+    func testOpeningSizeCheckpointsHaveContinuousAccelerationAndNoExtraExtrema() {
+        let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.84, 1]
+        // Short/wide and tall silhouettes, including the compact seed plateau.
+        for values: [CGFloat] in [[0, 0, 0.50, 0.86, 0.98, 1, 1],
+                                  [64, 64, 122, 186, 371, 470, 470]] {
+            func value(_ t: CGFloat) -> CGFloat {
+                contextMenuBloomSmoothSample(times: times, values: values, at: t)
+            }
+            var previous = values[0]
+            for step in 1...1000 {
+                let current = value(CGFloat(step) / 1000)
+                XCTAssertGreaterThanOrEqual(current + 0.000001, previous)
+                XCTAssertLessThanOrEqual(current, values.last! + 0.000001)
+                previous = current
+            }
+            let h: CGFloat = 0.000001
+            for knot in times.dropFirst().dropLast() {
+                let left = (value(knot) - 2 * value(knot-h) + value(knot-2*h)) / (h*h)
+                let right = (value(knot+2*h) - 2 * value(knot+h) + value(knot)) / (h*h)
+                XCTAssertEqual(left, right, accuracy: (values.last! - values[0]) * 0.03,
+                    "An acceleration discontinuity at a size checkpoint reads as a skipped frame")
+            }
+        }
+    }
+
     func testOpeningExpansionDeceleratesIntoOneSmallOverscale() {
         let source = CGRect(x: 18, y: 70, width: 88, height: 44)
         let target = CGRect(x: 18, y: 70, width: 255, height: 170)
@@ -542,7 +628,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
-    func testDisplayClockOverspringsOnlyGlassAndKeepsTheLastFrameOnReversal() throws {
+    func testDisplayClockOverspringsGlassAndRowsTogetherAndKeepsTheLastFrameOnReversal() throws {
         for appearance in AetherAppearanceStyle.allCases {
             let host = makeHost(appearance: appearance, menuHeight: 160, sourceWidth: 160)
             defer { host.tearDownGlassEffects() }
@@ -552,7 +638,15 @@ final class ContextMenuInterruptionTests: XCTestCase {
             for frame in 1...51 { host.advanceAnimation(to: 1 + Double(frame) / 120) }
             XCTAssertGreaterThan(host.finalMenuGlassSurfaceView.bounds.height, 160)
             XCTAssertLessThan(host.finalMenuGlassSurfaceView.bounds.height, 164)
-            XCTAssertEqual(host.liveMenuContentView.transform, .identity)
+            let scale = host.finalMenuGlassSurfaceView.bounds.height / 160
+            XCTAssertEqual(host.liveMenuContentView.transform.a, scale, accuracy: 0.000001)
+            XCTAssertEqual(host.liveMenuContentView.transform.d, scale, accuracy: 0.000001)
+            let rows = host.liveMenuContentView.convert(host.liveMenuContentView.bounds, to: host)
+            XCTAssertEqual(rows.minX, host.finalMenuGlassSurfaceView.frame.minX, accuracy: 0.000001)
+            XCTAssertEqual(rows.minY, host.finalMenuGlassSurfaceView.frame.minY, accuracy: 0.000001)
+            XCTAssertEqual(rows.width, host.finalMenuGlassSurfaceView.bounds.width, accuracy: 0.000001)
+            let snapshots = try menuContentViews(in: host)
+            XCTAssertEqual(snapshots[0].transform, host.liveMenuContentView.transform)
             XCTAssertEqual(host.sourceProxyContainer.transform.a, 1)
             let views = try menuContentViews(in: host) + [host.sourceProxyContainer, host.finalMenuGlassSurfaceView]
             let before = views.map(ViewRendering.init)

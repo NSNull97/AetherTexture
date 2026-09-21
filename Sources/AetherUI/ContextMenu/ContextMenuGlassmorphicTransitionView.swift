@@ -245,7 +245,7 @@ private func contextMenuReferenceOpeningGeometry(
     // Expansion overlaps the last part of the pull instead of waiting for
     // the compact seed to finish: one transfer, not a pull followed by unfold.
     let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.84, 1]
-    let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSample(
+    let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSmoothSample(
         times: times, values: [0, 0, 0.50, 0.86, 0.98, 1, 1], at: t)
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let directionX = 1 - 2 * anchor.unitPoint.x
@@ -264,7 +264,7 @@ private func contextMenuReferenceOpeningGeometry(
                       width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
     let width = lerp(seed.width, target.width, widthT)
     let lensHeight = min(target.height * 0.82, target.width * 0.73)
-    let height = reduceMotion ? lerp(source.height, target.height, widthT) : contextMenuBloomSample(
+    let height = reduceMotion ? lerp(source.height, target.height, widthT) : contextMenuBloomSmoothSample(
         times: times,
         values: [seed.height, seed.height,
                  min(target.height * 0.55, target.width * 0.48), lensHeight,
@@ -574,6 +574,36 @@ private func contextMenuBloomSample(
             + lowerTangentWeight * duration * lowerTangent
             + upperWeight * values[index]
             + upperTangentWeight * duration * upperTangent
+    }
+    return values[values.count - 1]
+}
+
+/// Monotone C2 interpolation for the opening silhouette. Shared endpoint
+/// velocities carry motion through each checkpoint; zero endpoint acceleration
+/// joins neighbouring quintics without the acceleration jumps of cubic Hermite.
+/// Ordered Bezier controls bound the curve to its measured segment, so smoothing
+/// cannot introduce a second overshoot or reverse the liquid transfer.
+func contextMenuBloomSmoothSample(times: [CGFloat], values: [CGFloat], at progress: CGFloat) -> CGFloat {
+    precondition(times.count == values.count && !times.isEmpty)
+    if progress <= times[0] { return values[0] }
+    for index in 1..<times.count where progress <= times[index] {
+        let lower = index - 1
+        let duration = times[index] - times[lower]
+        let t = contextMenuBloomNormalize(progress, start: times[lower], end: times[index])
+        func tangent(_ i: Int) -> CGFloat {
+            guard i > 0, i < times.count - 1 else { return 0 }
+            let before = (values[i] - values[i - 1]) / (times[i] - times[i - 1])
+            let after = (values[i + 1] - values[i]) / (times[i + 1] - times[i])
+            let slope = contextMenuBloomTangent(times: times, values: values, index: i)
+            let limit = 1.25 * min(abs(before), abs(after))
+            return max(-limit, min(limit, slope))
+        }
+        let t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t
+        let position = 10 * t3 - 15 * t4 + 6 * t5
+        let departure = t - 6 * t3 + 8 * t4 - 3 * t5
+        let arrival = -4 * t3 + 7 * t4 - 3 * t5
+        return values[lower] + (values[index] - values[lower]) * position
+            + duration * (tangent(lower) * departure + tangent(index) * arrival)
     }
     return values[values.count - 1]
 }
@@ -2267,7 +2297,15 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
         let snapshotAlpha = weights.snapshotContainer
         snapshotContainer.alpha = snapshotAlpha
-        snapshotContainer.transform = .identity
+        // Match the glass scale around the same attached edge. Bounds stay at
+        // their final size: snapshots and live rows share one visual overscale
+        // without relayout or a scale jump at the snapshot/live handoff.
+        let scale = 1 + (UIAccessibility.isReduceMotionEnabled ? 0 : animationSurfaceRebound)
+        let unit = bloomAnchor.unitPoint
+        snapshotContainer.transform = CGAffineTransform(
+            a: scale, b: 0, c: 0, d: scale,
+            tx: (0.5 - unit.x) * targetMenuFrameInOverlay.width * (scale - 1),
+            ty: (0.5 - unit.y) * targetMenuFrameInOverlay.height * (scale - 1))
         if snapshotAlpha > 0.0001 {
         // Child alphas are normalized because the container supplies the
         // common opacity. Equal-power gains soften the source-over midpoint
@@ -2339,9 +2377,11 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             if UIAccessibility.isReduceMotionEnabled {
                 return contextMenuBloomNormalize(t, start: 0.38, end: 0.82)
             }
-            // Reveal/refract inside the expanding lens, not on an already
-            // settled platter after its geometric clock has accelerated.
-            return contextMenuBloomNormalize(contextMenuOpeningShapeProgress(t), start: 0.38, end: 0.94)
+            // Start inside the growing lens, but let focus lag its fastest
+            // expansion. Feeding the full accelerated shape clock to the rows
+            // compressed their refraction/focus into just a few display frames.
+            let opticalPhase = (t + contextMenuOpeningShapeProgress(t)) * 0.5
+            return contextMenuBloomNormalize(opticalPhase, start: 0.30, end: 0.90)
         }
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
