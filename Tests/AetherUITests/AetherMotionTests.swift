@@ -4,14 +4,16 @@ import UIKit
 
 final class AetherMotionTests: XCTestCase {
     func testShortMenuReturnsBlurredSourceBeforeGlassHasFinishedCollapsing() {
-        // Source optics use the 520 ms linear clock, independently of geometry.
+        // Source optics use elapsed time, independently of eased geometry.
+        let duration = CGFloat(AetherMotion.contextMenu.dismissal.duration)
         let early = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.140 / 0.52, direction: .closing, menuHeight: 160
+            rawProgress: 1 - 0.140 / duration, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(early.opacity, 0.001)
-        XCTAssertGreaterThan(early.blurRadius, 4)
+        XCTAssertGreaterThan(early.blurRadius, 0)
+        XCTAssertLessThan(early.blurRadius, 2, "Visible caption must not return as an opaque blur clot")
         let readable = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.285 / 0.52, direction: .closing, menuHeight: 160
+            rawProgress: 1 - 0.285 / duration, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(readable.opacity, 0.95)
         XCTAssertLessThan(readable.blurRadius, 0.5)
@@ -283,9 +285,11 @@ final class AetherMotionTests: XCTestCase {
 
     func testContextMenuGlassmorphicUsesReferenceTimingProfile() {
         let timing = ContextMenuController.glassmorphicTiming
-        XCTAssertEqual(timing.openDuration, 0.44, accuracy: 0.001)
+        XCTAssertEqual(timing.openDuration, 0.60, accuracy: 0.001)
         XCTAssertEqual(timing.closeDuration, 0.44, accuracy: 0.001)
-        XCTAssertEqual(timing.closeDuration, timing.openDuration, accuracy: 0.001)
+        XCTAssertLessThan(timing.closeDuration, timing.openDuration)
+        XCTAssertEqual(AetherSourceMorphController.Configuration().openDuration, 0.44, accuracy: 0.001,
+            "The context-menu settling tail must not retime the separate attachment renderer")
     }
 
     func testContextMenuContentHandoffHasExactEndpoints() {

@@ -30,7 +30,9 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     // MARK: - Animation constants
 
     internal static let glassmorphicTiming = ContextMenuGlassmorphicTiming(
-        openDuration: AetherMotion.contextMenu.presentation.duration,
+        // This renderer spends the last ~230 ms settling its shared surface
+        // and row overscale. The generic source morph has a different clock.
+        openDuration: 0.60,
         closeDuration: AetherMotion.contextMenu.dismissal.duration
     )
     private static let previewOpenDuration: TimeInterval = 0.29

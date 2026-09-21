@@ -59,11 +59,11 @@ final class ContextMenuInterruptionTests: XCTestCase {
             host.layoutIfNeeded()
             host.animateExpand(duration: 0.44, damping: 0.86)
             host.advanceAnimation(to: 1)
-            for frame in 1...80 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
+            for frame in 1...61 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
             // At the peak, the carrier owns the full overscale while its
             // rows can still have their small directional lens deformation.
             XCTAssertEqual(try menuContentViews(in: host)[0].transform.a, 1.022, accuracy: 0.000001)
-            for frame in 81...90 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
+            for frame in 62...90 { host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100) }
             let glass = host.finalMenuGlassSurfaceView.frame
             let scale = 1 + contextMenuLiquidAnimationSample(fraction: 0.90, reduceMotion: false).rebound
             XCTAssertEqual(glass.width / target.width, scale, accuracy: 0.000001)
@@ -570,6 +570,8 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         XCTAssertEqual(source.transform.b, 0)
                         XCTAssertEqual(source.transform.c, 0)
                         XCTAssertEqual(source.bounds.size, CGSize(width: width, height: 44))
+                        XCTAssertEqual(source.frame, CGRect(x: 18, y: 70, width: width, height: 44),
+                            "A returning caption must focus in place, without sliding through the shrinking belly")
                     }
                 }
             }
@@ -601,6 +603,34 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
+    func testWideCaptionOnlyReturnsInsideTheRestoredGlassShoulder() throws {
+        guard #available(iOS 26.0, *) else { return }
+        for width: CGFloat in [94, 160, 240] {
+            for height: CGFloat in [160, 378] {
+                let host = makeHost(appearance: .liquidGlassV1, menuHeight: height, sourceWidth: width)
+                defer { host.tearDownGlassEffects() }
+                var visibleFrames = 0
+                for frame in 0...120 {
+                    host.setProgress(1 - CGFloat(frame) / 120, direction: .closing)
+                    guard host.sourceProxyContainer.alpha > 0.01 else { continue }
+                    visibleFrames += 1
+                    let mask = try XCTUnwrap(host.sourceProxyContainer.superview?.layer.mask)
+                    let paths = (mask.sublayers ?? []).filter { !$0.isHidden }
+                        .compactMap { ($0 as? CAShapeLayer)?.path }
+                    let caption = host.sourceProxyContainer.frame.insetBy(dx: 12, dy: 12)
+                    for x in [caption.minX, caption.midX, caption.maxX] {
+                        for y in [caption.minY, caption.midY, caption.maxY] {
+                            XCTAssertTrue(paths.contains { $0.contains(CGPoint(x: x, y: y)) },
+                                "The returning label is cut by the drop before the source shoulder arrives")
+                        }
+                    }
+                }
+                XCTAssertGreaterThan(visibleFrames, 0)
+                XCTAssertEqual(host.sourceProxyContainer.alpha, 1)
+            }
+        }
+    }
+
     func testMiddleOfOpeningExpansionMatchesTheReferenceTimeWindow() {
         let source = CGRect(x: 320, y: 70, width: 44, height: 44)
         let target = CGRect(x: 109, y: 70, width: 255, height: 378)
@@ -611,13 +641,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
             let motion = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false)
             let shape = contextMenuGlassmorphicGeometrySample(source: source, target: target,
                 outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
-                anchor: .topTrailing, direction: .opening, rawProgress: t, reduceMotion: false)
+                anchor: .topTrailing, direction: .opening, rawProgress: motion.progress, reduceMotion: false)
             let fraction = shape.bodyFrame.width * (1 + motion.rebound) / target.width
             if half == nil, fraction >= 0.5 { half = t }
             if almostFull == nil, fraction >= 0.9 { almostFull = t }
         }
         guard let half, let almostFull else { return XCTFail("The opening never reached its final width") }
-        let milliseconds = (almostFull - half) * 440
+        let milliseconds = (almostFull - half) * CGFloat(ContextMenuController.glassmorphicTiming.openDuration) * 1000
         // New native recording: roughly 100 ms, with a 16.7 ms frame window.
         // The previous accelerated phase crossed this range in about 45 ms.
         XCTAssertGreaterThanOrEqual(milliseconds, 80)
@@ -645,6 +675,38 @@ final class ContextMenuInterruptionTests: XCTestCase {
         #endif
     }
 
+    func testOpeningKeepsAVisibleOpticalTransferBeforeTheLongSettle() throws {
+        #if !APPSTORE_SAFE
+        guard #available(iOS 26.0, *) else { return }
+        let host = makeHost(appearance: .liquidGlassV1, menuHeight: 378, sourceWidth: 44)
+        defer { host.tearDownGlassEffects() }
+        let duration = ContextMenuController.glassmorphicTiming.openDuration
+        host.animateExpand(duration: duration, damping: 0.86)
+        host.advanceAnimation(to: 1)
+        let snapshots = try menuContentViews(in: host)
+        var visibleRefractionFrames = 0
+        var peakScale: CGFloat = 1
+        var peakTime: TimeInterval = 0
+        for frame in 1...73 {
+            let elapsed = Double(frame) / 120
+            host.advanceAnimation(to: 1 + elapsed)
+            if host.contentRefractionForTesting.displacement > 20,
+               snapshots[0].alpha + host.liveMenuContentView.alpha > 0.5 {
+                visibleRefractionFrames += 1
+            }
+            let scale = snapshots[0].transform.a
+            if scale > peakScale { peakScale = scale; peakTime = elapsed }
+        }
+        XCTAssertGreaterThanOrEqual(Double(visibleRefractionFrames) / 120, 0.14,
+            "The rows need a sustained optical transfer, not a three-frame blur flash")
+        XCTAssertGreaterThanOrEqual(peakTime, 0.34)
+        XCTAssertLessThanOrEqual(peakTime, 0.39)
+        XCTAssertGreaterThanOrEqual(duration - peakTime, 0.20)
+        XCTAssertEqual(host.contentRefractionForTesting.displacement, 0)
+        XCTAssertEqual(host.liveMenuContentView.transform, .identity)
+        #endif
+    }
+
     func testOpeningExpansionDeceleratesIntoOneSmallOverscale() {
         let source = CGRect(x: 18, y: 70, width: 88, height: 44)
         let target = CGRect(x: 18, y: 70, width: 255, height: 170)
@@ -660,13 +722,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
         let approaching = (width(at: 0.76) - width(at: 0.68)) / 0.08
         XCTAssertGreaterThan(expanding, approaching * 3,
             "The liquid transfer should accelerate out of the seed, then slow into the final size")
-        let peak = width(at: 0.80)
+        let peak = width(at: 0.61)
         XCTAssertGreaterThan(peak, target.width * 1.02)
         XCTAssertLessThan(peak, target.width * 1.03)
         var previous = width(at: 0.32)
         for step in 321...1000 {
             let current = width(at: CGFloat(step) / 1000)
-            if step <= 800 { XCTAssertGreaterThanOrEqual(current + 0.000001, previous) }
+            if step <= 610 { XCTAssertGreaterThanOrEqual(current + 0.000001, previous) }
             else { XCTAssertLessThanOrEqual(current, previous + 0.000001) }
             previous = current
         }
@@ -677,7 +739,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         for direction in [ContextMenuBloomDirection.opening, .closing] {
             var previous: CGFloat = 0
             var previousOverscale: CGFloat = 0
-            let peak: CGFloat = direction == .opening ? 0.80 : 0.52
+            let peak: CGFloat = direction == .opening ? 0.61 : 0.52
             for frame in 0...1000 {
                 let t = CGFloat(frame) / 1000
                 let sample = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false, direction: direction)
@@ -685,8 +747,8 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 if frame < 1000 { XCTAssertLessThan(sample.progress, 1) }
                 XCTAssertGreaterThanOrEqual(sample.rebound, 0)
                 XCTAssertLessThanOrEqual(sample.rebound, direction == .opening ? 0.0221 : 0.0141)
-                if t <= peak { XCTAssertGreaterThanOrEqual(sample.rebound, previousOverscale) }
-                else { XCTAssertLessThanOrEqual(sample.rebound, previousOverscale) }
+                if t <= peak { XCTAssertGreaterThanOrEqual(sample.rebound + 0.000000001, previousOverscale) }
+                else { XCTAssertLessThanOrEqual(sample.rebound, previousOverscale + 0.000000001) }
                 previous = sample.progress
                 previousOverscale = sample.rebound
                 XCTAssertEqual(contextMenuLiquidAnimationSample(fraction: t, reduceMotion: true, direction: direction).rebound, 0)
