@@ -570,8 +570,20 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         XCTAssertEqual(source.transform.b, 0)
                         XCTAssertEqual(source.transform.c, 0)
                         XCTAssertEqual(source.bounds.size, CGSize(width: width, height: 44))
-                        XCTAssertEqual(source.frame, CGRect(x: 18, y: 70, width: width, height: 44),
-                            "A returning caption must focus in place, without sliding through the shrinking belly")
+                        let offset = direction == .closing && host.supportsSingleSourceReturn
+                            && !UIAccessibility.isReduceMotionEnabled
+                            ? ContextMenuSharedSourceReturn.sourceOffset(
+                                phase: 1 - CGFloat(frame) / 120, height: 44,
+                                anchor: .init(unitPoint: .zero)) : 0
+                        XCTAssertEqual(source.frame.minX, 18, accuracy: 0.000001)
+                        XCTAssertEqual(source.frame.minY, 70 + offset, accuracy: 0.000001,
+                            "A returning caption must keep its native size while following the glass recoil")
+                        XCTAssertEqual(source.frame.width, width, accuracy: 0.000001)
+                        XCTAssertEqual(source.frame.height, 44, accuracy: 0.000001)
+                        let localPixel = CGPoint(x: 12, y: 16)
+                        let displayedPixel = source.convert(localPixel, to: host)
+                        XCTAssertEqual(displayedPixel.x, 18 + localPixel.x, accuracy: 0.000001)
+                        XCTAssertEqual(displayedPixel.y, 70 + offset + localPixel.y, accuracy: 0.000001)
                     }
                 }
             }

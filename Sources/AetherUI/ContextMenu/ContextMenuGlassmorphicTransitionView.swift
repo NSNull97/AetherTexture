@@ -1848,6 +1848,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     internal var supportsSharedSourceReturn: Bool {
         hasSharedSourceContent && glassMorphContainer.isUsingNativeContainerEffect
     }
+    internal var supportsSingleSourceReturn: Bool {
+        sourceMode == .leasedGlassSource && !hasSharedSourceContent
+            && glassMorphContainer.isUsingNativeContainerEffect
+    }
 
     private let shadowView = UIView()
     private let ambientShadowLayer = CAShapeLayer()
@@ -2523,7 +2527,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             ))
             return Self.interpolate(state.sourceContentTransform, .identity, t)
         }
-        if supportsSharedSourceReturn, animationDirection < 0 {
+        if supportsSharedSourceReturn || supportsSingleSourceReturn, animationDirection < 0 {
             return CGAffineTransform(translationX: 0, y: ContextMenuSharedSourceReturn.sourceOffset(
                 phase: 1 - rawT, height: startFrame.height, anchor: bloomAnchor))
         }
@@ -2948,7 +2952,17 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     private func surfaceReboundTransform(rawT: CGFloat) -> CGAffineTransform {
         if supportsSharedSourceReturn, animationDirection < 0, interruptedCollapse == nil { return .identity }
-        guard !UIAccessibility.isReduceMotionEnabled, animationSurfaceRebound != 0 else { return .identity }
+        guard !UIAccessibility.isReduceMotionEnabled else { return .identity }
+        // A single source retains its established drop geometry and clock.
+        // Translate the complete surface (including neck, shadow and mask)
+        // with its natural-sized content through the same returning impulse
+        // as a shared capsule. Captured reversals already contain this offset.
+        let returnOffset = supportsSingleSourceReturn && animationDirection < 0 && interruptedCollapse == nil
+            ? ContextMenuSharedSourceReturn.sourceOffset(phase: 1 - rawT, height: startFrame.height, anchor: bloomAnchor)
+            : 0
+        guard animationSurfaceRebound != 0 else {
+            return CGAffineTransform(translationX: 0, y: returnOffset)
+        }
         let unit = bloomAnchor.unitPoint
         let t = max(0, min(1, rawT))
         let pivot = CGPoint(
@@ -2958,7 +2972,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                          targetMenuFrameInOverlay.minY + targetMenuFrameInOverlay.height * unit.y, t))
         let scale = 1 + animationSurfaceRebound
         return .init(a: scale, b: 0, c: 0, d: scale,
-                     tx: pivot.x * (1 - scale), ty: pivot.y * (1 - scale))
+                     tx: pivot.x * (1 - scale), ty: pivot.y * (1 - scale) + returnOffset)
     }
 
     private func currentMetrics(rawT: CGFloat) -> Metrics {
