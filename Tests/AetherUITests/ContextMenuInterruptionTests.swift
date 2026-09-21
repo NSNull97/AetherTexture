@@ -572,8 +572,8 @@ final class ContextMenuInterruptionTests: XCTestCase {
                         XCTAssertEqual(source.bounds.size, CGSize(width: width, height: 44))
                         let offset = direction == .closing && host.supportsSingleSourceReturn
                             && !UIAccessibility.isReduceMotionEnabled
-                            ? ContextMenuSharedSourceReturn.sourceOffset(
-                                phase: 1 - CGFloat(frame) / 120, height: 44,
+                            ? ContextMenuSingleSourceReturn.sourceOffset(
+                                fraction: contextMenuLiquidTime(forProgress: 1 - CGFloat(frame) / 120), height: 44,
                                 anchor: .init(unitPoint: .zero)) : 0
                         XCTAssertEqual(source.frame.minX, 18, accuracy: 0.000001)
                         XCTAssertEqual(source.frame.minY, 70 + offset, accuracy: 0.000001,

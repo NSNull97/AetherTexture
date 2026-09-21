@@ -4,6 +4,54 @@ import UIKit
 
 @MainActor
 final class ContextMenuSingleSourceReturnTests: XCTestCase {
+    func testSingleReturnHasOneMirroredPeakAndNoDownwardPreDip() {
+        let anchor = ContextMenuBloomAnchor.topTrailing
+        var previous: CGFloat = 0
+        for index in 0...1000 {
+            let fraction = CGFloat(index) / 1000
+            let offset = ContextMenuSingleSourceReturn.sourceOffset(fraction: fraction, height: 44, anchor: anchor)
+            XCTAssertLessThanOrEqual(offset, 0)
+            XCTAssertGreaterThanOrEqual(offset, -7.040001)
+            if fraction <= 0.14 { XCTAssertEqual(offset, 0) }
+            if fraction <= 0.5 {
+                XCTAssertLessThanOrEqual(offset, previous + 0.000001)
+            } else {
+                XCTAssertGreaterThanOrEqual(offset, previous - 0.000001)
+            }
+            let mirrored = ContextMenuSingleSourceReturn.sourceOffset(fraction: fraction, height: 44,
+                anchor: .init(unitPoint: CGPoint(x: 1, y: 1)))
+            XCTAssertEqual(mirrored, -offset, accuracy: 0.000001)
+            previous = offset
+        }
+        XCTAssertEqual(ContextMenuSingleSourceReturn.sourceOffset(fraction: 0.5, height: 44, anchor: anchor),
+            -7.04, accuracy: 0.000001)
+        XCTAssertEqual(previous, 0)
+    }
+
+    func testSingleReturnBoundsSpeedAndAccelerationWithoutDwellingAtItsPeak() {
+        let duration: CGFloat = 0.44
+        let h: CGFloat = 0.00001
+        func offset(_ time: CGFloat) -> CGFloat {
+            ContextMenuSingleSourceReturn.sourceOffset(fraction: time / duration, height: 44, anchor: .topTrailing)
+        }
+        func velocity(_ time: CGFloat) -> CGFloat { (offset(time + h) - offset(time - h)) / (2 * h) }
+        func acceleration(_ time: CGFloat) -> CGFloat {
+            (offset(time + h) - 2 * offset(time) + offset(time - h)) / (h * h)
+        }
+        for index in 0...1000 {
+            let time = duration * CGFloat(index) / 1000
+            XCTAssertLessThan(abs(velocity(time)), 85, "A compact return must not snap through several pixels per frame")
+            XCTAssertLessThan(abs(acceleration(time)), 1700)
+        }
+        for time in [duration * 0.14, duration] {
+            XCTAssertEqual(velocity(time), 0, accuracy: 0.05)
+            XCTAssertEqual(acceleration(time), 0, accuracy: 2)
+        }
+        XCTAssertEqual(velocity(duration * 0.5), 0, accuracy: 0.05)
+        XCTAssertGreaterThan(acceleration(duration * 0.5), 1000,
+            "A spring turn needs restoring acceleration; joining two eased halves would pause at the peak")
+    }
+
     func testRoundAndCaptionSourcesRecoilOnBothEdgesAndFinishAtTheirOriginalPixels() throws {
         try requireNativeMotion()
         for width: CGFloat in [44, 160] {
@@ -53,15 +101,24 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
                 for raw: CGFloat in [0.15, 0.08, 0.025] {
                     host.setProgress(raw, direction: .closing)
                     let base = geometry(source: fixture.source, target: fixture.target, raw: raw)
-                    let offset = host.sourceProxyContainer.frame.midY - fixture.source.midY
-                    XCTAssertGreaterThan(abs(offset), 0.01)
+                    let fraction = contextMenuLiquidTime(forProgress: 1 - raw)
+                    let anchor = ContextMenuBloomAnchor.detect(source: fixture.source, target: fixture.target)
+                    let contentOffset = ContextMenuSingleSourceReturn.sourceOffset(
+                        fraction: fraction, height: fixture.source.height, anchor: anchor)
+                    let surfaceOffset = ContextMenuSingleSourceReturn.surfaceOffset(
+                        fraction: fraction, source: fixture.source, head: base.headFrame, anchor: anchor)
+                    XCTAssertGreaterThan(fraction, 0.42)
+                    XCTAssertGreaterThan(abs(contentOffset), 0.01)
+                    XCTAssertEqual(host.sourceProxyContainer.frame.midY - fixture.source.midY,
+                        contentOffset, accuracy: 0.000001)
                     let paths = try maskPaths(in: host)
                     let head = try XCTUnwrap(paths.first).boundingBoxOfPath
                     XCTAssertEqual(head.midX, base.headFrame.midX, accuracy: 0.000001)
-                    XCTAssertEqual(head.midY - base.headFrame.midY, offset, accuracy: 0.000001,
+                    XCTAssertEqual(head.midY - base.headFrame.midY, surfaceOffset, accuracy: 0.000001)
+                    XCTAssertEqual(head.midY, host.sourceProxyContainer.frame.midY, accuracy: 0.000001,
                         "The returning head and its caption must move together")
                     XCTAssertEqual(host.finalMenuGlassSurfaceView.center.x, base.bodyFrame.midX, accuracy: 0.000001)
-                    XCTAssertEqual(host.finalMenuGlassSurfaceView.center.y - base.bodyFrame.midY, offset, accuracy: 0.000001)
+                    XCTAssertEqual(host.finalMenuGlassSurfaceView.center.y - base.bodyFrame.midY, surfaceOffset, accuracy: 0.000001)
                     XCTAssertEqual(host.finalMenuGlassSurfaceView.bounds.width, base.bodyFrame.width, accuracy: 0.000001,
                         "Translation must preserve the single-source closing silhouette")
                     XCTAssertEqual(host.finalMenuGlassSurfaceView.bounds.height, base.bodyFrame.height, accuracy: 0.000001)

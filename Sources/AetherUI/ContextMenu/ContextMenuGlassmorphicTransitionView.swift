@@ -24,7 +24,7 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
         // One lobe has finite restoring acceleration at its peak. Joining
         // two smoothersteps there held the overscale almost still for 40 ms,
         // then accelerated into what looked like a second animation.
-        return (progress, 0.022 * contextMenuBloomPulse(t, start: 0.26, peak: 0.61, end: 1, power: 5))
+        return (progress, 0.022 * contextMenuBloomPulse(t, start: 0.26, peak: 0.61, end: 1, power: 4))
     }
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
@@ -782,6 +782,26 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
             bodyAlpha: scalar(from.bodyAlpha, to.bodyAlpha),
             bridgeEllipticity: scalar(from.bridgeEllipticity, to.bridgeEllipticity)
         )
+    }
+}
+
+/// A compact source rises once as the drop returns. Use elapsed time so its
+/// shorter closing duration does not compress the shared capsule's shoulder
+/// dip into a sharp kick. The pulse joins rest with zero speed and acceleration.
+enum ContextMenuSingleSourceReturn {
+    static func sourceOffset(fraction: CGFloat, height: CGFloat, anchor: ContextMenuBloomAnchor) -> CGFloat {
+        let pulse = contextMenuBloomPulse(fraction, start: 0.14, peak: 0.50, end: 1, power: 3)
+        return -height * 0.16 * pulse * (1 - 2 * anchor.unitPoint.y)
+    }
+
+    static func surfaceOffset(fraction: CGFloat, source: CGRect, head: CGRect,
+                              anchor: ContextMenuBloomAnchor) -> CGFloat {
+        // The returning head already travels down inside the old silhouette.
+        // Hand its centre to the recoil as it reforms, before the glyph becomes
+        // fully visible; otherwise the glass peaks after its own content.
+        let handoff = contextMenuBloomSmoothRange(fraction, start: 0.20, end: 0.42)
+        return sourceOffset(fraction: fraction, height: source.height, anchor: anchor)
+            - (head.midY - source.midY) * handoff
     }
 }
 
@@ -2527,9 +2547,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             ))
             return Self.interpolate(state.sourceContentTransform, .identity, t)
         }
-        if supportsSharedSourceReturn || supportsSingleSourceReturn, animationDirection < 0 {
+        if supportsSharedSourceReturn, animationDirection < 0 {
             return CGAffineTransform(translationX: 0, y: ContextMenuSharedSourceReturn.sourceOffset(
                 phase: 1 - rawT, height: startFrame.height, anchor: bloomAnchor))
+        }
+        if supportsSingleSourceReturn, animationDirection < 0 {
+            return CGAffineTransform(translationX: 0, y: ContextMenuSingleSourceReturn.sourceOffset(
+                fraction: opticalElapsed(rawT: rawT), height: startFrame.height, anchor: bloomAnchor))
         }
         return .identity
     }
@@ -2950,19 +2974,23 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         contactShadowLayer.shadowOffset = CGSize(width: 0, height: Self.lerp(Self.lerp(2.0, 5.0, energy), 4.0, finalT))
     }
 
-    private func surfaceReboundTransform(rawT: CGFloat) -> CGAffineTransform {
+    private func surfaceReboundTransform(rawT: CGFloat, headFrame: CGRect? = nil) -> CGAffineTransform {
         if supportsSharedSourceReturn, animationDirection < 0, interruptedCollapse == nil { return .identity }
         guard !UIAccessibility.isReduceMotionEnabled else { return .identity }
-        // A single source retains its established drop geometry and clock.
-        // Translate the complete surface (including neck, shadow and mask)
-        // with its natural-sized content through the same returning impulse
-        // as a shared capsule. Captured reversals already contain this offset.
-        let returnOffset = supportsSingleSourceReturn && animationDirection < 0 && interruptedCollapse == nil
-            ? ContextMenuSharedSourceReturn.sourceOffset(phase: 1 - rawT, height: startFrame.height, anchor: bloomAnchor)
-            : 0
-        guard animationSurfaceRebound != 0 else {
-            return CGAffineTransform(translationX: 0, y: returnOffset)
+        if supportsSingleSourceReturn, animationDirection < 0, interruptedCollapse == nil {
+            let head = headFrame ?? contextMenuGlassmorphicGeometrySample(
+                source: startFrame, target: targetMenuFrameInOverlay,
+                outerFrame: startFrame, outerCornerRadii: .uniform(startCornerRadius),
+                sourceRadius: startCornerRadius, targetRadius: finalCornerRadius,
+                anchor: bloomAnchor, direction: .closing, rawProgress: rawT, reduceMotion: false
+            ).headFrame
+            // Move the complete connected silhouette, shadow and mask. This
+            // impulse replaces the generic closing scale; layering both made
+            // the single button land in two separate movements.
+            return CGAffineTransform(translationX: 0, y: ContextMenuSingleSourceReturn.surfaceOffset(
+                fraction: opticalElapsed(rawT: rawT), source: startFrame, head: head, anchor: bloomAnchor))
         }
+        guard animationSurfaceRebound != 0 else { return .identity }
         let unit = bloomAnchor.unitPoint
         let t = max(0, min(1, rawT))
         let pivot = CGPoint(
@@ -2972,7 +3000,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                          targetMenuFrameInOverlay.minY + targetMenuFrameInOverlay.height * unit.y, t))
         let scale = 1 + animationSurfaceRebound
         return .init(a: scale, b: 0, c: 0, d: scale,
-                     tx: pivot.x * (1 - scale), ty: pivot.y * (1 - scale) + returnOffset)
+                     tx: pivot.x * (1 - scale), ty: pivot.y * (1 - scale))
     }
 
     private func currentMetrics(rawT: CGFloat) -> Metrics {
@@ -3015,7 +3043,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     private func currentGlassmorphicSample(metrics: Metrics, rawT: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
-        baseGlassmorphicSample(metrics: metrics, rawT: rawT).applying(surfaceReboundTransform(rawT: rawT))
+        let base = baseGlassmorphicSample(metrics: metrics, rawT: rawT)
+        return base.applying(surfaceReboundTransform(rawT: rawT, headFrame: base.headFrame))
     }
 
     private func baseGlassmorphicSample(
