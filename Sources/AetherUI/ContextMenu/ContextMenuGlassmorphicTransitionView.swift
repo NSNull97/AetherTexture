@@ -13,22 +13,46 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
                                      direction: ContextMenuBloomDirection = .opening) -> (progress: CGFloat, rebound: CGFloat) {
     let t = max(0, min(1, fraction))
     if reduceMotion { return (t * t * (3 - 2 * t), 0) }
-    // The native menu reaches its maximum at ~360 ms but keeps settling
-    // until ~600 ms. Stretch the recoil, not the fast middle of the bloom.
     let progress = direction == .opening
-        ? contextMenuBloomSmoothSample(times: [0, 0.25, 0.35, 0.45, 0.54, 0.61, 1],
-                                       values: [0, 0.26, 0.42, 0.55, 0.70, 0.80, 1], at: t)
+        ? contextMenuOpeningAnimationProgress(t)
         : contextMenuBloomSample(times: [0, 0.20, 0.50, 0.72, 1],
                                  values: [0, 0.10, 0.68, 0.99, 1], at: t)
+    if direction == .opening {
+        // One lobe has finite restoring acceleration at its peak. Joining
+        // two smoothersteps there held the overscale almost still for 40 ms,
+        // then accelerated into what looked like a second animation.
+        return (progress, 0.022 * contextMenuBloomPulse(t, start: 0.26, peak: 0.61, end: 1, power: 5))
+    }
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
     // with the end of the menu's clock. Opening settles with the platter.
-    let peak: CGFloat = direction == .opening ? 0.80 : 0.52
-    let start: CGFloat = direction == .opening ? 0.30 : 0.18
-    let reboundTime = direction == .opening ? progress : t
-    let envelope = contextMenuBloomSmoothRange(reboundTime, start: start, end: peak)
-        * (1 - contextMenuBloomSmoothRange(reboundTime, start: peak, end: 1))
-    return (progress, (direction == .opening ? 0.022 : 0.014) * envelope)
+    let envelope = contextMenuBloomSmoothRange(t, start: 0.18, end: 0.52)
+        * (1 - contextMenuBloomSmoothRange(t, start: 0.52, end: 1))
+    return (progress, 0.014 * envelope)
+}
+
+private func contextMenuOpeningAnimationProgress(_ t: CGFloat) -> CGFloat {
+    let times: [CGFloat] = [0, 0.25, 0.35, 0.45, 0.54, 0.61, 1]
+    let values: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.80, 1]
+    if t <= 0.54 { return contextMenuBloomSmoothSample(times: times, values: values, at: t) }
+    // Carry the incoming velocity into one decelerating quintic. The former
+    // final waypoint slowed the clock near the peak and accelerated it again
+    // afterwards, moving the corners and centre in a separate late pulse.
+    let velocity = contextMenuBloomTangent(times: times, values: values, index: 4)
+    let u = contextMenuBloomNormalize(t, start: 0.54, end: 1)
+    let departure = u - 6 * pow(u, 3) + 8 * pow(u, 4) - 3 * pow(u, 5)
+    return 0.70 + 0.30 * contextMenuBloomSmootherstep(u) + 0.46 * velocity * departure
+}
+
+/// A single smooth pulse, with no flat join at its maximum. Both endpoint
+/// derivatives vanish; the peak retains the acceleration of a spring turn.
+private func contextMenuBloomPulse(_ value: CGFloat, start: CGFloat, peak: CGFloat,
+                                   end: CGFloat, power: CGFloat) -> CGFloat {
+    let u = contextMenuBloomNormalize(value, start: start, end: end)
+    guard u > 0, u < 1 else { return 0 }
+    let peakUnit = (peak - start) / (end - start)
+    let returnPower = power * (1 - peakUnit) / peakUnit
+    return pow(u / peakUnit, power) * pow((1 - u) / (1 - peakUnit), returnPower)
 }
 
 /// Linear time samples (0 = source, 1 = menu), independent of eased geometry.
@@ -270,8 +294,7 @@ private func contextMenuReferenceOpeningGeometry(
     // parking a small seed at the final centre and unfolding it in place.
     let bend = reduceMotion ? 0 : 0.5 * centerTravel * (1 - centerTravel)
     let settlingTravel = reduceMotion ? 0 : min(14, target.height * 0.045)
-        * contextMenuBloomSmoothRange(t, start: 0.40, end: 0.68)
-        * (1 - contextMenuBloomSmoothRange(t, start: 0.68, end: 1))
+        * contextMenuBloomPulse(t, start: 0.40, peak: 0.68, end: 1, power: 3)
     let frame = CGRect(
         x: lerp(source.midX, target.midX, centerTravel - bend) - width * 0.5,
         y: lerp(source.midY, target.midY, centerTravel + bend) + directionY * settlingTravel - height * 0.5,

@@ -758,6 +758,31 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
+    func testOpeningTurnsAtItsPeakWithoutAFlatHoldOrASecondClockAcceleration() {
+        func motion(_ t: CGFloat) -> (progress: CGFloat, rebound: CGFloat) {
+            contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false)
+        }
+        let h: CGFloat = 0.0001
+        func velocity(_ t: CGFloat) -> CGFloat {
+            (motion(t + h).progress - motion(t - h).progress) / (2 * h)
+        }
+        let peak: CGFloat = 0.61
+        let acceleration = (motion(peak + h).rebound - 2 * motion(peak).rebound
+            + motion(peak - h).rebound) / (h * h)
+        XCTAssertLessThan(acceleration, -0.5,
+            "The overscale must turn straight into recoil, not stop with zero restoring acceleration")
+        var previousVelocity = velocity(0.54)
+        for frame in 541...999 {
+            let current = velocity(CGFloat(frame) / 1000)
+            XCTAssertGreaterThanOrEqual(current, 0)
+            XCTAssertLessThanOrEqual(current, previousVelocity + 0.000001,
+                "The settling clock must not accelerate into a separate late movement")
+            previousVelocity = current
+        }
+        XCTAssertEqual(velocity(0.54 - h), velocity(0.54 + h), accuracy: 0.00001,
+            "The main expansion and settling must share their boundary velocity")
+    }
+
     func testDisplayClockOverspringsGlassAndRowsTogetherAndKeepsTheLastFrameOnReversal() throws {
         for appearance in AetherAppearanceStyle.allCases {
             let host = makeHost(appearance: appearance, menuHeight: 160, sourceWidth: 160)
