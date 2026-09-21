@@ -18,24 +18,11 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
     // with the end of the menu's clock. Opening settles with the platter.
-    let peak: CGFloat = direction == .opening ? 0.72 : 0.52
+    let peak: CGFloat = direction == .opening ? 0.80 : 0.52
     let start: CGFloat = direction == .opening ? 0.30 : 0.18
     let envelope = contextMenuBloomSmoothRange(t, start: start, end: peak)
         * (1 - contextMenuBloomSmoothRange(t, start: peak, end: 1))
     return (progress, (direction == .opening ? 0.022 : 0.014) * envelope)
-}
-
-/// Keep the caption on its absolute clock while the glass accelerates out
-/// of the compact drop, then spends the remaining time settling. Every
-/// opening surface uses this same phase, including the trailing neck.
-private func contextMenuOpeningShapeProgress(_ time: CGFloat) -> CGFloat {
-    let t = max(0, min(1, time))
-    let u = max(0, min(1, (t - 0.26) / 0.74))
-    let shoulder = u * (1 - u)
-    // A single C2-continuous phase advance: no acceleration changes at
-    // intermediate timing knots. The amplitude keeps progress monotone,
-    // including the long deceleration after the main liquid transfer.
-    return t + 0.20 * 64 * shoulder * shoulder * shoulder
 }
 
 /// Linear time samples (0 = source, 1 = menu), independent of eased geometry.
@@ -233,20 +220,18 @@ private func contextMenuReferenceOpeningGeometry(
     anchor: ContextMenuBloomAnchor, progress: CGFloat, reduceMotion: Bool
 ) -> ContextMenuBloomGeometrySample {
     let raw = max(0, min(1, progress))
-    let t = reduceMotion ? raw : contextMenuOpeningShapeProgress(raw)
+    let t = raw
     if t == 0 || (!reduceMotion && t <= 0.16) {
         return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0)
     }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
     let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
-    // Grow a compact, broad lens before acquiring the menu's full height.
-    // Scaling height by the final (potentially very tall) platter made this
-    // phase a narrow strip unfolding from the source edge.
-    // Expansion overlaps the last part of the pull instead of waiting for
-    // the compact seed to finish: one transfer, not a pull followed by unfold.
-    let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.84, 1]
+    // The reference pear grows on both axes while it travels. A separate
+    // width-limited lens height flattened tall menus, then forced their
+    // height to catch up in a few frames after the centre had already stopped.
+    let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.78, 1]
     let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSmoothSample(
-        times: times, values: [0, 0, 0.50, 0.86, 0.98, 1, 1], at: t)
+        times: times, values: [0, 0, 0.50, 0.80, 0.98, 1, 1], at: t)
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let directionX = 1 - 2 * anchor.unitPoint.x
     let directionY = 1 - 2 * anchor.unitPoint.y
@@ -263,24 +248,25 @@ private func contextMenuReferenceOpeningGeometry(
     let seed = CGRect(x: lerp(source.minX, egg.minX, pinch), y: lerp(source.minY, egg.minY, pinch),
                       width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
     let width = lerp(seed.width, target.width, widthT)
-    let lensHeight = min(target.height * 0.82, target.width * 0.73)
-    let height = reduceMotion ? lerp(source.height, target.height, widthT) : contextMenuBloomSmoothSample(
-        times: times,
-        values: [seed.height, seed.height,
-                 min(target.height * 0.55, target.width * 0.48), lensHeight,
-                 lerp(lensHeight, target.height, 0.65), target.height, target.height], at: t)
-    let heightT = max(0, min(1, (height - seed.height) / max(1, target.height - seed.height)))
+    // The pear is initially a little fuller than the final menu. Its height
+    // follows the same growth continuously, rather than catching up later.
+    let heightT = reduceMotion ? widthT : widthT * (0.65 + 0.35 * widthT)
+    let height = lerp(reduceMotion ? source.height : seed.height, target.height, heightT)
     // A single centre trajectory carries the compact drop into the menu.
     // Deriving Y from an anchored growing rectangle while moving X ahead
     // made the seed slide sideways; both axes must share the arrival clock.
-    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.40)
+    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.58)
     // Quadratic travel bends toward the destination: the vertical component
     // leads while the compact body leaves the button, then the horizontal
-    // component catches up. Both arrive together, with zero end velocity.
+    // component catches up. Translation overlaps expansion instead of
+    // parking a small seed at the final centre and unfolding it in place.
     let bend = reduceMotion ? 0 : 0.5 * centerTravel * (1 - centerTravel)
+    let settlingTravel = reduceMotion ? 0 : min(14, target.height * 0.045)
+        * contextMenuBloomSmoothRange(t, start: 0.40, end: 0.68)
+        * (1 - contextMenuBloomSmoothRange(t, start: 0.68, end: 1))
     let frame = CGRect(
         x: lerp(source.midX, target.midX, centerTravel - bend) - width * 0.5,
-        y: lerp(source.midY, target.midY, centerTravel + bend) - height * 0.5,
+        y: lerp(source.midY, target.midY, centerTravel + bend) + directionY * settlingTravel - height * 0.5,
         width: width, height: height)
     let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.58, end: 0.94)
     let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)
@@ -784,7 +770,7 @@ func contextMenuGlassmorphicGeometrySample(
         // instead form one short trailing neck, absorbed before the platter
         // settles. Its exposed length is bounded even for very tall menus.
         let body = geometry.frame
-        let shapeProgress = reduceMotion ? rawProgress : contextMenuOpeningShapeProgress(rawProgress)
+        let shapeProgress = rawProgress
         let center = CGPoint(x: body.midX, y: body.midY)
         let sourceCenter = CGPoint(x: source.midX, y: source.midY)
         let dx = sourceCenter.x - center.x
@@ -970,10 +956,13 @@ private func contextMenuClosingGlassmorphicGeometrySample(
             * (1.0 - collapsed)
         surfaceTensionStrength = max(horizontalTension, verticalTension)
         headDeformationStrength = surfaceTensionStrength
-        headScale = 0.015 + 0.985 * contextMenuBloomSmoothRange(phase, start: 0.40, end: 0.74)
-        headAlpha = contextMenuBloomSmoothRange(phase, start: 0.40, end: 0.64)
+        // The reference pulls a visible nose toward the source while the
+        // belly is still broad. Delaying this until phase .40 produced only
+        // a shrinking platter and then a stretched button at the very end.
+        headScale = 0.015 + 0.985 * contextMenuBloomSmoothRange(phase, start: 0.16, end: 0.60)
+        headAlpha = contextMenuBloomSmoothRange(phase, start: 0.16, end: 0.52)
         bodyAlpha = 1.0 - contextMenuBloomSmoothRange(phase, start: 0.86, end: 1.0)
-        bridgeVisibility = contextMenuBloomSmoothRange(phase, start: 0.38, end: 0.60)
+        bridgeVisibility = contextMenuBloomSmoothRange(phase, start: 0.18, end: 0.52)
             * (1.0 - contextMenuBloomSmoothRange(phase, start: 0.86, end: 1.0))
         menuAmount = 1.0 - phase
     }
@@ -1336,6 +1325,14 @@ private func contextMenuClosingGlassmorphicGeometrySample(
         x: headCenter.x + semanticExit.x * bridgeOriginDistance,
         y: headCenter.y + semanticExit.y * bridgeOriginDistance
     ))
+    // An earlier, fuller returning source moves the exit farther inside.
+    // Keep the receiving end inward of that actual exit, not merely inward
+    // of the source centre; otherwise the neck can bend outward for a frame.
+    if unit.x >= 0.75 {
+        bodyContact.x = max(bodyFrame.minX, min(bodyContact.x, bridgeOrigin.x - 4))
+    } else if unit.x <= 0.25 {
+        bodyContact.x = min(bodyFrame.maxX, max(bodyContact.x, bridgeOrigin.x + 4))
+    }
     bodyContact = clampBridgePoint(bodyContact)
 
     let bridgeDX = bodyContact.x - bridgeOrigin.x
@@ -2377,11 +2374,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             if UIAccessibility.isReduceMotionEnabled {
                 return contextMenuBloomNormalize(t, start: 0.38, end: 0.82)
             }
-            // Start inside the growing lens, but let focus lag its fastest
-            // expansion. Feeding the full accelerated shape clock to the rows
-            // compressed their refraction/focus into just a few display frames.
-            let opticalPhase = (t + contextMenuOpeningShapeProgress(t)) * 0.5
-            return contextMenuBloomNormalize(opticalPhase, start: 0.30, end: 0.90)
+            // Share the absolute clock with the pear. A second acceleration
+            // of this phase squeezed the whole optical transfer into a burst.
+            return contextMenuBloomNormalize(t, start: 0.30, end: 0.90)
         }
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
@@ -2453,8 +2448,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 filter.setBlurRadius(value.blur)
             }
 
-            let t = animationDirection >= 0
-                ? contextMenuOpeningShapeProgress(rawT) : max(0, min(1, rawT))
+            let t = max(0, min(1, rawT))
             let phase = Self.smootherstep(0.02, 0.82, t)
             let lensBell = sin(.pi * phase)
             let visibleIn = Self.smootherstep(0.015, 0.12, t)
@@ -2501,7 +2495,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             }
 
             let t = max(0, min(1, rawT))
-            let phase = Self.smootherstep(0.16, 1.0, t)
+            // Opening distortion peaks before sharp rows take over. The
+            // previous late peak blurred them a second time after reveal.
+            let phase = animationDirection >= 0
+                ? Self.smootherstep(0.04, 0.88, t) : Self.smootherstep(0.16, 1.0, t)
             let lensBell = pow(sin(.pi * phase), 2)
             let visibility = contextMenuBloomRevealProgress(
                 for: contextMenuBloomClosingContentWeights(at: t)
@@ -2511,7 +2508,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             let minimumSide = min(size.width, size.height)
             let peakDisplacement = min(48.0, max(36.0, minimumSide * 0.18))
 
-            apply(displacement: peakDisplacement * intensity, blur: 2.7 * intensity)
+            apply(displacement: peakDisplacement * intensity, blur: (animationDirection >= 0 ? 0.9 : 2.7) * intensity)
         }
     }
 

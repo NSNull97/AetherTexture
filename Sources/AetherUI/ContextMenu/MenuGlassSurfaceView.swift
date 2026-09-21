@@ -14,6 +14,10 @@ public final class MenuGlassSurfaceView: UIView {
     private let isDark: Bool
     private var surfaceCornerRadii = ContextMenuBloomCornerRadii.uniform(0)
     private var forcesRoundedBoundsClip = false
+    private var appliedCornerRadii: ContextMenuBloomCornerRadii?
+    private var appliedCornerUsesLiquidGlass = false
+    private var appliedCornerForcesRoundedBoundsClip = false
+    private weak var appliedCornerContentHost: UIView?
     private var supplementalScatteringEnabled = true
     var routesTouchesToGlassSurface = false
 
@@ -147,10 +151,24 @@ public final class MenuGlassSurfaceView: UIView {
             bottomLeft: max(0, radii.bottomLeft),
             bottomRight: max(0, radii.bottomRight)
         )
+        let usesLiquidGlass = surfaceView?.usesLiquidGlassAppearance == true
+        let contentHost = surfaceView?.contentView.superview
+        // Identical corner writes invalidate native glass layout even when
+        // the source lobe is hidden or the shape has already settled. A new
+        // renderer reparents the stable content view, so it must receive the
+        // configuration again; clipping changes must also bypass this guard.
+        guard appliedCornerRadii != resolved
+            || appliedCornerUsesLiquidGlass != usesLiquidGlass
+            || appliedCornerForcesRoundedBoundsClip != forcesRoundedBoundsClip
+            || appliedCornerContentHost !== contentHost else { return }
+        appliedCornerRadii = resolved
+        appliedCornerUsesLiquidGlass = usesLiquidGlass
+        appliedCornerForcesRoundedBoundsClip = forcesRoundedBoundsClip
+        appliedCornerContentHost = contentHost
         surfaceCornerRadii = resolved
         let radius = resolved.average
 
-        if surfaceView?.usesLiquidGlassAppearance == true, #available(iOS 26.0, *) {
+        if usesLiquidGlass, #available(iOS 26.0, *) {
             let configuration = UICornerConfiguration.corners(
                 topLeftRadius: .fixed(resolved.topLeft),
                 topRightRadius: .fixed(resolved.topRight),
