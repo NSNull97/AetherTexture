@@ -127,7 +127,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
                 outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
                 anchor: .init(unitPoint: unit), direction: .opening, rawProgress: progress, reduceMotion: reduceMotion)
         }
-        let lens = sample(.zero, 0.53)
+        let lens = sample(.zero, 0.44)
         XCTAssertGreaterThan(lens.bodyFrame.width, lens.bodyFrame.height,
             "A tall menu should emerge from a broad lens, not an upright strip")
         XCTAssertGreaterThan(lens.bodyFrame.minY, source.minY + 15,
@@ -148,13 +148,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
             "The source shoulder must relax during expansion instead of retaining a ledge")
         XCTAssertGreaterThan(lens.bodyCornerRadii.topLeft, lens.bodyFrame.height * 0.38,
             "The growing menu must keep a rounded lens shoulder before settling into a platter")
-        let arriving = sample(.zero, 0.40)
+        let arriving = sample(.zero, 0.38)
         XCTAssertEqual(arriving.headAlpha, 0)
         XCTAssertEqual(arriving.bodyFrame.midX, source.minX + 255 * 0.5, accuracy: 0.0001,
             "The compact drop must reach the destination centre before most of the widening")
         XCTAssertEqual(arriving.bodyFrame.midY, source.minY + 470 * 0.5, accuracy: 0.0001,
             "Vertical arrival must use the same clock as horizontal arrival")
-        XCTAssertLessThan(arriving.bodyFrame.width, 255 * 0.65)
+        XCTAssertLessThan(arriving.bodyFrame.width, 255 * 0.75)
         XCTAssertEqual(sample(.zero, 0.28, reduceMotion: true).bodyRotation, 0)
         for height: CGFloat in [160, 470] {
             for frame in 0...120 {
@@ -194,7 +194,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
             XCTAssertEqual(left.bodyFrame.midY + up.bodyFrame.midY, 2 * source.midY, accuracy: 0.0001)
             XCTAssertEqual(left.bodyCornerRadii.topLeft, right.bodyCornerRadii.topRight, accuracy: 0.0001)
             XCTAssertEqual(left.bodyCornerRadii.topLeft, up.bodyCornerRadii.bottomLeft, accuracy: 0.0001)
-            if (0.30...0.54).contains(t) {
+            if (0.30...0.40).contains(t) {
                 XCTAssertLessThan(left.bodyCornerRadii.topLeft, left.bodyCornerRadii.bottomRight * 0.90)
             }
         }
@@ -368,7 +368,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
         var samples: [CGFloat] = []
         host.contentRevealProgressChanged = { samples.append($0) }
-        host.setProgress(0.68)
+        host.setProgress(0.48)
         let originalReveal = try XCTUnwrap(samples.last)
         XCTAssertGreaterThan(originalReveal, 0)
         XCTAssertLessThan(originalReveal, 1)
@@ -396,7 +396,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
     func testRepeatedLayoutDoesNotResizeTransformedSnapshotContents() throws {
         let host = makeHost(appearance: .legacy)
         defer { host.tearDownGlassEffects() }
-        host.setProgress(0.68)
+        host.setProgress(0.57)
         let views = try menuContentViews(in: host)
         let before = views.map(ViewRendering.init)
 
@@ -491,18 +491,46 @@ final class ContextMenuInterruptionTests: XCTestCase {
         }
     }
 
+    func testOpeningExpansionDeceleratesIntoOneSmallOverscale() {
+        let source = CGRect(x: 18, y: 70, width: 88, height: 44)
+        let target = CGRect(x: 18, y: 70, width: 255, height: 170)
+        func width(at t: CGFloat) -> CGFloat {
+            let motion = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false)
+            let shape = contextMenuGlassmorphicGeometrySample(source: source, target: target,
+                outerFrame: source, outerCornerRadii: .uniform(22), sourceRadius: 22, targetRadius: 27,
+                anchor: .init(unitPoint: .zero), direction: .opening,
+                rawProgress: motion.progress, reduceMotion: false)
+            return shape.bodyFrame.width * (1 + motion.rebound)
+        }
+        let expanding = (width(at: 0.40) - width(at: 0.32)) / 0.08
+        let approaching = (width(at: 0.64) - width(at: 0.56)) / 0.08
+        XCTAssertGreaterThan(expanding, approaching * 3,
+            "The liquid transfer should accelerate out of the seed, then slow into the final size")
+        let peak = width(at: 0.72)
+        XCTAssertGreaterThan(peak, target.width * 1.02)
+        XCTAssertLessThan(peak, target.width * 1.03)
+        var previous = width(at: 0.32)
+        for step in 321...1000 {
+            let current = width(at: CGFloat(step) / 1000)
+            if step <= 720 { XCTAssertGreaterThanOrEqual(current + 0.000001, previous) }
+            else { XCTAssertLessThanOrEqual(current, previous + 0.000001) }
+            previous = current
+        }
+        XCTAssertEqual(previous, target.width, accuracy: 0.000001)
+    }
+
     func testFluidClockHasNoSeparateStationarySettlingPhase() {
         for direction in [ContextMenuBloomDirection.opening, .closing] {
             var previous: CGFloat = 0
             var previousOverscale: CGFloat = 0
-            let peak: CGFloat = direction == .opening ? 0.82 : 0.52
+            let peak: CGFloat = direction == .opening ? 0.72 : 0.52
             for frame in 0...1000 {
                 let t = CGFloat(frame) / 1000
                 let sample = contextMenuLiquidAnimationSample(fraction: t, reduceMotion: false, direction: direction)
                 if frame > 0 { XCTAssertGreaterThan(sample.progress, previous) }
                 if frame < 1000 { XCTAssertLessThan(sample.progress, 1) }
                 XCTAssertGreaterThanOrEqual(sample.rebound, 0)
-                XCTAssertLessThanOrEqual(sample.rebound, 0.0141)
+                XCTAssertLessThanOrEqual(sample.rebound, direction == .opening ? 0.0221 : 0.0141)
                 if t <= peak { XCTAssertGreaterThanOrEqual(sample.rebound, previousOverscale) }
                 else { XCTAssertLessThanOrEqual(sample.rebound, previousOverscale) }
                 previous = sample.progress

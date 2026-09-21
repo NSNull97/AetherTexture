@@ -18,11 +18,24 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
     // with the end of the menu's clock. Opening settles with the platter.
-    let peak: CGFloat = direction == .opening ? 0.82 : 0.52
+    let peak: CGFloat = direction == .opening ? 0.72 : 0.52
     let start: CGFloat = direction == .opening ? 0.30 : 0.18
     let envelope = contextMenuBloomSmoothRange(t, start: start, end: peak)
         * (1 - contextMenuBloomSmoothRange(t, start: peak, end: 1))
-    return (progress, 0.014 * envelope)
+    return (progress, (direction == .opening ? 0.022 : 0.014) * envelope)
+}
+
+/// Keep the caption on its absolute clock while the glass accelerates out
+/// of the compact drop, then spends the remaining time settling. Every
+/// opening surface uses this same phase, including the trailing neck.
+private func contextMenuOpeningShapeProgress(_ time: CGFloat) -> CGFloat {
+    let t = max(0, min(1, time))
+    let u = max(0, min(1, (t - 0.26) / 0.74))
+    let shoulder = u * (1 - u)
+    // A single C2-continuous phase advance: no acceleration changes at
+    // intermediate timing knots. The amplitude keeps progress monotone,
+    // including the long deceleration after the main liquid transfer.
+    return t + 0.20 * 64 * shoulder * shoulder * shoulder
 }
 
 /// Linear time samples (0 = source, 1 = menu), independent of eased geometry.
@@ -219,8 +232,11 @@ private func contextMenuReferenceOpeningGeometry(
     source: CGRect, target: CGRect, sourceRadius: CGFloat, targetRadius: CGFloat,
     anchor: ContextMenuBloomAnchor, progress: CGFloat, reduceMotion: Bool
 ) -> ContextMenuBloomGeometrySample {
-    let t = max(0, min(1, progress))
-    if t == 0 { return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0) }
+    let raw = max(0, min(1, progress))
+    let t = reduceMotion ? raw : contextMenuOpeningShapeProgress(raw)
+    if t == 0 || (!reduceMotion && t <= 0.16) {
+        return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0)
+    }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
     let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
     // Grow a compact, broad lens before acquiring the menu's full height.
@@ -738,13 +754,14 @@ func contextMenuGlassmorphicGeometrySample(
         // instead form one short trailing neck, absorbed before the platter
         // settles. Its exposed length is bounded even for very tall menus.
         let body = geometry.frame
+        let shapeProgress = reduceMotion ? rawProgress : contextMenuOpeningShapeProgress(rawProgress)
         let center = CGPoint(x: body.midX, y: body.midY)
         let sourceCenter = CGPoint(x: source.midX, y: source.midY)
         let dx = sourceCenter.x - center.x
         let dy = sourceCenter.y - center.y
         let distance = hypot(dx, dy)
-        let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.26)
-            * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.32, end: 0.52))
+        let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(shapeProgress, start: 0.16, end: 0.26)
+            * (1 - contextMenuBloomSmoothRange(shapeProgress, start: 0.32, end: 0.52))
         let side = min(body.width, body.height)
         let reach = min(distance, side * 0.30 + source.height * 0.48) * neck
         let fraction = distance > 0.001 ? reach / distance : 0
@@ -2319,7 +2336,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             )
         }
         if animationDirection >= 0 {
-            return contextMenuBloomNormalize(t, start: 0.38, end: 0.82)
+            if UIAccessibility.isReduceMotionEnabled {
+                return contextMenuBloomNormalize(t, start: 0.38, end: 0.82)
+            }
+            // Reveal/refract inside the expanding lens, not on an already
+            // settled platter after its geometric clock has accelerated.
+            return contextMenuBloomNormalize(contextMenuOpeningShapeProgress(t), start: 0.38, end: 0.94)
         }
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
@@ -2391,7 +2413,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 filter.setBlurRadius(value.blur)
             }
 
-            let t = max(0, min(1, rawT))
+            let t = animationDirection >= 0
+                ? contextMenuOpeningShapeProgress(rawT) : max(0, min(1, rawT))
             let phase = Self.smootherstep(0.02, 0.82, t)
             let lensBell = sin(.pi * phase)
             let visibleIn = Self.smootherstep(0.015, 0.12, t)
