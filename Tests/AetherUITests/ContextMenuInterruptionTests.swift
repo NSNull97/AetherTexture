@@ -141,8 +141,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
         XCTAssertGreaterThan(seed.bridgeRadius, 5, "The opening must retain a liquid neck without a separate source bead")
         XCTAssertLessThan(seed.bodyCornerRadii.topLeft, seed.bodyCornerRadii.bottomRight * 0.75,
             "The source end must be narrower than the leading belly")
-        XCTAssertLessThan(lens.bodyCornerRadii.topLeft, lens.bodyCornerRadii.bottomRight * 0.75,
+        XCTAssertLessThan(lens.bodyCornerRadii.topLeft, lens.bodyCornerRadii.bottomRight * 0.90,
             "Asymmetry must survive from the seed into the growing menu")
+        XCTAssertGreaterThan(lens.bodyCornerRadii.topLeft / lens.bodyCornerRadii.bottomRight,
+            seed.bodyCornerRadii.topLeft / seed.bodyCornerRadii.bottomRight,
+            "The source shoulder must relax during expansion instead of retaining a ledge")
+        XCTAssertGreaterThan(lens.bodyCornerRadii.topLeft, lens.bodyFrame.height * 0.38,
+            "The growing menu must keep a rounded lens shoulder before settling into a platter")
         let arriving = sample(.zero, 0.40)
         XCTAssertEqual(arriving.headAlpha, 0)
         XCTAssertEqual(arriving.bodyFrame.midX, source.minX + 255 * 0.5, accuracy: 0.0001,
@@ -190,7 +195,7 @@ final class ContextMenuInterruptionTests: XCTestCase {
             XCTAssertEqual(left.bodyCornerRadii.topLeft, right.bodyCornerRadii.topRight, accuracy: 0.0001)
             XCTAssertEqual(left.bodyCornerRadii.topLeft, up.bodyCornerRadii.bottomLeft, accuracy: 0.0001)
             if (0.30...0.54).contains(t) {
-                XCTAssertLessThan(left.bodyCornerRadii.topLeft, left.bodyCornerRadii.bottomRight * 0.75)
+                XCTAssertLessThan(left.bodyCornerRadii.topLeft, left.bodyCornerRadii.bottomRight * 0.90)
             }
         }
     }

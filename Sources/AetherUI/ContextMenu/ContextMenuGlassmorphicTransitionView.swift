@@ -226,7 +226,9 @@ private func contextMenuReferenceOpeningGeometry(
     // Grow a compact, broad lens before acquiring the menu's full height.
     // Scaling height by the final (potentially very tall) platter made this
     // phase a narrow strip unfolding from the source edge.
-    let times: [CGFloat] = [0, 0.30, 0.42, 0.55, 0.70, 0.84, 1]
+    // Expansion overlaps the last part of the pull instead of waiting for
+    // the compact seed to finish: one transfer, not a pull followed by unfold.
+    let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.84, 1]
     let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSample(
         times: times, values: [0, 0, 0.50, 0.86, 0.98, 1, 1], at: t)
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
@@ -264,7 +266,7 @@ private func contextMenuReferenceOpeningGeometry(
         x: lerp(source.midX, target.midX, centerTravel - bend) - width * 0.5,
         y: lerp(source.midY, target.midY, centerTravel + bend) - height * 0.5,
         width: width, height: height)
-    let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.50, end: 0.88)
+    let rounding = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.58, end: 0.94)
     let seedRadius = lerp(sourceRadius, min(frame.width, frame.height)*0.5, pinch)
     let radius = lerp(seedRadius, targetRadius, rounding)
     // One convex contour transfers volume diagonally: the corner nearest
@@ -272,12 +274,14 @@ private func contextMenuReferenceOpeningGeometry(
     // asymmetry through the growth phase, not just a brief seed deformation.
     // Independent corners feed the native glass shape itself; no overlapping
     // source lobe or rigid rotation is needed to suggest a drop.
+    // Relax the shoulder as volume spreads. Holding a tight corner until
+    // after expansion left a flat ledge next to the neck in the middle frames.
     let tension = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
-        * (1 - contextMenuBloomSmoothRange(t, start: 0.54, end: 0.84))
+        * (1 - contextMenuBloomSmoothRange(t, start: 0.34, end: 0.82))
     let side = min(frame.width, frame.height)
     func corner(x: CGFloat, y: CGFloat) -> CGFloat {
         let along = ((x - 0.5) * directionX + (y - 0.5) * directionY + 1) * 0.5
-        let dropRadius = side * lerp(0.26, 0.50, max(0, min(1, along * 1.6)))
+        let dropRadius = side * lerp(0.34, 0.50, max(0, min(1, along * 1.6)))
         return lerp(radius, dropRadius, tension)
     }
     let radii = ContextMenuBloomCornerRadii(
@@ -742,7 +746,7 @@ func contextMenuGlassmorphicGeometrySample(
         let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(rawProgress, start: 0.16, end: 0.26)
             * (1 - contextMenuBloomSmoothRange(rawProgress, start: 0.32, end: 0.52))
         let side = min(body.width, body.height)
-        let reach = min(distance, side * 0.30 + source.height * 0.60) * neck
+        let reach = min(distance, side * 0.30 + source.height * 0.48) * neck
         let fraction = distance > 0.001 ? reach / distance : 0
         let tip = CGPoint(x: center.x + dx * fraction, y: center.y + dy * fraction)
         let rawRadius = min(source.height * 0.28, side * 0.26) * neck
