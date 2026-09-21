@@ -3,6 +3,70 @@ import UIKit
 @testable import AetherUI
 
 final class ContextMenuClosingAbsorptionTests: XCTestCase {
+    func testSharedCapsuleGrowsANoseBeforeItsBellyBecomesButtonSized() {
+        let source = CGRect(x: 288, y: 70, width: 96, height: 44)
+        let target = CGRect(x: 129, y: 70, width: 255, height: 380)
+        let fixture = Fixture(source: source, target: target, anchor: .topTrailing)
+        let duration = CGFloat(ContextMenuController.glassmorphicTiming.closeDuration)
+        func sample(at milliseconds: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
+            let motion = contextMenuLiquidAnimationSample(fraction: milliseconds / (duration * 1000),
+                reduceMotion: false, direction: .closing)
+            return closingSample(fixture, elapsed: motion.progress)
+        }
+        // Both native recordings have a visible nose at ~100–117 ms while
+        // a broad lower lobe still travels separately toward the source.
+        let nose = sample(at: 110)
+        XCTAssertGreaterThan(nose.headAlpha, 0.1)
+        XCTAssertGreaterThan(nose.bodyFrame.width, source.height * 2)
+        XCTAssertGreaterThan(nose.bodyFrame.height, source.height * 2)
+        XCTAssertLessThan(nose.headFrame.width, source.width * 0.6)
+        XCTAssertLessThan(nose.headFrame.minY, nose.bodyFrame.minY)
+
+        let returnFlow = sample(at: 180)
+        XCTAssertGreaterThan(returnFlow.headFrame.width, source.width * 0.95)
+        XCTAssertGreaterThan(returnFlow.headFrame.midX - returnFlow.bodyFrame.midX, source.height * 0.35)
+        XCTAssertGreaterThan(returnFlow.bodyFrame.maxY, source.maxY + source.height * 0.7)
+        XCTAssertFalse(source.contains(sample(at: 240).bodyFrame), "Do not consume the final belly too early")
+        XCTAssertTrue(source.contains(sample(at: 330).bodyFrame))
+    }
+
+    func testSharedCapsuleReturnMirrorsItsSeparateHeadAndBellyTrajectories() {
+        let target = CGRect(x: 100, y: 100, width: 255, height: 380)
+        for width: CGFloat in [94, 160] {
+            for unit in [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 0, y: 1), CGPoint(x: 1, y: 1)] {
+                let source = CGRect(x: unit.x == 0 ? target.minX : target.maxX - width,
+                    y: unit.y == 0 ? target.minY : target.maxY - 44, width: width, height: 44)
+                let fixture = Fixture(source: source, target: target, anchor: .init(unitPoint: unit))
+                let motion = contextMenuLiquidAnimationSample(fraction: 0.4, reduceMotion: false, direction: .closing)
+                let shape = closingSample(fixture, elapsed: motion.progress)
+                XCTAssertGreaterThan((shape.bodyFrame.midX - shape.headFrame.midX) * (1 - 2 * unit.x), 44 * 0.35)
+                XCTAssertGreaterThan((shape.bodyFrame.midY - shape.headFrame.midY) * (1 - 2 * unit.y), 44 * 0.5)
+                XCTAssertTrue(shape.headFrame.intersects(shape.bodyFrame))
+                let final = closingSample(fixture, elapsed: 0.99)
+                XCTAssertEqual(final.headFrame, source)
+                XCTAssertTrue(source.contains(final.bodyFrame))
+            }
+        }
+    }
+
+    func testReturningSharedHeadDoesNotHitItsRestingPositionWithNonzeroVelocity() {
+        let fixture = Fixture(source: CGRect(x: 292, y: 70, width: 88, height: 44),
+            target: CGRect(x: 125, y: 70, width: 255, height: 470), anchor: .topTrailing)
+        let step: CGFloat = 0.0001
+        var previousVelocity: CGFloat?
+        for frame in 4001...6000 {
+            let t = CGFloat(frame) * step
+            let before = closingSample(fixture, elapsed: t - step).headFrame.midY
+            let now = closingSample(fixture, elapsed: t).headFrame.midY
+            let velocity = (now - before) / step
+            if let previousVelocity {
+                XCTAssertLessThan(abs(velocity - previousVelocity), 5,
+                    "The source shoulder must decelerate into place, not hit a hard coordinate clamp")
+            }
+            previousVelocity = velocity
+        }
+    }
+
     func testDisappearingBodyIsInsideReturningHeadOnEveryCorner() {
         for fixture in fixtures {
             var absorbedSamples = 0

@@ -63,7 +63,14 @@ final class AetherMotionTests: XCTestCase {
             sourceMode: .leasedGlassSource, isDark: false, appearanceStyle: .legacy
         )
         host.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        host.setProgress(1 - 0.130 / 0.32, direction: .closing)
+        // Check elapsed time, not a geometric fraction: the closing clock
+        // can change without moving the source's optical reveal window.
+        host.setProgress(1)
+        host.animateCollapse(duration: AetherMotion.contextMenu.dismissal.duration, damping: 0.86)
+        host.advanceAnimation(to: 10)
+        for frame in 1...21 {
+            host.advanceAnimation(to: 10 + Double(frame) / 120)
+        }
         XCTAssertGreaterThan(host.sourceProxyContainer.alpha, 0.1)
         XCTAssertFalse(host.sourceProxyContainer.isHidden)
         XCTAssertEqual(host.sourceProxyContainer.bounds.size, source.size)

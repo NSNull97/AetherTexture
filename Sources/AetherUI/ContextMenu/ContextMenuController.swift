@@ -557,16 +557,21 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     }
 
     private static func visualContextMenuSource(for hitView: UIView) -> UIView {
+        // A shared button capsule is one liquid surface, including all of its
+        // glyphs. Resolve that owner before walking through its renderer's
+        // GlassContentContainer/UIVisualEffectView ancestors: leasing one of
+        // those hides the glyphs but leaves an empty glass capsule behind.
+        var ancestor: UIView? = hitView
+        while let view = ancestor {
+            if let group = view as? GlassControlGroup,
+               view === hitView || group.visualSourceView(containing: hitView) != nil {
+                return group
+            }
+            ancestor = view.superview
+        }
+
         var current: UIView? = hitView
         while let view = current {
-            if let group = view as? GlassControlGroup,
-               let visual = group.visualSourceView(containing: hitView) {
-                return visual
-            }
-            if let group = view.superview as? GlassControlGroup,
-               let visual = group.visualSourceView(containing: hitView) {
-                return visual
-            }
             if isGlassVisualOwner(view) {
                 return view
             }

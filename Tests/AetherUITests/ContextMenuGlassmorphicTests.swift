@@ -46,6 +46,62 @@ final class ContextMenuGlassmorphicTests: XCTestCase {
         }
     }
 
+    func testMenuFromEitherSharedButtonLeasesAndRestoresTheWholeCapsule() throws {
+        for appearance in AetherAppearanceStyle.allCases {
+            for selectedID in ["plus", "gear"] {
+                let fixture = makeFixture()
+                defer { fixture.window.isHidden = true }
+                fixture.source.removeFromSuperview()
+                let group = GlassControlGroup(appearanceStyle: appearance)
+                _ = group.update(items: [
+                    .init(id: "plus", content: .icon(try XCTUnwrap(UIImage(systemName: "plus"))), action: {}),
+                    .init(id: "gear", content: .icon(try XCTUnwrap(UIImage(systemName: "gearshape"))), action: {})
+                ], transition: .immediate)
+                group.frame.origin = CGPoint(x: 280, y: 64)
+                fixture.window.rootViewController!.view.addSubview(group)
+                group.layoutIfNeeded()
+                group.alpha = 0.63
+                let first = try XCTUnwrap(group.itemButton(id: "plus"))
+                let second = try XCTUnwrap(group.itemButton(id: "gear"))
+                let selected = try XCTUnwrap(group.itemButton(id: selectedID))
+                let content = group.contextMenuPresentationContentView
+                let contentHost = try XCTUnwrap(content.superview)
+                let expectedFrame = group.convert(group.bounds, to: fixture.window)
+                var dismissCount = 0
+                let menu = makeMenu(source: selected, appearance: appearance) { dismissCount += 1 }
+                menu.present()
+                defer { menu.dismiss(animated: false) }
+
+                XCTAssertEqual(group.alpha, 0, "The whole shared material must leave with its glyphs")
+                XCTAssertFalse(group.isUserInteractionEnabled)
+                XCTAssertFalse(selected.isUserInteractionEnabled)
+                XCTAssertEqual(contentHost.alpha, 1, "Do not lease an internal GlassContentContainer")
+                XCTAssertEqual(content.alpha, 1)
+                XCTAssertEqual(first.alpha, 1)
+                XCTAssertEqual(second.alpha, 1)
+                let host = try XCTUnwrap(fixture.window.subviews.flatMap(\.subviews)
+                    .compactMap { $0 as? ContextMenuGlassmorphicTransitionView }.first)
+                XCTAssertEqual(host.sourceProxyContainer.frame, expectedFrame)
+
+                // Complete an interrupted animated close synchronously; the
+                // same capsule and both original buttons must be restored once.
+                menu.dismiss(animated: true)
+                menu.dismiss(animated: false)
+                menu.dismiss(animated: false)
+                XCTAssertEqual(dismissCount, 1)
+                XCTAssertFalse(menu.hasPresentationOverlayForTesting)
+                XCTAssertFalse(menu.usesSourcePresentationLeaseForTesting)
+                XCTAssertEqual(group.alpha, 0.63, accuracy: 0.001)
+                XCTAssertTrue(group.isUserInteractionEnabled)
+                XCTAssertTrue(first.isUserInteractionEnabled)
+                XCTAssertTrue(second.isUserInteractionEnabled)
+                XCTAssertEqual(first.alpha, 1)
+                XCTAssertEqual(second.alpha, 1)
+                XCTAssertEqual(contentHost.alpha, 1)
+            }
+        }
+    }
+
     func testOutsideTapOptOutDoesNotInstallADismissRecognizer() throws {
         let fixture = makeFixture()
         defer { fixture.window.isHidden = true }

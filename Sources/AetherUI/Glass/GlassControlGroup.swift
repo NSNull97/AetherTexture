@@ -1206,10 +1206,9 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         return itemViews.first(where: { $0.id == id })?.button
     }
 
-    /// Visual source used by menu/presentation leases. A single-item group
-    /// reads as one glass button, so the whole group is the visual owner.
-    /// Multi-item groups share one background; in that case only the item
-    /// button/content can be leased without hiding siblings.
+    /// Visual anchor for an individual item. A single-item group reads as
+    /// one glass button; a shared group returns the requested button slot.
+    /// Context-menu transitions resolve the whole shared surface separately.
     public func itemVisualSourceView(id: AnyHashable) -> UIView? {
         guard let entry = itemViews.first(where: { $0.id == id }) else {
             return nil
@@ -1228,6 +1227,14 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             return nil
         }
         return itemViews[0].button
+    }
+
+    /// A context menu takes the whole capsule, so its proxy includes every
+    /// glyph while the transition provides fresh glass. Capture the plain
+    /// controls plane rather than the material-bearing group or content host.
+    /// Preserve the existing single-button opacity/capture path.
+    internal var contextMenuPresentationContentView: UIView {
+        singleItemPresentationProxyContentView ?? controlsView
     }
 
     public func visualSourceView(containing view: UIView) -> UIView? {

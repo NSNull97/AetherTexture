@@ -15,8 +15,11 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
     if reduceMotion { return (t * t * (3 - 2 * t), 0) }
     let progress = direction == .opening
         ? contextMenuOpeningAnimationProgress(t)
-        : contextMenuBloomSample(times: [0, 0.20, 0.50, 0.72, 1],
-                                 values: [0, 0.10, 0.68, 0.99, 1], at: t)
+        // Contract the broad body first, leaving time for the nose and belly
+        // to merge. The previous clock spent its first 90 ms almost still
+        // and squeezed most of the transfer into the next 100 ms.
+        : contextMenuBloomSmoothSample(times: [0, 0.18, 0.38, 0.72, 1],
+                                       values: [0, 0.24, 0.60, 0.90, 1], at: t)
     if direction == .opening {
         // One lobe has finite restoring acceleration at its peak. Joining
         // two smoothersteps there held the overscale almost still for 40 ms,
@@ -595,7 +598,7 @@ private func contextMenuBloomSample(
     return values[values.count - 1]
 }
 
-/// Monotone C2 interpolation for the opening silhouette. Shared endpoint
+/// Monotone C2 interpolation for the liquid silhouette. Shared endpoint
 /// velocities carry motion through each checkpoint; zero endpoint acceleration
 /// joins neighbouring quintics without the acceleration jumps of cubic Hermite.
 /// Ordered Bezier controls bound the curve to its measured segment, so smoothing
@@ -1077,10 +1080,9 @@ private func contextMenuClosingGlassmorphicGeometrySample(
 
     if direction == .closing, source.width > source.height * 1.6 {
         let elapsed = 1 - raw
-        // A wide trigger returns as a compact drop and then spreads across
-        // the source capsule. Keep the returning shoulder centred over the
-        // belly: aligning both lobes to the trailing edge made an L-shaped
-        // shelf, while a single rounded rectangle erased the liquid waist.
+        // The shared capsule grows a nose while the belly is still broad.
+        // Keep the belly on the menu side of that nose until absorption;
+        // forcing their centres together made a symmetric cap in one frame.
         let compact = contextMenuBloomSmoothRange(elapsed, start: 0.22, end: 0.64)
         let retract = contextMenuBloomSmoothRange(elapsed, start: 0.62, end: 0.98)
         let compactWidth = min(source.width * 0.72, source.height * 1.90)
@@ -1091,7 +1093,9 @@ private func contextMenuClosingGlassmorphicGeometrySample(
         let resolvedWidth = width + (endWidth - width) * retract
         let resolvedHeight = height + (endHeight - height) * retract
         let centrePull = contextMenuBloomSmoothRange(elapsed, start: 0.18, end: 0.66)
+        let horizontalSign = 1 - 2 * unit.x
         let centreX = bodyFrame.midX + (source.midX - bodyFrame.midX) * centrePull
+            + horizontalSign * source.height * 0.55 * compact * (1 - retract)
         let verticalSign: CGFloat = unit.y < 0.5 ? 1 : -1
         let bellyY = source.midY + verticalSign * source.height * 0.95
         let centreY = bodyFrame.midY + (bellyY - bodyFrame.midY) * compact
@@ -1101,15 +1105,27 @@ private func contextMenuClosingGlassmorphicGeometrySample(
         let roundness = contextMenuBloomSmoothRange(elapsed, start: 0.02, end: 0.48)
         let radius = targetRadius + (min(frame.width, frame.height) / 2 - targetRadius) * roundness
 
-        // Born inside the belly, the shoulder reaches the source before the
-        // last underside retracts. Its content can focus during that tail.
-        let shoulder = contextMenuBloomSmoothRange(elapsed, start: 0.36, end: 0.66)
-        let initialHeadWidth = min(source.width, frame.width * 0.7)
-        let headWidth = initialHeadWidth + (source.width - initialHeadWidth) * shoulder
-        let initialHeadHeight = min(source.height, frame.height)
-        let headHeight = initialHeadHeight + (source.height - initialHeadHeight) * shoulder
-        let headY = frame.midY + (source.midY - frame.midY) * shoulder
-        let headFrame = CGRect(x: centreX - headWidth / 2, y: headY - headHeight / 2,
+        // Start with a small nose on the source-facing shoulder, rather than
+        // reveal a nearly full-width head from the centre of the small egg.
+        // The overlap keeps one connected surface as its two centres diverge.
+        let shoulder = contextMenuBloomSmoothRange(elapsed, start: 0.22, end: 0.64)
+        let headWidth = source.width * (0.02 + 0.98 * shoulder)
+        let headHeight = source.height * (0.04 + 0.96
+            * contextMenuBloomSmoothRange(elapsed, start: 0.22, end: 0.54))
+        let overlap = headHeight * 0.14
+        let attachedY = verticalSign > 0
+            ? frame.minY - headHeight / 2 + overlap
+            : frame.maxY + headHeight / 2 - overlap
+        let distanceToSource = (attachedY - source.midY) * verticalSign
+        // Integrating smoothstep gives a C2 positive-part function. A hard
+        // max(distance, 0) stopped the returning nose with nonzero velocity.
+        // This stays on the belly side of that limit, preserving overlap.
+        let softRange = source.height * 0.10
+        let u = contextMenuBloomNormalize(distanceToSource, start: -softRange, end: softRange)
+        let remainingDistance = distanceToSource >= softRange ? distanceToSource
+            : softRange * (2 * u * u * u - u * u * u * u)
+        let headY = source.midY + verticalSign * remainingDistance
+        let headFrame = CGRect(x: source.midX - headWidth / 2, y: headY - headHeight / 2,
                                width: headWidth, height: headHeight)
         let neck = contextMenuBloomSmoothRange(elapsed, start: 0.30, end: 0.48)
             * (1 - contextMenuBloomSmoothRange(elapsed, start: 0.74, end: 0.94))
@@ -1123,7 +1139,7 @@ private func contextMenuClosingGlassmorphicGeometrySample(
             headRadius: min(sourceRadius, headHeight / 2), bodyCornerRadii: .uniform(radius),
             bridgeStart: neckStart, bridgeEnd: neckJoin, bridgeRadius: radiusOfNeck,
             neckBulbCenter: neckEnd, neckBulbRadius: radiusOfNeck * 1.25,
-            headAlpha: shoulder, bodyAlpha: 1)
+            headAlpha: contextMenuBloomSmoothRange(elapsed, start: 0.22, end: 0.44), bodyAlpha: 1)
     }
 
     var headWidth = max(1.0, source.width * headScale)

@@ -137,6 +137,56 @@ final class ContextMenuSourcePresentationLeaseTests: XCTestCase {
         XCTAssertNil(group.singleItemPresentationProxyContentView)
         XCTAssertTrue(group.itemVisualSourceView(id: "first") === firstButton)
     }
+
+    func testSharedCapsuleProxyContainsBothGlyphsAndNoGlassPixels() throws {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let group = GlassControlGroup(appearanceStyle: .liquidGlassV1)
+        // Small opaque markers stand in for glyphs so the alpha assertions
+        // distinguish two content snapshots from a captured glass background.
+        let firstGlyph = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 12))
+        let secondGlyph = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 12))
+        firstGlyph.backgroundColor = .black
+        secondGlyph.backgroundColor = .black
+        _ = group.update(items: [
+            .init(id: "first", content: .customView(firstGlyph), action: nil),
+            .init(id: "second", content: .customView(secondGlyph), action: {})
+        ], transition: .immediate)
+        root.addSubview(group)
+        group.layoutIfNeeded()
+        group.alpha = 0.8
+        let selected = try XCTUnwrap(group.itemButton(id: "second"))
+        let descriptor = try XCTUnwrap(ContextMenuSourceDescriptor(
+            sourceID: "second", hitView: selected, visualView: group, overlayView: root,
+            sourceCornerRadius: 22, sourceMode: .leasedGlassSource))
+        let proxy = descriptor.makeProxyView()
+        XCTAssertEqual(proxy.bounds.size, group.bounds.size)
+        let snapshot = try XCTUnwrap(proxy.subviews.first as? UIImageView)
+        XCTAssertEqual(snapshot.frame, group.bounds)
+        XCTAssertEqual(snapshot.alpha, 0.8, accuracy: 0.001)
+        let image = try XCTUnwrap(snapshot.image?.cgImage)
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        pixels.withUnsafeMutableBytes { bytes in
+            let context = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        var maximumAlpha = [UInt8](repeating: 0, count: 2)
+        var paintedPixels = 0
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                let alpha = pixels[(y * image.width + x) * 4 + 3]
+                let half = x < image.width / 2 ? 0 : 1
+                maximumAlpha[half] = max(maximumAlpha[half], alpha)
+                if alpha > 0 { paintedPixels += 1 }
+            }
+        }
+        XCTAssertEqual(Double(maximumAlpha[0]), 127.5, accuracy: 1,
+            "The disabled first glyph must retain its own opacity")
+        XCTAssertEqual(maximumAlpha[1], 255, "The selected glyph must also be captured")
+        XCTAssertLessThan(paintedPixels, image.width * image.height / 5,
+            "The shared glass/backdrop must not be baked into the content proxy")
+    }
 }
 
 private extension XCTestCase {

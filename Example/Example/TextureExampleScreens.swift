@@ -86,8 +86,13 @@ enum ExampleRootFactory {
     static func makeRoot(window: AetherNativeWindow, observer: inout NSObjectProtocol?) -> UIViewController {
         let store = ExampleAppearanceStore.shared
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("--animation-reference") || arguments.contains("--animation-reference-autoplay") {
-            let root = TextureAnimationReferenceController(autoplay: arguments.contains("--animation-reference-autoplay"))
+        #if DEBUG
+        let sharedGroupAutoplay = arguments.contains("--animation-reference-shared-group-autoplay")
+        #else
+        let sharedGroupAutoplay = false
+        #endif
+        if arguments.contains("--animation-reference") || arguments.contains("--animation-reference-autoplay") || sharedGroupAutoplay {
+            let root = TextureAnimationReferenceController(autoplay: arguments.contains("--animation-reference-autoplay") || sharedGroupAutoplay)
             let navigation = AetherNavigationController(mode: .single)
             navigation.setViewControllers([root], animated: false)
             navigation.updateAppearance(store.appearance)
@@ -2438,6 +2443,11 @@ private final class TextureSearchAccessoryView: NavigationBarContentView {
 /// Ordinary launches never schedule this timeline.
 private final class TextureAnimationReferenceController: AetherViewController {
     private var regressionMode: Bool { ProcessInfo.processInfo.arguments.contains("--animation-regression") }
+    #if DEBUG
+    private var sharedGroupReference: Bool {
+        ProcessInfo.processInfo.arguments.contains("--animation-reference-shared-group-autoplay")
+    }
+    #endif
     private let autoplay: Bool
     private let isDetail: Bool
     private let showsCamera: Bool
@@ -2500,6 +2510,14 @@ private final class TextureAnimationReferenceController: AetherViewController {
         stack.alignment = .fill
         scrollView.addSubview(stack)
         addBackdrop()
+        #if DEBUG
+        if sharedGroupReference, !isDetail {
+            addButton("Меню общей капсулы + / ⚙", id: "animation-reference.open-shared-group") { [weak self] in
+                self?.showMenu(trailing: true)
+            }
+            return
+        }
+        #endif
         if isDetail {
             addButton("Изменить счётчик: 165 → 161 → без числа", id: "animation-reference.change-badge") { [weak self] in
                 self?.advanceBadge()
@@ -2525,6 +2543,16 @@ private final class TextureAnimationReferenceController: AetherViewController {
         super.viewDidAppear(animated)
         guard autoplay, !didStartAutoplay else { return }
         didStartAutoplay = true
+        #if DEBUG
+        if sharedGroupReference {
+            // Two complete cycles expose stale ownership/restoration on reopen.
+            schedule(after: 1) { $0.showMenu(trailing: true) }
+            schedule(after: 3) { $0.activeMenu?.dismiss() }
+            schedule(after: 4) { $0.showMenu(trailing: true) }
+            schedule(after: 6) { $0.activeMenu?.dismiss() }
+            return
+        }
+        #endif
         if regressionMode {
             schedule(after: 1) { $0.openDetail(showsCamera: true) }
             schedule(after: 2) { $0.detailController?.showMenu(trailing: true) }
@@ -2562,6 +2590,24 @@ private final class TextureAnimationReferenceController: AetherViewController {
     }
 
     private func installMenuChrome() {
+        #if DEBUG
+        if sharedGroupReference {
+            navigationItem.title = "Wings App"
+            navigationItem.leftBarButtonItem = UIBarButtonItem(title: "V4", style: .plain, target: nil, action: nil)
+            let plus = UIBarButtonItem(image: UIImage(systemName: "plus"), contextMenuItemsProvider: { [weak self] in
+                self?.sharedGroupItems() ?? []
+            })
+            plus.accessibilityIdentifier = "animation-reference.nav-shared-plus"
+            plus.accessibilityLabel = "Добавить"
+            let gear = UIBarButtonItem(image: UIImage(systemName: "gearshape"), contextMenuItemsProvider: { [weak self] in
+                self?.sharedGroupItems() ?? []
+            })
+            gear.accessibilityIdentifier = "animation-reference.nav-shared-gear"
+            gear.accessibilityLabel = "Настройки"
+            navigationItem.rightBarButtonItems = [plus, gear]
+            return
+        }
+        #endif
         let edit = UIBarButtonItem(title: "Изменить", contextMenuItemsProvider: { [weak self] in self?.editItems() ?? [] })
         edit.accessibilityIdentifier = "animation-reference.nav-edit"
         edit.accessibilityLabel = "Изменить"
@@ -2616,16 +2662,72 @@ private final class TextureAnimationReferenceController: AetherViewController {
             let rect = $0.convert($0.bounds, to: window)
             return rect.height > 10 && rect.minY >= 0 && rect.midY < window.safeAreaInsets.top + 90
         }.sorted { $0.convert($0.bounds, to: window).midX < $1.convert($1.bounds, to: window).midX }
-        guard let source = trailing ? candidates.last : candidates.first else { return }
+        guard let group = trailing ? candidates.last : candidates.first else { return }
+        var source: UIView = group
+        var items = trailing ? filterItems() : editItems()
+        #if DEBUG
+        if sharedGroupReference {
+            // Match NavigationBarImpl's normal bar-item entry point: the
+            // caller supplies the gear slot, and the framework must resolve
+            // ownership of the entire shared glass group. Passing the group
+            // directly would hide the regression this recording checks.
+            guard group.items.count == 2,
+                  let gearSource = group.itemVisualSourceView(id: group.items[1].id) else { return }
+            source = gearSource
+            items = sharedGroupItems()
+        }
+        #endif
         let menu = ContextMenuController(
             source: .init(view: source, cornerRadius: source.bounds.height / 2),
-            items: trailing ? filterItems() : editItems(),
+            items: items,
             hasHapticFeedback: false,
             onDismiss: { [weak self] in self?.activeMenu = nil }
         )
         activeMenu = menu
         menu.present()
     }
+
+    #if DEBUG
+    /// Fixed Wings-style sections, including its taller quick-action row.
+    /// All actions only dismiss this demo menu.
+    private func sharedGroupItems() -> [ContextMenuItem] {
+        func item(_ id: String, _ title: String, _ symbol: String, destructive: Bool = false, submenu: [ContextMenuItem]? = nil) -> ContextMenuActionItem {
+            ContextMenuActionItem(
+                id: id,
+                title: title,
+                icon: UIImage(systemName: symbol),
+                iconSide: .leading,
+                textColor: destructive ? .destructive : .primary,
+                submenu: submenu,
+                action: { _, handle in handle.dismiss() }
+            )
+        }
+        return [
+            .action(item("subscriptions", "Подписки", "tray.full", submenu: [
+                action("all-subscriptions", "Все подписки", "tray.2"),
+                action("current-subscription", "Только текущая", "tray")
+            ])),
+            .action(item("attributes", "Обновить атрибуты", "arrow.up.doc")),
+            .separator,
+            .actionRow([
+                item("send-push", "Отправить пуш", "message"),
+                item("history", "История", "list.bullet.indent")
+            ]),
+            .separator,
+            .action(item("logs", "Логи", "doc.text", submenu: [
+                action("send-logs", "Отправить", "square.and.arrow.up"),
+                action("show-logs", "Показать", "doc.text")
+            ])),
+            .separator,
+            .action(item("clear-storage", "Очистить хранилище", "trash", destructive: true)),
+            .separator,
+            .action(item("unsubscribe", "Отписаться", "arrow.right.square", destructive: true, submenu: [
+                action("device", "Устройство", "iphone"),
+                action("client", "Клиент", "person")
+            ]))
+        ]
+    }
+    #endif
 
     private func editItems() -> [ContextMenuItem] {
         [
