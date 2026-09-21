@@ -1237,6 +1237,19 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         singleItemPresentationProxyContentView ?? controlsView
     }
 
+    /// Shared icon capsules focus each glyph as the returning glass reaches
+    /// it. Captions and caller-owned views retain their atomic content path.
+    internal var contextMenuPresentationContentRegions: [ContextMenuSourceContentRegion] {
+        guard itemViews.count > 1, itemViews.allSatisfy({ entry in
+            if case .icon = entry.contentId { return true }
+            return false
+        }) else { return [] }
+        return itemViews.map { entry in
+            ContextMenuSourceContentRegion(frame: entry.button.convert(entry.button.bounds, to: self)
+                .offsetBy(dx: -bounds.minX, dy: -bounds.minY))
+        }
+    }
+
     public func visualSourceView(containing view: UIView) -> UIView? {
         for entry in itemViews {
             if entry.button === view || entry.button.isDescendant(of: view) || view.isDescendant(of: entry.button) {

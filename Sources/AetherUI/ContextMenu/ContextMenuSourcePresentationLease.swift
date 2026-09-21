@@ -1,11 +1,18 @@
 import UIKit
 
+/// A transparent item slot, expressed in the source proxy's local coordinates.
+/// The transition derives the occupied glyph bounds from the captured pixels.
+struct ContextMenuSourceContentRegion {
+    let frame: CGRect
+}
+
 struct ContextMenuSourceDescriptor {
     let hitView: UIView
     let visualView: UIView
     let sourceFrameInOverlay: CGRect
     let sourceCornerRadius: CGFloat
     let sourceMode: ContextMenuSourceVisualMode
+    let sourceContentRegions: [ContextMenuSourceContentRegion]
 
     let makeProxyView: () -> UIView
     let suppressOriginal: (_ suppressed: Bool) -> Void
@@ -20,6 +27,7 @@ final class SourcePresentationLease {
     let sourceID: AnyHashable
     let proxyView: UIView
     let sourceFrameInOverlay: CGRect
+    let sourceContentRegions: [ContextMenuSourceContentRegion]
 
     private let originalAlpha: CGFloat
     private let originalIsHidden: Bool
@@ -68,6 +76,7 @@ final class SourcePresentationLease {
         self.hitView = descriptor.hitView
         self.overlayView = overlayView
         self.sourceFrameInOverlay = frame
+        self.sourceContentRegions = descriptor.sourceContentRegions
         self.originalAlpha = originalView.alpha
         self.originalIsHidden = originalView.isHidden
         self.originalIsUserInteractionEnabled = originalView.isUserInteractionEnabled
@@ -266,6 +275,12 @@ extension ContextMenuSourceDescriptor {
         self.sourceFrameInOverlay = frame
         self.sourceCornerRadius = sourceCornerRadius
         self.sourceMode = sourceMode
+        let regionScale = CGAffineTransform(
+            scaleX: frame.width / visualView.bounds.width,
+            y: frame.height / visualView.bounds.height
+        )
+        self.sourceContentRegions = ((visualView as? GlassControlGroup)?.contextMenuPresentationContentRegions ?? [])
+            .map { ContextMenuSourceContentRegion(frame: $0.frame.applying(regionScale)) }
         let contentOnlyProxySource = (visualView as? GlassControlGroup)?.contextMenuPresentationContentView
             ?? (visualView as? GlassBarButtonView)?.contextMenuPresentationContentView
             ?? (visualView as? GlassButton)?.contextMenuPresentationContentView

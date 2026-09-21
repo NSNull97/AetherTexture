@@ -785,6 +785,98 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
     }
 }
 
+/// Shared icon capsules drain continuously, then settle as one source.
+/// Measurements are normalized to each lobe, so a taller menu does not spend
+/// its middle frames parked at a fixed button-sized egg. The phase knots map
+/// measured wall time through the existing closing clock exactly once.
+enum ContextMenuSharedSourceReturn {
+    static let duration: TimeInterval = 0.54
+    private static let seconds: [CGFloat] = [0, 0.033, 0.066, 0.100, 0.133, 0.150,
+                                            0.183, 0.200, 0.233, 0.266, 0.316, 0.400, 0.540]
+    private static let phases: [CGFloat] = seconds.map {
+        contextMenuLiquidAnimationSample(fraction: $0 / CGFloat(duration),
+            reduceMotion: false, direction: .closing).progress
+    }
+
+    private static func sample(_ values: [CGFloat], at phase: CGFloat) -> CGFloat {
+        contextMenuBloomSmoothSample(times: phases, values: values, at: phase)
+    }
+
+    // Before the nose rises, the source-facing shoulder is broad and shallow.
+    // Sampling only the later upright nose pulled a thin spike out too early.
+    private static let shoulderPhases: [CGFloat] = [0, 0.066, 0.100, 0.116, 0.133, 0.150,
+                                                   0.183, 0.200, 0.233, 0.266, 0.316, 0.400, 0.540].map {
+        contextMenuLiquidAnimationSample(fraction: $0 / CGFloat(duration),
+            reduceMotion: false, direction: .closing).progress
+    }
+    private static func shoulder(_ values: [CGFloat], at phase: CGFloat) -> CGFloat {
+        contextMenuBloomSmoothSample(times: shoulderPhases, values: values, at: phase)
+    }
+
+    /// Only translation: returning source glyphs keep their natural size.
+    static func sourceOffset(phase: CGFloat, height: CGFloat, anchor: ContextMenuBloomAnchor) -> CGFloat {
+        let offset = sample([0, 0, 0, 0, 0.12, 0, -0.15, -0.18, -0.185,
+                             -0.172, -0.12, -0.052, 0], at: phase)
+        return height * offset * (1 - 2 * anchor.unitPoint.y)
+    }
+
+    static func geometry(source: CGRect, target: CGRect, sourceRadius: CGFloat,
+                         targetRadius: CGFloat, anchor: ContextMenuBloomAnchor,
+                         rawProgress: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
+        let phase = 1 - max(0, min(1, rawProgress))
+        let vertical = 1 - 2 * anchor.unitPoint.y
+        let horizontal = 2 * anchor.unitPoint.x - 1
+        let width = target.width * sample([1, 0.987, 0.846, 0.673, 0.495, 0.412,
+                                          0.295, 0.237, 0.178, 0.130, 0.055, 0.02, 0.02], at: phase)
+        let height = target.height * sample([1, 0.965, 0.812, 0.616, 0.419, 0.329,
+                                            0.223, 0.161, 0.108, 0.049, 0.018, 0.01, 0.01], at: phase)
+        let cx = sample([1, 0.977, 0.822, 0.648, 0.465, 0.357,
+                         0.272, 0.207, 0.141, 0.075, 0.005, 0, 0], at: phase)
+        let cy = sample([1, 1.050, 1.113, 0.932, 0.696, 0.597,
+                         0.372, 0.318, 0.198, 0.135, 0, 0, 0], at: phase)
+        let tail = contextMenuBloomSmoothRange(phase, start: phases[9], end: phases[10])
+        let settleY = sourceOffset(phase: phase, height: source.height, anchor: anchor)
+        let center = CGPoint(x: source.midX + (target.midX - source.midX) * cx,
+            y: source.midY + (target.midY - source.midY) * cy + settleY * tail)
+        let body = CGRect(x: center.x - width / 2, y: center.y - height / 2,
+                          width: width, height: height)
+        let headWidth = source.width * shoulder([0.02, 0.02, 0.18, 0.22, 0.23, 0.353,
+                                              0.611, 0.737, 0.826, 0.904, 0.970, 1, 1], at: phase)
+        let headHeight = source.height * shoulder([0.04, 0.04, 0.08, 0.30, 0.831, 1,
+                                                1, 1, 1, 1, 1, 1, 1], at: phase)
+        let headX = source.midX + horizontal * source.height
+            * sample([0, 0, 0, 0, 0.06, 0.10, 0.10, 0.10, 0.08, 0.04, 0, 0, 0], at: phase)
+        // Once the nose becomes a capsule, its upward recoil and the glyphs
+        // share one trajectory. Delaying the shell's peak made the icons ride
+        // against its top rim, followed by a separate-looking button jump.
+        let headY = source.midY + vertical * source.height
+            * shoulder([0, 0.8, 0.8, 0.72, 0.47, 0.30, -0.15, -0.18, -0.185,
+                      -0.172, -0.12, -0.052, 0], at: phase)
+        let sharedSettle = contextMenuBloomSmoothRange(phase, start: phases[5], end: phases[6])
+        let settledHeadY = headY + (source.midY + settleY - headY) * sharedSettle
+        let head = CGRect(x: headX - headWidth / 2, y: settledHeadY - headHeight / 2,
+                          width: headWidth, height: headHeight)
+        let roundness = contextMenuBloomSmoothRange(phase, start: 0, end: phases[6])
+        let radius = min(width, height) / 2
+        let bodyRadius = min(radius, targetRadius + (radius - targetRadius) * roundness)
+        let headAlpha = contextMenuBloomSmoothRange(phase, start: phases[3], end: phases[4])
+        // The last lower lobe is entirely inside the head before it vanishes.
+        // Native glass keeps visible surfaces opaque, including during fusion.
+        let bodyAlpha = 1 - contextMenuBloomSmoothRange(phase, start: phases[10], end: phases[11])
+        let neck = contextMenuBloomSmoothRange(phase, start: phases[3], end: phases[5])
+            * (1 - contextMenuBloomSmoothRange(phase, start: phases[9], end: phases[10]))
+        let neckRadius = min(source.height * 0.20, min(headWidth * 0.30, width * 0.20)) * neck
+        let join = CGPoint(x: head.midX + (center.x - head.midX) * 0.48,
+                           y: head.midY + (center.y - head.midY) * 0.48)
+        return .init(headFrame: head, bodyFrame: body, headRotation: 0, bodyRotation: 0,
+            headRadius: min(sourceRadius, min(headWidth, headHeight) / 2),
+            bodyCornerRadii: .uniform(bodyRadius),
+            bridgeStart: CGPoint(x: head.midX, y: head.midY), bridgeEnd: join,
+            bridgeRadius: neckRadius, neckBulbCenter: center, neckBulbRadius: neckRadius * 1.3,
+            headAlpha: headAlpha, bodyAlpha: bodyAlpha)
+    }
+}
+
 /// Opening pulls one compact lens from the source; dismissal preserves the
 /// measured connected shoulder and lower lobe. Reversals capture the rendered
 /// shape before switching paths.
@@ -793,7 +885,7 @@ func contextMenuGlassmorphicGeometrySample(
     outerCornerRadii: ContextMenuBloomCornerRadii,
     sourceRadius: CGFloat, targetRadius: CGFloat,
     anchor: ContextMenuBloomAnchor, direction: ContextMenuBloomDirection,
-    rawProgress: CGFloat, reduceMotion: Bool
+    rawProgress: CGFloat, reduceMotion: Bool, sharedSource: Bool = false
 ) -> ContextMenuGlassmorphicGeometrySample {
     if direction == .opening && rawProgress > 0 && rawProgress < 1 {
         let geometry = contextMenuReferenceOpeningGeometry(source: source, target: target,
@@ -831,6 +923,11 @@ func contextMenuGlassmorphicGeometrySample(
             bridgeStart: tip, bridgeEnd: join, bridgeRadius: radius,
             neckBulbCenter: center, neckBulbRadius: rootRadius,
             headAlpha: 0, bodyAlpha: 1, bridgeEllipticity: 1)
+    }
+    if direction == .closing, sharedSource, !reduceMotion, rawProgress > 0, rawProgress < 1 {
+        return ContextMenuSharedSourceReturn.geometry(source: source, target: target,
+            sourceRadius: sourceRadius, targetRadius: targetRadius, anchor: anchor,
+            rawProgress: rawProgress)
     }
     let outer = contextMenuBloomGeometrySample(
         source: source, target: target, sourceRadius: sourceRadius, targetRadius: targetRadius,
@@ -1604,6 +1701,114 @@ func contextMenuBloomRevealProgress(at progress: CGFloat) -> CGFloat {
     )
 }
 
+struct ContextMenuSharedSourceSnapshot {
+    let image: UIImage
+    let frame: CGRect
+    /// Occupied pixels in the full source proxy's coordinates, excluding the
+    /// transparent padding in a 44-point control slot.
+    let alphaBounds: CGRect
+}
+
+func contextMenuSharedSourceSnapshots(
+    image: UIImage,
+    regions: [ContextMenuSourceContentRegion]
+) -> [ContextMenuSharedSourceSnapshot] {
+    guard regions.count > 1 else { return [] }
+    let normalized = AetherContentMaterialization.normalizedImage(image)
+    guard let fullImage = normalized.cgImage else { return [] }
+    let scale = normalized.scale
+    let imageBounds = CGRect(x: 0, y: 0, width: fullImage.width, height: fullImage.height)
+    var snapshots: [ContextMenuSharedSourceSnapshot] = []
+    for region in regions {
+        let frame = region.frame
+        guard frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite,
+              frame.height.isFinite, frame.width > 0, frame.height > 0 else { return [] }
+        let pixels = frame.applying(CGAffineTransform(scaleX: scale, y: scale)).integral
+            .intersection(imageBounds)
+        guard !pixels.isNull, !pixels.isEmpty,
+              let cropped = fullImage.cropping(to: pixels) else { return [] }
+        var bytes = [UInt8](repeating: 0, count: cropped.width * cropped.height * 4)
+        let rendered = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress,
+                width: cropped.width, height: cropped.height, bitsPerComponent: 8,
+                bytesPerRow: cropped.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+            else { return false }
+            context.draw(cropped, in: CGRect(x: 0, y: 0, width: cropped.width, height: cropped.height))
+            return true
+        }
+        guard rendered else { return [] }
+        var minX = cropped.width, minY = cropped.height, maxX = -1, maxY = -1
+        for y in 0..<cropped.height {
+            for x in 0..<cropped.width where bytes[(y * cropped.width + x) * 4 + 3] > 0 {
+                minX = min(minX, x); minY = min(minY, y)
+                maxX = max(maxX, x); maxY = max(maxY, y)
+            }
+        }
+        // An intentionally hidden glyph has no materialization work to do.
+        guard maxX >= minX, maxY >= minY else { continue }
+        snapshots.append(.init(
+            image: UIImage(cgImage: cropped, scale: scale, orientation: .up),
+            frame: CGRect(x: pixels.minX / scale, y: pixels.minY / scale,
+                width: pixels.width / scale, height: pixels.height / scale),
+            alphaBounds: CGRect(x: (pixels.minX + CGFloat(minX)) / scale,
+                y: (pixels.minY + CGFloat(minY)) / scale,
+                width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
+        ))
+    }
+    return snapshots
+}
+
+func contextMenuSharedSourceMaterializationSample(
+    elapsed: CGFloat,
+    regionIndex: Int,
+    reduceMotion: Bool
+) -> ContextMenuSourceMaterializationSample {
+    let delay = reduceMotion ? 0 : CGFloat(max(0, regionIndex)) * 0.045
+    let reveal = contextMenuBloomSmoothRange(elapsed, start: 0.20 + delay, end: 0.38 + delay)
+    let focus = contextMenuBloomSmoothRange(elapsed, start: 0.20 + delay, end: 0.44 + delay)
+    return .init(opacity: reveal, blurRadius: reduceMotion ? 0 : 3 * (1 - focus))
+}
+
+/// Shared icons emerge through the returning head before their full bounds
+/// fit inside it. A small fixed grid estimates this overlap; the real glass
+/// silhouette mask still clips the image and its blur halo. Evaluate after
+/// the source transform and the head's displayed rotation/rebound.
+func contextMenuSharedSourceCoverage(
+    alphaBounds: CGRect,
+    sourceBounds: CGRect,
+    sourceCenter: CGPoint,
+    sourceTransform: CGAffineTransform,
+    headFrame: CGRect,
+    headRadius: CGFloat,
+    headRotation: CGFloat
+) -> CGFloat {
+    guard !alphaBounds.isEmpty, headFrame.width > 0, headFrame.height > 0 else { return 0 }
+    let radius = min(max(0, headRadius), min(headFrame.width, headFrame.height) * 0.5)
+    let unrotate = CGAffineTransform(rotationAngle: -headRotation)
+    let gridSize = 7
+    let stepX = alphaBounds.width / CGFloat(gridSize)
+    let stepY = alphaBounds.height / CGFloat(gridSize)
+    var coverage: CGFloat = 0
+    for column in 0..<gridSize {
+        let x = alphaBounds.minX + (CGFloat(column) + 0.5) * stepX
+        for row in 0..<gridSize {
+            let y = alphaBounds.minY + (CGFloat(row) + 0.5) * stepY
+            let transformed = CGPoint(x: x - sourceBounds.midX, y: y - sourceBounds.midY)
+                .applying(sourceTransform)
+            let point = CGPoint(x: sourceCenter.x + transformed.x - headFrame.midX,
+                y: sourceCenter.y + transformed.y - headFrame.midY).applying(unrotate)
+            let dx = abs(point.x) - headFrame.width * 0.5 + radius
+            let dy = abs(point.y) - headFrame.height * 0.5 + radius
+            let outsideX = max(0, dx), outsideY = max(0, dy)
+            let distance = sqrt(outsideX * outsideX + outsideY * outsideY)
+                + min(max(dx, dy), 0) - radius
+            coverage += contextMenuBloomSmoothRange(-distance, start: 0, end: 2)
+        }
+    }
+    return coverage / CGFloat(gridSize * gridSize)
+}
+
 final class ContextMenuGlassmorphicTransitionView: UIView {
     static var debugFrozenProgress: CGFloat? = {
         #if DEBUG
@@ -1636,6 +1841,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     private let sourceContentMask = CALayer()
     private var sourceContentMaskParts: [CAShapeLayer] = []
     private var sourceMaterializationView: AetherMaterializationImageView?
+    private var sharedSourceContentCarrier: UIView?
+    private var sharedSourceRegions: [SharedSourceRegion] = []
+
+    internal var hasSharedSourceContent: Bool { sharedSourceRegions.count >= 2 }
+    internal var supportsSharedSourceReturn: Bool {
+        hasSharedSourceContent && glassMorphContainer.isUsingNativeContainerEffect
+    }
 
     private let shadowView = UIView()
     private let ambientShadowLayer = CAShapeLayer()
@@ -1902,19 +2114,49 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         updateContentFrames(for: finalMenuGlassSurfaceView.bounds)
     }
 
-    func prepareSourceContentSnapshots() {
-        guard sourceMaterializationView == nil,
+    func prepareSourceContentSnapshots(regions: [ContextMenuSourceContentRegion] = []) {
+        guard sourceMaterializationView == nil, sharedSourceContentCarrier == nil,
               !sourceProxyContainer.subviews.isEmpty,
               sourceProxyContainer.bounds.width > 0,
               sourceProxyContainer.bounds.height > 0 else { return }
         sourceProxyContainer.layoutIfNeeded()
         Self.ensureTextureContentIsDisplayed(in: sourceProxyContainer)
-        let image = Self.renderImage(from: sourceProxyContainer)
+        // The lease contains transparent glyph pixels, never live glass.
+        // Capture their layers directly: a just-installed proxy has not yet
+        // reached the render server and drawHierarchy can return empty pixels.
+        let image = AetherContentMaterialization.captureContent(of: sourceProxyContainer, preservingRootOpacity: true)
+            ?? Self.renderImage(from: sourceProxyContainer)
         sourceProxyContainer.subviews.forEach { $0.isHidden = true }
-        let content = AetherMaterializationImageView(image: image, maximumBlurRadius: 8.0)
-        content.frame = sourceProxyContainer.bounds
-        sourceProxyContainer.addSubview(content)
-        sourceMaterializationView = content
+        let snapshots = contextMenuSharedSourceSnapshots(image: image, regions: regions)
+        if snapshots.isEmpty {
+            let content = AetherMaterializationImageView(image: image, maximumBlurRadius: 8.0)
+            content.frame = sourceProxyContainer.bounds
+            sourceProxyContainer.addSubview(content)
+            sourceMaterializationView = content
+        } else {
+            // Only this full-size carrier is a direct proxy child. Its glyph
+            // children retain their native frames when the host lays out.
+            let carrier = UIView(frame: sourceProxyContainer.bounds)
+            carrier.isUserInteractionEnabled = false
+            carrier.backgroundColor = .clear
+            sourceProxyContainer.addSubview(carrier)
+            sharedSourceContentCarrier = carrier
+            let ordered = snapshots.enumerated().sorted { lhs, rhs in
+                func distance(_ snapshot: ContextMenuSharedSourceSnapshot) -> CGFloat {
+                    let x = startFrame.minX + snapshot.alphaBounds.midX - targetMenuFrameInOverlay.midX
+                    let y = startFrame.minY + snapshot.alphaBounds.midY - targetMenuFrameInOverlay.midY
+                    return x * x + y * y
+                }
+                let leftDistance = distance(lhs.element), rightDistance = distance(rhs.element)
+                return leftDistance == rightDistance ? lhs.offset < rhs.offset : leftDistance < rightDistance
+            }
+            sharedSourceRegions = ordered.map { _, snapshot in
+                let view = AetherMaterializationImageView(image: snapshot.image, maximumBlurRadius: 3)
+                view.frame = snapshot.frame
+                carrier.addSubview(view)
+                return SharedSourceRegion(snapshot: snapshot, view: view)
+            }
+        }
         updateSourceProxy(rawT: progress)
     }
 
@@ -2070,9 +2312,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 width: startFrame.width, height: startFrame.height
             )
         } else {
-            // The returning glass reaches the stationary button caption.
-            // Attaching the caption to the moving belly made it rise several
-            // points while focusing, and clipped the bottom of wide labels.
+            // Keep a fixed, native-sized source coordinate space. Captions
+            // stay in place; shared icons receive their measured translation
+            // and spacing in updateSourceProxy, without scaling their bitmap.
             sourceProxyContainer.frame = startFrame
         }
         for proxySubview in sourceProxyContainer.subviews {
@@ -2174,11 +2416,102 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             sourceProxyContainer.isHidden = true
             sourceProxyContainer.transform = .identity
         case .leasedGlassSource:
+            sourceProxyContainer.transform = sourceContentTransform(rawT: rawT)
+            if !sharedSourceRegions.isEmpty {
+                updateSharedSourceRegionFrames(rawT: rawT)
+                let samples = sharedSourceMaterializationSamples(rawT: rawT)
+                for (region, sample) in zip(sharedSourceRegions, samples) {
+                    region.view.alpha = sample.opacity
+                    region.view.setBlurRadius(sample.blurRadius)
+                }
+                sourceProxyContainer.alpha = 1
+                sourceProxyContainer.isHidden = samples.allSatisfy { $0.opacity <= 0.001 }
+                return
+            }
             let sample = sourceMaterializationSample(rawT: rawT)
             sourceProxyContainer.alpha = sample.opacity
             sourceProxyContainer.isHidden = sample.opacity <= 0.001
-            sourceProxyContainer.transform = sourceContentTransform(rawT: rawT)
             sourceMaterializationView?.setBlurRadius(sample.blurRadius)
+        }
+    }
+
+    private func updateSharedSourceRegionFrames(rawT: CGFloat) {
+        let followsReturningHead = animationDirection < 0
+            && !UIAccessibility.isReduceMotionEnabled
+            && supportsSharedSourceReturn
+        let head = displayedGlassmorphicSample
+        let localHeadCenter = head.map {
+            // This conversion includes the common content transform. If the
+            // carrier already follows the head, do not apply its X shift twice.
+            sourceProxyContainer.convert(CGPoint(x: $0.headFrame.midX, y: $0.headFrame.midY), from: self)
+        }
+        for (index, region) in sharedSourceRegions.enumerated() {
+            let original = region.snapshot.frame
+            var center = CGPoint(x: original.midX, y: original.midY)
+            if followsReturningHead, rawT > 0, let head, let localHeadCenter {
+                let spacing = max(0, min(1, head.headFrame.width / startFrame.width))
+                center.x = localHeadCenter.x + (original.midX - sourceProxyContainer.bounds.midX) * spacing
+            }
+            if let state = interruptedCollapse, index < state.sharedSourceContentFrames.count {
+                let t = contextMenuBloomSmootherstep(interruptedCollapseRunProgress(
+                    rawT: rawT, startProgress: state.rawProgress
+                ))
+                let previous = state.sharedSourceContentFrames[index]
+                center = Self.lerpPoint(CGPoint(x: previous.midX, y: previous.midY), center, t)
+            }
+            region.view.bounds = CGRect(origin: .zero, size: original.size)
+            region.view.center = center
+        }
+    }
+
+    private func sharedSourceMaterializationSamples(rawT: CGFloat) -> [ContextMenuSourceMaterializationSample] {
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        guard animationDirection < 0, !reduceMotion,
+              supportsSharedSourceReturn,
+              let head = displayedGlassmorphicSample else {
+            let common = sourceMaterializationSample(rawT: rawT)
+            return sharedSourceRegions.map { _ in
+                .init(opacity: common.opacity, blurRadius: reduceMotion ? 0 : common.blurRadius)
+            }
+        }
+        let elapsed = opticalElapsed(rawT: rawT)
+        return sharedSourceRegions.enumerated().map { index, region in
+            // The final handoff must reproduce the original pixels, even for
+            // an oversized icon clipped by the source's own resting edge.
+            if rawT <= 0 { return .init(opacity: 1, blurRadius: 0) }
+            let coverage = sourceSeedGlassSurfaceView.isHidden ? 0 : contextMenuSharedSourceCoverage(
+                alphaBounds: region.displayedAlphaBounds,
+                sourceBounds: sourceProxyContainer.bounds,
+                sourceCenter: sourceProxyContainer.center,
+                sourceTransform: sourceProxyContainer.transform,
+                headFrame: head.headFrame,
+                headRadius: head.headRadius,
+                headRotation: head.headRotation
+            )
+            if let state = interruptedCollapse, index < state.sharedSourceContentSamples.count {
+                // Save the already displayed opacity, including coverage.
+                // Multiplying it by coverage a second time would jump at the
+                // reversal. Blend toward the current covered return instead.
+                let t = Self.smootherstep(0.0, 0.68, interruptedCollapseRunProgress(
+                    rawT: rawT, startProgress: state.rawProgress
+                ))
+                let previous = state.sharedSourceContentSamples[index]
+                return .init(opacity: Self.lerp(previous.opacity, coverage, t),
+                    blurRadius: Self.lerp(previous.blurRadius, 0, t))
+            }
+            let sample = contextMenuSharedSourceMaterializationSample(
+                elapsed: elapsed, regionIndex: index, reduceMotion: false
+            )
+            return .init(opacity: sample.opacity * coverage,
+                blurRadius: max(sample.blurRadius, 3 * (1 - coverage)))
+        }
+    }
+
+    internal var sharedSourceContentForTesting: [(
+        frame: CGRect, bounds: CGRect, alphaBounds: CGRect, opacity: CGFloat, blurRadius: CGFloat
+    )] {
+        sharedSourceRegions.map {
+            ($0.view.frame, $0.view.bounds, $0.displayedAlphaBounds, $0.view.alpha, $0.view.blurRadius)
         }
     }
 
@@ -2189,6 +2522,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 rawT: rawT, startProgress: state.rawProgress
             ))
             return Self.interpolate(state.sourceContentTransform, .identity, t)
+        }
+        if supportsSharedSourceReturn, animationDirection < 0 {
+            return CGAffineTransform(translationX: 0, y: ContextMenuSharedSourceReturn.sourceOffset(
+                phase: 1 - rawT, height: startFrame.height, anchor: bloomAnchor))
         }
         return .identity
     }
@@ -2226,7 +2563,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             menuHeight: targetMenuFrameInOverlay.height,
             reduceMotion: UIAccessibility.isReduceMotionEnabled
         )
-        if animationDirection < 0, glassMorphContainer.isUsingNativeContainerEffect,
+        if sharedSourceRegions.isEmpty, animationDirection < 0, glassMorphContainer.isUsingNativeContainerEffect,
            !UIAccessibility.isReduceMotionEnabled, startFrame.width > startFrame.height * 1.6 {
             // The wide source shoulder covers the original caption at .66.
             // Revealing against the earlier belly cuts through the letters;
@@ -2610,6 +2947,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     private func surfaceReboundTransform(rawT: CGFloat) -> CGAffineTransform {
+        if supportsSharedSourceReturn, animationDirection < 0, interruptedCollapse == nil { return .identity }
         guard !UIAccessibility.isReduceMotionEnabled, animationSurfaceRebound != 0 else { return .identity }
         let unit = bloomAnchor.unitPoint
         let t = max(0, min(1, rawT))
@@ -2642,6 +2980,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 sourceRadius: startCornerRadius, targetRadius: finalCornerRadius, anchor: bloomAnchor,
                 progress: rawT, reduceMotion: UIAccessibility.isReduceMotionEnabled)
             return Metrics(frame: sample.frame, cornerRadii: sample.cornerRadii)
+        }
+        if supportsSharedSourceReturn, !UIAccessibility.isReduceMotionEnabled, rawT > 0, rawT < 1 {
+            let sample = ContextMenuSharedSourceReturn.geometry(source: startFrame, target: targetMenuFrameInOverlay,
+                sourceRadius: startCornerRadius, targetRadius: finalCornerRadius, anchor: bloomAnchor,
+                rawProgress: rawT)
+            return Metrics(frame: sample.bodyFrame, cornerRadii: sample.bodyCornerRadii)
         }
         let sample = contextMenuBloomGeometrySample(
             source: startFrame,
@@ -2699,7 +3043,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             anchor: bloomAnchor,
             direction: animationDirection >= 0 ? .opening : .closing,
             rawProgress: rawT,
-            reduceMotion: UIAccessibility.isReduceMotionEnabled
+            reduceMotion: UIAccessibility.isReduceMotionEnabled,
+            sharedSource: supportsSharedSourceReturn
         )
     }
 
@@ -2838,6 +3183,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             reveal: displayedContentReveal
         )
         let sampledSourceContent = sourceMaterializationSample(rawT: progress)
+        let sampledSharedSourceContent = sharedSourceRegions.map {
+            ContextMenuSourceMaterializationSample(opacity: $0.view.alpha, blurRadius: $0.view.blurRadius)
+        }
+        let sampledSharedSourceFrames = sharedSourceRegions.map { $0.view.frame }
         let sampledSourceFrame = CGRect(
             x: sourceProxyContainer.center.x - sourceProxyContainer.bounds.width * 0.5,
             y: sourceProxyContainer.center.y - sourceProxyContainer.bounds.height * 0.5,
@@ -2861,6 +3210,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 glassSpacing: displayedGlassSpacing,
                 renderedHeadAlpha: sourceSeedGlassSurfaceView.alpha,
                 sourceContentSample: sampledSourceContent,
+                sharedSourceContentSamples: sampledSharedSourceContent,
+                sharedSourceContentFrames: sampledSharedSourceFrames,
                 sourceContentFrame: sampledSourceFrame,
                 sourceContentTransform: sourceProxyContainer.transform,
                 glassSample: sampledGlassSample
@@ -2957,6 +3308,16 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let cornerRadii: ContextMenuBloomCornerRadii
     }
 
+    private struct SharedSourceRegion {
+        let snapshot: ContextMenuSharedSourceSnapshot
+        let view: AetherMaterializationImageView
+
+        var displayedAlphaBounds: CGRect {
+            snapshot.alphaBounds.offsetBy(dx: view.center.x - snapshot.frame.midX,
+                dy: view.center.y - snapshot.frame.midY)
+        }
+    }
+
     private struct InterruptedCollapse {
         let rawProgress: CGFloat
         let metrics: Metrics
@@ -2967,6 +3328,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let glassSpacing: CGFloat
         let renderedHeadAlpha: CGFloat
         let sourceContentSample: ContextMenuSourceMaterializationSample
+        let sharedSourceContentSamples: [ContextMenuSourceMaterializationSample]
+        let sharedSourceContentFrames: [CGRect]
         let sourceContentFrame: CGRect
         let sourceContentTransform: CGAffineTransform
         let glassSample: ContextMenuGlassmorphicGeometrySample

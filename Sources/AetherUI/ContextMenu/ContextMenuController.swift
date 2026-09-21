@@ -667,7 +667,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         // glass and plain/content sources are represented by the leased proxy,
         // so the real source never remains visible/interactive underneath.
         sourceLease?.attachProxy(to: platterHost.sourceProxyContainer)
-        platterHost.prepareSourceContentSnapshots()
+        platterHost.prepareSourceContentSnapshots(regions: sourceLease?.sourceContentRegions ?? [])
 
         // Destination content is laid out at its final menu rect from the
         // beginning. The lens mask reveals it as the bloom grows/sharpens.
@@ -1017,7 +1017,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         })
 
         glassmorphicHost.animateCollapse(
-            duration: ContextMenuController.glassmorphicTiming.closeDuration,
+            duration: glassmorphicHost.supportsSharedSourceReturn && !UIAccessibility.isReduceMotionEnabled
+                ? ContextMenuSharedSourceReturn.duration : ContextMenuController.glassmorphicTiming.closeDuration,
             damping: ContextMenuController.dismissDamping,
             completion: { cleanup() }
         )
