@@ -407,10 +407,57 @@ AetherGlassConfig.current = AetherGlassConfig(
 
 | Backend | Описание |
 |---|---|
-| `.systemMaterial` | `UIBlurEffect(style: .systemMaterial)` |
-| `.regular` | `UIBlurEffect(style: .regular)` |
-| `.prominent` | `UIBlurEffect(style: .prominent)` |
-| `.custom(UIBlurEffect)` | Произвольный blur effect. |
+| `.experimentalGlass` | Metal-бэкпорт с преломлением и Direct-захватом UIKit-фона. |
+| `.visualEffectView(blurRadius:tintColor:tintColorAlpha:saturation:)` | Прежний материал `VisualEffectView`, остаётся вариантом по умолчанию. |
+
+`custom` переименован в `experimentalGlass`; старое написание оставлено как
+устаревший alias. Backend фиксируется при создании поверхности. iOS 26+
+сохраняет нативный путь, если приложение явно не включает `useCustomGlassImpl`.
+Классическое оформление `.legacy` не меняется: для бэкпорта нужен Liquid Glass
+appearance (`.liquidGlassV1` или `.liquidGlassV2`).
+
+```swift
+AetherGlassConfig.current.legacyBlurBackend = .experimentalGlass
+
+let glass = GlassBackgroundView(appearanceStyle: .liquidGlassV1)
+glass.glassCornerRadius = 24
+glass.glassTintColor = .init(kind: .panel)
+
+// Задать на общем родителе стекла или на конкретной поверхности.
+// scrollView содержит только фон, а не саму стеклянную поверхность.
+view.experimentalGlassBackgroundSource = scrollView
+```
+
+Источник хранится слабо и наследуется дочерними поверхностями; изменение
+источника применяется при следующем кадре. Явный источник даёт проверенный
+на iPhone 7 путь без задержки WindowServer. Если источника нет, захватываются
+UIKit-слои под поверхностью; сама поверхность и слои перед ней исключаются.
+Источник, содержащий само стекло, отклоняется, чтобы избежать обратной связи.
+Элементы одной навигационной панели, таббара или группы кнопок используют
+общий снимок фона в пределах одного callback общего `CADisplayLink`. Для явного источника
+снимок также общий для всех поверхностей. На новом кадре проверяются свойства
+видимых слоёв фона: неизменившийся фон использует прежний снимок, изменения
+содержимого или геометрии вызывают новый захват. Активные CA-анимации и фильтры
+отключают повторное использование между кадрами. Это исключает повторный
+`CALayer.render(in:)` для каждой кнопки одной панели.
+
+Direct-захват не воспроизводит Metal-вью, видео и системные visual effects:
+для таких фонов используйте `.visualEffectView()` или подходящий UIKit-источник.
+
+Общий API размеров, радиуса, `updateStyle`, tint/inner tint, темы, видимости,
+переходов и интерактивной геометрии проходит через существующий
+`GlassBackgroundView`. `isInteractive` включает приближённую реакцию на нажатие;
+это не идентичная физическая модель Apple. Приватные параметры нативного
+`UIGlassEffect` не являются параметрами Metal-шейдера. Reduce Transparency
+заменяет поверхность непрозрачным цветом, а Reduce Motion отключает анимацию
+реакции на нажатие. При недоступном Metal используется материал UIKit.
+
+`LiquidLensView` в Liquid Glass appearance на iOS 15–25 использует собственную
+Metal-линзу независимо от выбранного blur backend. API selection origin/size,
+inset/liftedInset, lift/collapse, тема и выбранный контент остаётся общим.
+На iOS 26+ сохраняется существующий нативный путь. Чтобы линза видела тот же
+Direct-фон, задайте `experimentalGlassBackgroundSource` на её общем родителе.
+
 
 ## UIView+CornerConfiguration (iOS 18+)
 

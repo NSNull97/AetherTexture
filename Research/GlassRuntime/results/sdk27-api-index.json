@@ -1,0 +1,2040 @@
+{
+  "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.0.sdk",
+  "hits": [
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBackgroundExtensionView.h",
+      "line": 1,
+      "text": "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIBackgroundExtensionView.h>)",
+      "preceding": []
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBackgroundExtensionView.h",
+      "line": 3,
+      "text": "//  UIBackgroundExtensionView.h",
+      "preceding": [
+        "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIBackgroundExtensionView.h>)",
+        "//"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBackgroundExtensionView.h",
+      "line": 21,
+      "text": "@interface UIBackgroundExtensionView : UIView",
+      "preceding": [
+        "/// content along the edges to fill the container view.",
+        "API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0))",
+        "API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBackgroundExtensionView.h",
+      "line": 23,
+      "text": "/// The content view to extend to fill the `UIBackgroundExtensionView`.",
+      "preceding": [
+        "API_UNAVAILABLE(watchos)",
+        "@interface UIBackgroundExtensionView : UIView",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBackgroundExtensionView.h",
+      "line": 45,
+      "text": "#import <UIKitCore/UIBackgroundExtensionView.h>",
+      "preceding": [
+        "NS_HEADER_AUDIT_END(nullability, sendability)",
+        "",
+        "#else"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBarButtonItem.h",
+      "line": 168,
+      "text": "/// Set this property to `YES` to prevent the standard shared background (typically using the Glass effect)",
+      "preceding": [
+        "/// A boolean value indicating whether the background this item may share with other items in the bar",
+        "/// should be hidden.",
+        "///"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBarButtonItem.h",
+      "line": 175,
+      "text": "@property (nonatomic) BOOL hidesSharedBackground API_AVAILABLE(ios(26.0)) API_UNAVAILABLE(visionos) API_UNAVAILABLE(tvos, watchos);",
+      "preceding": [
+        "/// without the standard shared background.",
+        "/// This property is ignored if the item is in a `UIBarButtonItemGroup` with more than one item.",
+        "/// The default value is `NO`."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBarMinimization.h",
+      "line": 37,
+      "text": "/// The system selects ``UIBarMinimizationRestorationBehaviorAtScrollEdge``",
+      "preceding": [
+        "    /// The system determines the restoration behavior.",
+        "    ///",
+        "    /// By default, the bar restores when the user reverses scroll direction."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBarMinimization.h",
+      "line": 46,
+      "text": "UIBarMinimizationRestorationBehaviorAtScrollEdge API_AVAILABLE(ios(27.0)) API_UNAVAILABLE(visionos) API_UNAVAILABLE(watchos, tvos),",
+      "preceding": [
+        "    /// Currently this is only honored alongside",
+        "    /// ``UIBarMinimizationBehaviorOnScrollDown``. With other minimization",
+        "    /// behaviors, the system falls back to ``UIBarMinimizationRestorationBehaviorAutomatic``."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIBarMinimization.h",
+      "line": 75,
+      "text": "/// user reverses scroll direction; with ``UIBarMinimizationRestorationBehaviorAtScrollEdge``,",
+      "preceding": [
+        "///",
+        "/// Use this property alongside ``minimizationBehavior`` to control when a",
+        "/// minimized navigation bar restores. By default the bar restores when the"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h",
+      "line": 93,
+      "text": "+ (instancetype)glassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+      "preceding": [
+        "+ (instancetype)borderedTintedButtonConfiguration;",
+        "+ (instancetype)borderedProminentButtonConfiguration;",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h",
+      "line": 94,
+      "text": "+ (instancetype)prominentGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+      "preceding": [
+        "+ (instancetype)borderedProminentButtonConfiguration;",
+        "",
+        "+ (instancetype)glassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h",
+      "line": 95,
+      "text": "+ (instancetype)clearGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+      "preceding": [
+        "",
+        "+ (instancetype)glassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+        "+ (instancetype)prominentGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h",
+      "line": 96,
+      "text": "+ (instancetype)prominentClearGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+      "preceding": [
+        "+ (instancetype)glassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+        "+ (instancetype)prominentGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);",
+        "+ (instancetype)clearGlassButtonConfiguration API_AVAILABLE(ios(26.0), tvos(26.0)) API_UNAVAILABLE(watchos, visionos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 1,
+      "text": "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UICornerConfiguration.h>)",
+      "preceding": []
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 3,
+      "text": "//  UICornerConfiguration.h",
+      "preceding": [
+        "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UICornerConfiguration.h>)",
+        "//"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 10,
+      "text": "#import <UIKit/UICornerRadius.h>",
+      "preceding": [
+        "//",
+        "",
+        "#import <UIKit/UIKitDefines.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 17,
+      "text": "@interface UICornerConfiguration : NSObject <NSCopying>",
+      "preceding": [
+        "/// Defines how corner radii are mapped to the corners of a rectangle.",
+        "UIKIT_EXTERN UIKIT_FINAL NS_REFINED_FOR_SWIFT",
+        "API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 23,
+      "text": "+ (instancetype)configurationWithRadius:(UICornerRadius *)radius NS_SWIFT_NAME(corners(radius:));",
+      "preceding": [
+        "///",
+        "/// When used with a container concentric radius, this allows each individual",
+        "/// corner to resolve to different radii."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 26,
+      "text": "+ (instancetype)configurationWithTopLeftRadius:(nullable UICornerRadius *)topLeftRadius",
+      "preceding": [
+        "+ (instancetype)configurationWithRadius:(UICornerRadius *)radius NS_SWIFT_NAME(corners(radius:));",
+        "",
+        "/// A configuration with independent radii for each corner."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 27,
+      "text": "topRightRadius:(nullable UICornerRadius *)topRightRadius",
+      "preceding": [
+        "",
+        "/// A configuration with independent radii for each corner.",
+        "+ (instancetype)configurationWithTopLeftRadius:(nullable UICornerRadius *)topLeftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 28,
+      "text": "bottomLeftRadius:(nullable UICornerRadius *)bottomLeftRadius",
+      "preceding": [
+        "/// A configuration with independent radii for each corner.",
+        "+ (instancetype)configurationWithTopLeftRadius:(nullable UICornerRadius *)topLeftRadius",
+        "                                topRightRadius:(nullable UICornerRadius *)topRightRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 29,
+      "text": "bottomRightRadius:(nullable UICornerRadius *)bottomRightRadius NS_SWIFT_NAME(corners(topLeftRadius:topRightRadius:bottomLeftRadius:bottomRightRadius:));",
+      "preceding": [
+        "+ (instancetype)configurationWithTopLeftRadius:(nullable UICornerRadius *)topLeftRadius",
+        "                                topRightRadius:(nullable UICornerRadius *)topRightRadius",
+        "                              bottomLeftRadius:(nullable UICornerRadius *)bottomLeftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 38,
+      "text": "+ (instancetype)configurationWithUniformRadius:(UICornerRadius *)radius NS_SWIFT_NAME(uniformCorners(radius:));",
+      "preceding": [
+        "+ (instancetype)capsuleConfigurationWithMaximumRadius:(CGFloat)maximumRadius NS_SWIFT_NAME(capsule(maximumRadius:));",
+        "",
+        "/// A configuration that applies the given radius uniformly to all corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 41,
+      "text": "+ (instancetype)configurationWithUniformTopRadius:(UICornerRadius *)topRadius",
+      "preceding": [
+        "+ (instancetype)configurationWithUniformRadius:(UICornerRadius *)radius NS_SWIFT_NAME(uniformCorners(radius:));",
+        "",
+        "/// A configuration that applies the `topRadius` uniformly to the top-left and top-right corners, and the `bottomRadius` uniformly to the bottom-left and bottom-right corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 42,
+      "text": "uniformBottomRadius:(UICornerRadius *)bottomRadius NS_SWIFT_NAME(uniformEdges(topRadius:bottomRadius:));",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `topRadius` uniformly to the top-left and top-right corners, and the `bottomRadius` uniformly to the bottom-left and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformTopRadius:(UICornerRadius *)topRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 45,
+      "text": "+ (instancetype)configurationWithUniformLeftRadius:(UICornerRadius *)leftRadius",
+      "preceding": [
+        "                              uniformBottomRadius:(UICornerRadius *)bottomRadius NS_SWIFT_NAME(uniformEdges(topRadius:bottomRadius:));",
+        "",
+        "/// A configuration that applies the `leftRadius` uniformly to the top-left and bottom-left corners, and the `rightRadius` uniformly to the top-right and bottom-right corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 46,
+      "text": "uniformRightRadius:(UICornerRadius *)rightRadius NS_SWIFT_NAME(uniformEdges(leftRadius:rightRadius:));",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `leftRadius` uniformly to the top-left and bottom-left corners, and the `rightRadius` uniformly to the top-right and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformLeftRadius:(UICornerRadius *)leftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 49,
+      "text": "+ (instancetype)configurationWithUniformTopRadius:(UICornerRadius *)topRadius",
+      "preceding": [
+        "                                uniformRightRadius:(UICornerRadius *)rightRadius NS_SWIFT_NAME(uniformEdges(leftRadius:rightRadius:));",
+        "",
+        "/// A configuration that applies the `topRadius` uniformly to the top-left and top-right corners, with optional independent radii for the bottom-left and bottom-right corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 50,
+      "text": "bottomLeftRadius:(nullable UICornerRadius *)bottomLeftRadius",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `topRadius` uniformly to the top-left and top-right corners, with optional independent radii for the bottom-left and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformTopRadius:(UICornerRadius *)topRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 51,
+      "text": "bottomRightRadius:(nullable UICornerRadius *)bottomRightRadius NS_SWIFT_NAME(uniformTopRadius(_:bottomLeftRadius:bottomRightRadius:));",
+      "preceding": [
+        "/// A configuration that applies the `topRadius` uniformly to the top-left and top-right corners, with optional independent radii for the bottom-left and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformTopRadius:(UICornerRadius *)topRadius",
+        "                                 bottomLeftRadius:(nullable UICornerRadius *)bottomLeftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 54,
+      "text": "+ (instancetype)configurationWithUniformBottomRadius:(UICornerRadius *)bottomRadius",
+      "preceding": [
+        "                                bottomRightRadius:(nullable UICornerRadius *)bottomRightRadius NS_SWIFT_NAME(uniformTopRadius(_:bottomLeftRadius:bottomRightRadius:));",
+        "",
+        "/// A configuration that applies the `bottomRadius` uniformly to the bottom-left and bottom-right corners, with optional independent radii for the top-left and top-right corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 55,
+      "text": "topLeftRadius:(nullable UICornerRadius *)topLeftRadius",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `bottomRadius` uniformly to the bottom-left and bottom-right corners, with optional independent radii for the top-left and top-right corners.",
+        "+ (instancetype)configurationWithUniformBottomRadius:(UICornerRadius *)bottomRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 56,
+      "text": "topRightRadius:(nullable UICornerRadius *)topRightRadius NS_SWIFT_NAME(uniformBottomRadius(_:topLeftRadius:topRightRadius:));",
+      "preceding": [
+        "/// A configuration that applies the `bottomRadius` uniformly to the bottom-left and bottom-right corners, with optional independent radii for the top-left and top-right corners.",
+        "+ (instancetype)configurationWithUniformBottomRadius:(UICornerRadius *)bottomRadius",
+        "                                       topLeftRadius:(nullable UICornerRadius *)topLeftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 59,
+      "text": "+ (instancetype)configurationWithUniformLeftRadius:(UICornerRadius *)leftRadius",
+      "preceding": [
+        "                                      topRightRadius:(nullable UICornerRadius *)topRightRadius NS_SWIFT_NAME(uniformBottomRadius(_:topLeftRadius:topRightRadius:));",
+        "",
+        "/// A configuration that applies the `leftRadius` uniformly to the top-left and bottom-left corners, with optional independent radii for the top-right and bottom-right corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 60,
+      "text": "topRightRadius:(nullable UICornerRadius *)topRightRadius",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `leftRadius` uniformly to the top-left and bottom-left corners, with optional independent radii for the top-right and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformLeftRadius:(UICornerRadius *)leftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 61,
+      "text": "bottomRightRadius:(nullable UICornerRadius *)bottomRightRadius NS_SWIFT_NAME(uniformLeftRadius(_:topRightRadius:bottomRightRadius:));",
+      "preceding": [
+        "/// A configuration that applies the `leftRadius` uniformly to the top-left and bottom-left corners, with optional independent radii for the top-right and bottom-right corners.",
+        "+ (instancetype)configurationWithUniformLeftRadius:(UICornerRadius *)leftRadius",
+        "                                    topRightRadius:(nullable UICornerRadius *)topRightRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 64,
+      "text": "+ (instancetype)configurationWithUniformRightRadius:(UICornerRadius *)rightRadius",
+      "preceding": [
+        "                                 bottomRightRadius:(nullable UICornerRadius *)bottomRightRadius NS_SWIFT_NAME(uniformLeftRadius(_:topRightRadius:bottomRightRadius:));",
+        "",
+        "/// A configuration that applies the `rightRadius` uniformly to the top-right and bottom-right corners, with optional independent radii for the top-left and bottom-left corners."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 65,
+      "text": "topLeftRadius:(nullable UICornerRadius *)topLeftRadius",
+      "preceding": [
+        "",
+        "/// A configuration that applies the `rightRadius` uniformly to the top-right and bottom-right corners, with optional independent radii for the top-left and bottom-left corners.",
+        "+ (instancetype)configurationWithUniformRightRadius:(UICornerRadius *)rightRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 66,
+      "text": "bottomLeftRadius:(nullable UICornerRadius *)bottomLeftRadius NS_SWIFT_NAME(uniformRightRadius(_:topLeftRadius:bottomLeftRadius:));",
+      "preceding": [
+        "/// A configuration that applies the `rightRadius` uniformly to the top-right and bottom-right corners, with optional independent radii for the top-left and bottom-left corners.",
+        "+ (instancetype)configurationWithUniformRightRadius:(UICornerRadius *)rightRadius",
+        "                                      topLeftRadius:(nullable UICornerRadius *)topLeftRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerConfiguration.h",
+      "line": 76,
+      "text": "#import <UIKitCore/UICornerConfiguration.h>",
+      "preceding": [
+        "NS_HEADER_AUDIT_END(nullability, sendability)",
+        "",
+        "#else"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 1,
+      "text": "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UICornerRadius.h>)",
+      "preceding": []
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 3,
+      "text": "//  UICornerRadius.h",
+      "preceding": [
+        "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UICornerRadius.h>)",
+        "//"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 16,
+      "text": "@interface UICornerRadius : NSObject <NSCopying>",
+      "preceding": [
+        "/// Represents a radius used to round a corner.",
+        "UIKIT_EXTERN UIKIT_FINAL NS_REFINED_FOR_SWIFT",
+        "API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 22,
+      "text": "+ (instancetype)containerConcentricRadius;",
+      "preceding": [
+        "+ (instancetype)fixedRadius:(CGFloat)radius;",
+        "",
+        "/// A dynamic corner radius calculated using the geometry of the view and its container."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 25,
+      "text": "+ (instancetype)containerConcentricRadiusWithMinimum:(CGFloat)minimum;",
+      "preceding": [
+        "+ (instancetype)containerConcentricRadius;",
+        "",
+        "/// A dynamic corner radius calculated using the geometry of the view and its container limited to a minimum radius."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UICornerRadius.h",
+      "line": 35,
+      "text": "#import <UIKitCore/UICornerRadius.h>",
+      "preceding": [
+        "NS_HEADER_AUDIT_END(nullability, sendability)",
+        "",
+        "#else"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 1,
+      "text": "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIGlassEffect.h>)",
+      "preceding": []
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 3,
+      "text": "//  UIGlassEffect.h",
+      "preceding": [
+        "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIGlassEffect.h>)",
+        "//"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 15,
+      "text": "typedef NS_ENUM(NSInteger, UIGlassEffectStyle) {",
+      "preceding": [
+        "",
+        "NS_HEADER_AUDIT_BEGIN(nullability, sendability)",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 16,
+      "text": "/// Standard glass effect style.",
+      "preceding": [
+        "NS_HEADER_AUDIT_BEGIN(nullability, sendability)",
+        "",
+        "typedef NS_ENUM(NSInteger, UIGlassEffectStyle) {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 17,
+      "text": "UIGlassEffectStyleRegular,",
+      "preceding": [
+        "",
+        "typedef NS_ENUM(NSInteger, UIGlassEffectStyle) {",
+        "    /// Standard glass effect style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 18,
+      "text": "/// Clear glass effect style.",
+      "preceding": [
+        "typedef NS_ENUM(NSInteger, UIGlassEffectStyle) {",
+        "    /// Standard glass effect style.",
+        "    UIGlassEffectStyleRegular,"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 19,
+      "text": "UIGlassEffectStyleClear",
+      "preceding": [
+        "    /// Standard glass effect style.",
+        "    UIGlassEffectStyleRegular,",
+        "    /// Clear glass effect style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 20,
+      "text": "} API_AVAILABLE(ios(26.0)) API_UNAVAILABLE(visionos, watchos) NS_SWIFT_NAME(UIGlassEffect.Style);",
+      "preceding": [
+        "    UIGlassEffectStyleRegular,",
+        "    /// Clear glass effect style.",
+        "    UIGlassEffectStyleClear"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 22,
+      "text": "/// A visual effect that renders a glass material.",
+      "preceding": [
+        "    UIGlassEffectStyleClear",
+        "} API_AVAILABLE(ios(26.0)) API_UNAVAILABLE(visionos, watchos) NS_SWIFT_NAME(UIGlassEffect.Style);",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 26,
+      "text": "@interface UIGlassEffect : UIVisualEffect",
+      "preceding": [
+        "UIKIT_EXTERN NS_SWIFT_UI_ACTOR",
+        "API_AVAILABLE(ios(26.0))",
+        "API_UNAVAILABLE(visionos, watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 28,
+      "text": "/// Enables interactive behavior for the glass effect.",
+      "preceding": [
+        "API_UNAVAILABLE(visionos, watchos)",
+        "@interface UIGlassEffect : UIVisualEffect",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 31,
+      "text": "/// A tint color applied to the glass.",
+      "preceding": [
+        "/// Enables interactive behavior for the glass effect.",
+        "@property (nonatomic, getter=isInteractive) BOOL interactive;",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 34,
+      "text": "/// Creates a glass effect with the specified style.",
+      "preceding": [
+        "/// A tint color applied to the glass.",
+        "@property (nonatomic, copy, nullable) UIColor *tintColor;",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 35,
+      "text": "+ (UIGlassEffect *)effectWithStyle:(UIGlassEffectStyle)style NS_SWIFT_NAME(init(style:));",
+      "preceding": [
+        "@property (nonatomic, copy, nullable) UIColor *tintColor;",
+        "",
+        "/// Creates a glass effect with the specified style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 39,
+      "text": "/// A `UIGlassContainerEffect` renders multiple glass elements into a combined effect.",
+      "preceding": [
+        "",
+        "@end",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 41,
+      "text": "/// When using `UIGlassContainerEffect` with a `UIVisualEffectView` you can",
+      "preceding": [
+        "",
+        "/// A `UIGlassContainerEffect` renders multiple glass elements into a combined effect.",
+        "///"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 42,
+      "text": "/// add individual glass elements to the visual effect view's contentView by nesting `UIVisualEffectView`'s",
+      "preceding": [
+        "/// A `UIGlassContainerEffect` renders multiple glass elements into a combined effect.",
+        "///",
+        "/// When using `UIGlassContainerEffect` with a `UIVisualEffectView` you can"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 43,
+      "text": "/// configured with `UIGlassEffect`. In that configuration, the glass container will render all glass elements",
+      "preceding": [
+        "///",
+        "/// When using `UIGlassContainerEffect` with a `UIVisualEffectView` you can",
+        "/// add individual glass elements to the visual effect view's contentView by nesting `UIVisualEffectView`'s"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 48,
+      "text": "@interface UIGlassContainerEffect : UIVisualEffect",
+      "preceding": [
+        "UIKIT_EXTERN NS_SWIFT_UI_ACTOR",
+        "API_AVAILABLE(ios(26.0))",
+        "API_UNAVAILABLE(visionos, watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h",
+      "line": 57,
+      "text": "#import <UIKitCore/UIGlassEffect.h>",
+      "preceding": [
+        "NS_HEADER_AUDIT_END(nullability, sendability)",
+        "",
+        "#else"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIKitCore.h",
+      "line": 78,
+      "text": "#import <UIKit/UICornerConfiguration.h>",
+      "preceding": [
+        "#import <UIKit/UIContentSizeCategoryAdjusting.h>",
+        "#import <UIKit/UIContentSizeCategory.h>",
+        "#import <UIKit/UIControl.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIKitCore.h",
+      "line": 79,
+      "text": "#import <UIKit/UICornerRadius.h>",
+      "preceding": [
+        "#import <UIKit/UIContentSizeCategory.h>",
+        "#import <UIKit/UIControl.h>",
+        "#import <UIKit/UICornerConfiguration.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIKitCore.h",
+      "line": 93,
+      "text": "#import <UIKit/UIGlassEffect.h>",
+      "preceding": [
+        "#import <UIKit/NSFileProviderExtension.h>",
+        "#import <UIKit/UIVisualEffect.h>",
+        "#import <UIKit/UIBlurEffect.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIKitCore.h",
+      "line": 96,
+      "text": "#import <UIKit/UIBackgroundExtensionView.h>",
+      "preceding": [
+        "#import <UIKit/UIGlassEffect.h>",
+        "#import <UIKit/UIVibrancyEffect.h>",
+        "#import <UIKit/UIVisualEffectView.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIKitCore.h",
+      "line": 163,
+      "text": "#import <UIKit/UIScrollEdgeElementContainerInteraction.h>",
+      "preceding": [
+        "#import <UIKit/UIScreenEdgePanGestureRecognizer.h>",
+        "#import <UIKit/UIScreenMode.h>",
+        "#import <UIKit/UIScrollView.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIMenuElement.h",
+      "line": 68,
+      "text": "@property (nonatomic) UIMenuElementImageVisibility preferredImageVisibility API_AVAILABLE(ios(27.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "@property (nonatomic, nullable, readonly) UIImage *image;",
+        "",
+        "/// The preferred visibility of the element's image."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIMenuLeaf.h",
+      "line": 33,
+      "text": "@property (nonatomic) UIMenuElementImageVisibility preferredImageVisibility API_AVAILABLE(ios(27.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "@property (nullable, nonatomic, copy) UIImage *selectedImage API_AVAILABLE(ios(17.0)) API_UNAVAILABLE(watchos);",
+        "",
+        "/// The preferred visibility of the element’s image."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 124,
+      "text": "compactAppearance, scrollEdgeAppearance, compactScrollEdgeAppearance) on either UINavigationBar",
+      "preceding": [
+        " Fallback Behavior:",
+        " 1) Appearance objects are used in whole – that is, all values will be sourced entirely from an",
+        " instance of UINavigationBarAppearance defined by one of these named properties (standardAppearance,"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 128,
+      "text": "AtScrollEdge: self.topItem.scrollEdgeAppearance => self.scrollEdgeAppearance",
+      "preceding": [
+        " (self) or UINavigationItem (self.topItem).",
+        " 2) The navigation bar will always attempt to use the most relevant appearance instances first,",
+        " before falling back to less relevant ones. The fallback logic is:"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 130,
+      "text": "AtCompactScrollEdge: self.topItem.compactScrollEdgeAppearance",
+      "preceding": [
+        " before falling back to less relevant ones. The fallback logic is:",
+        "     AtScrollEdge: self.topItem.scrollEdgeAppearance => self.scrollEdgeAppearance",
+        "         => self.topItem.standardAppearance => self.standardAppearance"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 131,
+      "text": "=> self.compactScrollEdgeAppearance => self.topItem.scrollEdgeAppearance",
+      "preceding": [
+        "     AtScrollEdge: self.topItem.scrollEdgeAppearance => self.scrollEdgeAppearance",
+        "         => self.topItem.standardAppearance => self.standardAppearance",
+        "     AtCompactScrollEdge: self.topItem.compactScrollEdgeAppearance"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 132,
+      "text": "=> self.scrollEdgeAppearance => self.topItem.compactAppearance",
+      "preceding": [
+        "         => self.topItem.standardAppearance => self.standardAppearance",
+        "     AtCompactScrollEdge: self.topItem.compactScrollEdgeAppearance",
+        "         => self.compactScrollEdgeAppearance => self.topItem.scrollEdgeAppearance"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 144,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "/// Describes the appearance attributes for the navigation bar to use when it is displayed with its compact height. If not set, the standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the navigation bar to use when an associated UIScrollView has reached the edge abutting the bar (the top edge for the navigation bar). If not set, a modified standardAppearance will be used instead."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 145,
+      "text": "/// Describes the appearance attributes for the navigation bar to use when it is displayed with its compact heights, and an associated UIScrollView has reached the edge abutting the bar. If not set, first the scrollEdgeAppearance will be tried, and if that is nil then compactAppearance followed by a modified standardAppearance.",
+      "preceding": [
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the navigation bar to use when an associated UIScrollView has reached the edge abutting the bar (the top edge for the navigation bar). If not set, a modified standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationBar.h",
+      "line": 146,
+      "text": "@property(nonatomic,readwrite, copy, nullable) UINavigationBarAppearance *compactScrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "/// Describes the appearance attributes for the navigation bar to use when an associated UIScrollView has reached the edge abutting the bar (the top edge for the navigation bar). If not set, a modified standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the navigation bar to use when it is displayed with its compact heights, and an associated UIScrollView has reached the edge abutting the bar. If not set, first the scrollEdgeAppearance will be tried, and if that is nil then compactAppearance followed by a modified standardAppearance."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationItem.h",
+      "line": 269,
+      "text": "///  When set and this item is topmost, overrides the hosting navigation bar's scrollEdgeAppearance. See UINavigationBar.scrollEdgeAppearance for further details.",
+      "preceding": [
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *standardAppearance API_AVAILABLE(ios(13.0), tvos(13.0)) API_UNAVAILABLE(watchos);",
+        "///  When set and this item is topmost, overrides the hosting navigation bar's compactAppearance. See UINavigationBar.compactAppearance for further details.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationItem.h",
+      "line": 270,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "///  When set and this item is topmost, overrides the hosting navigation bar's compactAppearance. See UINavigationBar.compactAppearance for further details.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "///  When set and this item is topmost, overrides the hosting navigation bar's scrollEdgeAppearance. See UINavigationBar.scrollEdgeAppearance for further details."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationItem.h",
+      "line": 271,
+      "text": "///  When set and this item is topmost, overrides the hosting navigation bar's compactScrollEdgeAppearance. See UINavigationBar.h for further details.",
+      "preceding": [
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "///  When set and this item is topmost, overrides the hosting navigation bar's scrollEdgeAppearance. See UINavigationBar.scrollEdgeAppearance for further details.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UINavigationItem.h",
+      "line": 272,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *compactScrollEdgeAppearance API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "///  When set and this item is topmost, overrides the hosting navigation bar's scrollEdgeAppearance. See UINavigationBar.scrollEdgeAppearance for further details.",
+        "@property (nonatomic, readwrite, copy, nullable) UINavigationBarAppearance *scrollEdgeAppearance API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "///  When set and this item is topmost, overrides the hosting navigation bar's compactScrollEdgeAppearance. See UINavigationBar.h for further details."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 1,
+      "text": "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIScrollEdgeElementContainerInteraction.h>)",
+      "preceding": []
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 3,
+      "text": "//  UIScrollEdgeElementContainerInteraction.h",
+      "preceding": [
+        "#if (defined(USE_UIKIT_PUBLIC_HEADERS) && USE_UIKIT_PUBLIC_HEADERS) || !__has_include(<UIKitCore/UIScrollEdgeElementContainerInteraction.h>)",
+        "//"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 17,
+      "text": "/// Any descendants of this view that should affect the shape of the edge effect, such as labels, images, glass views, and controls, will automatically do so.",
+      "preceding": [
+        "@class UIScrollView;",
+        "",
+        "/// Add this interaction to a container view of views that overlay the edge of a scroll view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 21,
+      "text": "///     let interaction = UIScrollEdgeElementContainerInteraction()",
+      "preceding": [
+        "///",
+        "/// In the following example, an interaction is added to a container view of buttons that overlay the bottom edge of a scroll view.",
+        "///"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 27,
+      "text": "@interface UIScrollEdgeElementContainerInteraction : NSObject <UIInteraction>",
+      "preceding": [
+        "///     buttonContainer.addInteraction(interaction)",
+        "///",
+        "UIKIT_FINAL UIKIT_EXTERN NS_SWIFT_UI_ACTOR API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollEdgeElementContainerInteraction.h",
+      "line": 40,
+      "text": "#import <UIKitCore/UIScrollEdgeElementContainerInteraction.h>",
+      "preceding": [
+        "NS_HEADER_AUDIT_END(nullability, sendability)",
+        "",
+        "#else"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 50,
+      "text": "UIKIT_FINAL UIKIT_EXTERN NS_SWIFT_UI_ACTOR API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos) NS_SWIFT_NAME(UIScrollEdgeEffect.Style)",
+      "preceding": [
+        "UIKIT_EXTERN const UIScrollViewDecelerationRate UIScrollViewDecelerationRateFast API_AVAILABLE(ios(3.0)) API_UNAVAILABLE(watchos);",
+        "",
+        "/// Styles for a scroll view's edge effect."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 51,
+      "text": "@interface UIScrollEdgeEffectStyle : NSObject",
+      "preceding": [
+        "",
+        "/// Styles for a scroll view's edge effect.",
+        "UIKIT_FINAL UIKIT_EXTERN NS_SWIFT_UI_ACTOR API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos) NS_SWIFT_NAME(UIScrollEdgeEffect.Style)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 57,
+      "text": "@property (nonatomic, readonly, class) UIScrollEdgeEffectStyle *automaticStyle;",
+      "preceding": [
+        "+ (instancetype)new NS_UNAVAILABLE;",
+        "",
+        "/// The automatic scroll edge effect style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 60,
+      "text": "@property (nonatomic, readonly, class) UIScrollEdgeEffectStyle *softStyle;",
+      "preceding": [
+        "@property (nonatomic, readonly, class) UIScrollEdgeEffectStyle *automaticStyle;",
+        "",
+        "/// A soft-edged scroll edge effect."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 63,
+      "text": "@property (nonatomic, readonly, class) UIScrollEdgeEffectStyle *hardStyle;",
+      "preceding": [
+        "@property (nonatomic, readonly, class) UIScrollEdgeEffectStyle *softStyle;",
+        "",
+        "/// A scroll edge effect with a hard cutoff and dividing line."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 69,
+      "text": "@interface UIScrollEdgeEffect : NSObject",
+      "preceding": [
+        "",
+        "/// Properties of the effect on a particular edge of the scroll view.",
+        "UIKIT_FINAL UIKIT_EXTERN NS_SWIFT_UI_ACTOR API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 75,
+      "text": "@property (nonatomic, strong) UIScrollEdgeEffectStyle *style;",
+      "preceding": [
+        "+ (instancetype)new NS_UNAVAILABLE;",
+        "",
+        "/// The style of this edge effect."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 190,
+      "text": "@property (nonatomic, readonly) UIScrollEdgeEffect *topEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "///",
+        "",
+        "/// The effect for the top edge of the scroll view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 193,
+      "text": "@property (nonatomic, readonly) UIScrollEdgeEffect *leftEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "@property (nonatomic, readonly) UIScrollEdgeEffect *topEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+        "",
+        "/// The effect for the left edge of the scroll view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 196,
+      "text": "@property (nonatomic, readonly) UIScrollEdgeEffect *bottomEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "@property (nonatomic, readonly) UIScrollEdgeEffect *leftEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+        "",
+        "/// The effect for the bottom edge of the scroll view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIScrollView.h",
+      "line": 199,
+      "text": "@property (nonatomic, readonly) UIScrollEdgeEffect *rightEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "@property (nonatomic, readonly) UIScrollEdgeEffect *bottomEdgeEffect API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos);",
+        "",
+        "/// The effect for the right edge of the scroll view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UISearchBar.h",
+      "line": 21,
+      "text": "UISearchBarIconSearch, // The magnifying glass",
+      "preceding": [
+        "NS_HEADER_AUDIT_BEGIN(nullability, sendability)",
+        "",
+        "typedef NS_ENUM(NSInteger, UISearchBarIcon) {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 17,
+      "text": "typedef NS_ENUM(NSInteger, UICornerCurve) {",
+      "preceding": [
+        "",
+        "/// The corner curve to apply to a view.",
+        "API_AVAILABLE(ios(17.0), visionos(1.0)) API_UNAVAILABLE(tvos, watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 19,
+      "text": "UICornerCurveAutomatic,",
+      "preceding": [
+        "API_AVAILABLE(ios(17.0), visionos(1.0)) API_UNAVAILABLE(tvos, watchos)",
+        "typedef NS_ENUM(NSInteger, UICornerCurve) {",
+        "    /// Select the corner style automatically."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 21,
+      "text": "UICornerCurveCircular,",
+      "preceding": [
+        "    /// Select the corner style automatically.",
+        "    UICornerCurveAutomatic,",
+        "    /// Always use a circular corner style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 23,
+      "text": "UICornerCurveContinuous,",
+      "preceding": [
+        "    /// Always use a circular corner style.",
+        "    UICornerCurveCircular,",
+        "    /// Always use a continuous corner style."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 70,
+      "text": "+ (instancetype)rectShapeWithCornerRadius:(CGFloat)cornerRadius cornerCurve:(UICornerCurve)cornerCurve;",
+      "preceding": [
+        "",
+        "/// A rectangular shape with rounded corners, aligned inside the frame of",
+        "/// in which it is contained."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 74,
+      "text": "+ (instancetype)rectShapeWithCornerRadius:(CGFloat)cornerRadius cornerCurve:(UICornerCurve)cornerCurve maskedCorners:(UIRectCorner)maskedCorners;",
+      "preceding": [
+        "",
+        "/// A rectangular shape with rounded corners, aligned inside the frame of",
+        "/// in which it is contained."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIShape.h",
+      "line": 86,
+      "text": "+ (instancetype)fixedRectShapeWithRect:(CGRect)rect cornerRadius:(CGFloat)cornerRadius cornerCurve:(UICornerCurve)cornerCurve maskedCorners:(UIRectCorner)maskedCorners;",
+      "preceding": [
+        "",
+        "/// A fixed rectangle shape using `rect` as its shape, regardless of the",
+        "/// frame in which it is contained, with rounded corners using `cornerRadius`."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UITabBar.h",
+      "line": 122,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UITabBarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "/// Describes the appearance attributes for the tab bar to use.",
+        "@property (nonatomic, readwrite, copy) UITabBarAppearance *standardAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0), tvos(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the tabBar to use when an observable scroll view is scrolled to the bottom. If not set, standardAppearance will be used instead."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UITabBarItem.h",
+      "line": 74,
+      "text": "///  When set and this item is selected, overrides the hosting tab bar's scrollEdgeAppearance.",
+      "preceding": [
+        "",
+        "///  When set and this item is selected, overrides the hosting tab bar's standardAppearance.",
+        "@property (nonatomic, readwrite, copy, nullable) UITabBarAppearance *standardAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0), tvos(13.0)) API_UNAVAILABLE(watchos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UITabBarItem.h",
+      "line": 75,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UITabBarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "///  When set and this item is selected, overrides the hosting tab bar's standardAppearance.",
+        "@property (nonatomic, readwrite, copy, nullable) UITabBarAppearance *standardAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0), tvos(13.0)) API_UNAVAILABLE(watchos);",
+        "///  When set and this item is selected, overrides the hosting tab bar's scrollEdgeAppearance."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UITableView.h",
+      "line": 56,
+      "text": "// Including this constant string in the array of strings returned by sectionIndexTitlesForTableView: will cause a magnifying glass icon to be displayed at that location in the index.",
+      "preceding": [
+        "    UITableViewContentHuggingElementsSectionHeaders = 1 << 0",
+        "} API_AVAILABLE(ios(18.0), tvos(18.0), visionos(2.0)) API_UNAVAILABLE(watchos);",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UITextField.h",
+      "line": 86,
+      "text": "@property(nullable, nonatomic,strong) UIView              *leftView;        // e.g. magnifying glass",
+      "preceding": [
+        "",
+        "@property(nonatomic)        UITextFieldViewMode  clearButtonMode; // sets when the clear button shows up. default is UITextFieldViewModeNever",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIToolbar.h",
+      "line": 75,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "/// Describes the appearance attributes for the toolbar to use when it is displayed with its compact height. If not set, the standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *compactAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the toolbar to use at standard height when an observable scroll view is scrolled to the bottom. If not set, standardAppearance will be used instead."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIToolbar.h",
+      "line": 76,
+      "text": "/// Describes the appearance attributes for the toolbar to use at compact height when an observable scroll view is scrolled to the bottom. If not set, will fall back to scrollEdgeAppearance followed by compactAppearance and finally standardAppearance.",
+      "preceding": [
+        "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *compactAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(13.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the toolbar to use at standard height when an observable scroll view is scrolled to the bottom. If not set, standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIToolbar.h",
+      "line": 77,
+      "text": "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *compactScrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+      "preceding": [
+        "/// Describes the appearance attributes for the toolbar to use at standard height when an observable scroll view is scrolled to the bottom. If not set, standardAppearance will be used instead.",
+        "@property (nonatomic, readwrite, copy, nullable) UIToolbarAppearance *scrollEdgeAppearance UI_APPEARANCE_SELECTOR API_AVAILABLE(ios(15.0)) API_UNAVAILABLE(watchos);",
+        "/// Describes the appearance attributes for the toolbar to use at compact height when an observable scroll view is scrolled to the bottom. If not set, will fall back to scrollEdgeAppearance followed by compactAppearance and finally standardAppearance."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIView.h",
+      "line": 22,
+      "text": "#import <UIKit/UICornerConfiguration.h>",
+      "preceding": [
+        "#import <UIKit/UIFocus.h>",
+        "#import <UIKit/UIViewLayoutRegion.h>",
+        "#import <UIKit/UIFocusEffect.h>"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIView.h",
+      "line": 759,
+      "text": "@interface UIView (CornerConfiguration)",
+      "preceding": [
+        "@end",
+        "",
+        "API_AVAILABLE(ios(26.0), tvos(26.0), visionos(26.0)) API_UNAVAILABLE(watchos)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIView.h",
+      "line": 762,
+      "text": "@property (nonatomic, copy, nonnull) UICornerConfiguration *cornerConfiguration NS_REFINED_FOR_SWIFT;",
+      "preceding": [
+        "@interface UIView (CornerConfiguration)",
+        "",
+        "/// A configuration that defines the corners of the view."
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIView.h",
+      "line": 764,
+      "text": "/// Returns the effective radius for the given `corner`, calculated using the view's current `cornerConfiguration`.",
+      "preceding": [
+        "/// A configuration that defines the corners of the view.",
+        "@property (nonatomic, copy, nonnull) UICornerConfiguration *cornerConfiguration NS_REFINED_FOR_SWIFT;",
+        ""
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIViewController.h",
+      "line": 315,
+      "text": "otherwise customized with the `scrollEdgeAppearance` APIs.",
+      "preceding": [
+        "",
+        " When contentScrollView is nil for an edge, UIKit uses a heuristic to search for",
+        " a UIScrollView to track. If none is found, the relevant bar will be transparent unless"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Headers/UIViewController.h",
+      "line": 783,
+      "text": "UIContainerBackgroundStyleGlass,",
+      "preceding": [
+        "",
+        "typedef NS_ENUM(NSInteger, UIContainerBackgroundStyle) {",
+        "    UIContainerBackgroundStyleAutomatic,"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 227,
+      "text": "@_Concurrency.MainActor @preconcurrency public var cornerConfiguration: UIKit.UICornerConfiguration {",
+      "preceding": [
+        "extension UIView {",
+        "  @available(iOS 26.0, tvOS 26.0, visionOS 26.0, *)",
+        "  @available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 278,
+      "text": "public struct UICornerRadius : Swift.Equatable, Swift.Hashable, Swift.ExpressibleByFloatLiteral, Swift.ExpressibleByIntegerLiteral, Swift.CustomStringConvertible {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, tvOS 26.0, visionOS 26.0, *)",
+        "@available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 279,
+      "text": "public static func fixed(_ radius: Swift.Double) -> UIKit.UICornerRadius",
+      "preceding": [
+        "@available(iOS 26.0, tvOS 26.0, visionOS 26.0, *)",
+        "@available(watchOS, unavailable)",
+        "public struct UICornerRadius : Swift.Equatable, Swift.Hashable, Swift.ExpressibleByFloatLiteral, Swift.ExpressibleByIntegerLiteral, Swift.CustomStringConvertible {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 280,
+      "text": "public static func containerConcentric(minimum: CoreFoundation.CGFloat? = nil) -> UIKit.UICornerRadius",
+      "preceding": [
+        "@available(watchOS, unavailable)",
+        "public struct UICornerRadius : Swift.Equatable, Swift.Hashable, Swift.ExpressibleByFloatLiteral, Swift.ExpressibleByIntegerLiteral, Swift.CustomStringConvertible {",
+        "  public static func fixed(_ radius: Swift.Double) -> UIKit.UICornerRadius"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 286,
+      "text": "public static func == (a: UIKit.UICornerRadius, b: UIKit.UICornerRadius) -> Swift.Bool",
+      "preceding": [
+        "  public var description: Swift.String {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 488,
+      "text": "@_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, preferredImageVisibility: UIMenuElement.ImageVisibility = .automatic, identifier: UIMenu.Identifier? = nil, options: UIMenu.Options = [], preferredElementSize: UIMenu.ElementSize = .automatic, children: [UIMenuElement] = [])",
+      "preceding": [
+        "  @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, identifier: UIMenu.Identifier? = nil, options: UIMenu.Options = [], preferredElementSize: UIMenu.ElementSize = { if #available(iOS 17.0, tvOS 17.0, watchOS 10.0, *) { .automatic } else { .large } }(), children: [UIMenuElement] = [])",
+        "  @available(iOS 27.0, tvOS 27.0, *)",
+        "  @available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 503,
+      "text": "public static func rect(cornerRadius: CoreFoundation.CGFloat, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape",
+      "preceding": [
+        "  public static var circle: UIKit.UIShape {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 504,
+      "text": "public static func fixedRect(_ rect: CoreFoundation.CGRect, cornerRadius: CoreFoundation.CGFloat = 0, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape",
+      "preceding": [
+        "    get",
+        "  }",
+        "  public static func rect(cornerRadius: CoreFoundation.CGFloat, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 524,
+      "text": "public static func rect(cornerRadius: CoreFoundation.CGFloat, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape",
+      "preceding": [
+        "  public static var circle: UIKit.UIShape {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 525,
+      "text": "public static func fixedRect(_ rect: CoreFoundation.CGRect, cornerRadius: CoreFoundation.CGFloat = 0, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape",
+      "preceding": [
+        "    get",
+        "  }",
+        "  public static func rect(cornerRadius: CoreFoundation.CGFloat, cornerCurve: UICornerCurve = .automatic, maskedCorners: UIRectCorner = .allCorners) -> UIKit.UIShape"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 583,
+      "text": "extension UICornerCurve : Swift.CustomStringConvertible, Swift.CustomDebugStringConvertible {",
+      "preceding": [
+        "}",
+        "@available(iOS 17.0, visionOS 1.0, *)",
+        "@available(tvOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 979,
+      "text": "public static func glass() -> UIButton.Configuration",
+      "preceding": [
+        "@available(watchOS, unavailable)",
+        "@available(visionOS, unavailable)",
+        "extension UIButton.Configuration {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 980,
+      "text": "public static func prominentGlass() -> UIButton.Configuration",
+      "preceding": [
+        "@available(visionOS, unavailable)",
+        "extension UIButton.Configuration {",
+        "  public static func glass() -> UIButton.Configuration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 981,
+      "text": "public static func clearGlass() -> UIButton.Configuration",
+      "preceding": [
+        "extension UIButton.Configuration {",
+        "  public static func glass() -> UIButton.Configuration",
+        "  public static func prominentGlass() -> UIButton.Configuration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 982,
+      "text": "public static func prominentClearGlass() -> UIButton.Configuration",
+      "preceding": [
+        "  public static func glass() -> UIButton.Configuration",
+        "  public static func prominentGlass() -> UIButton.Configuration",
+        "  public static func clearGlass() -> UIButton.Configuration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2596,
+      "text": "@_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, selectedImage: UIImage? = nil, preferredImageVisibility: UIMenuElement.ImageVisibility = .automatic, action: ObjectiveC.Selector, propertyList: Any? = nil, alternates: [UICommandAlternate] = [], discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off)",
+      "preceding": [
+        "  @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, selectedImage: UIImage? = nil, action: ObjectiveC.Selector, propertyList: Any? = nil, alternates: [UICommandAlternate] = [], discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off)",
+        "  @available(iOS 27.0, tvOS 27.0, *)",
+        "  @available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2842,
+      "text": "public struct UICornerConfiguration : Swift.Equatable, Swift.Hashable, Swift.CustomStringConvertible {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, tvOS 26.0, visionOS 26.0, *)",
+        "@available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2843,
+      "text": "public static func corners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "@available(iOS 26.0, tvOS 26.0, visionOS 26.0, *)",
+        "@available(watchOS, unavailable)",
+        "public struct UICornerConfiguration : Swift.Equatable, Swift.Hashable, Swift.CustomStringConvertible {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2844,
+      "text": "public static func corners(topLeftRadius: UIKit.UICornerRadius?, topRightRadius: UIKit.UICornerRadius?, bottomLeftRadius: UIKit.UICornerRadius?, bottomRightRadius: UIKit.UICornerRadius?) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "@available(watchOS, unavailable)",
+        "public struct UICornerConfiguration : Swift.Equatable, Swift.Hashable, Swift.CustomStringConvertible {",
+        "  public static func corners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2845,
+      "text": "public static func capsule(maximumRadius: Swift.Double? = nil) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "public struct UICornerConfiguration : Swift.Equatable, Swift.Hashable, Swift.CustomStringConvertible {",
+        "  public static func corners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func corners(topLeftRadius: UIKit.UICornerRadius?, topRightRadius: UIKit.UICornerRadius?, bottomLeftRadius: UIKit.UICornerRadius?, bottomRightRadius: UIKit.UICornerRadius?) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2846,
+      "text": "public static func uniformCorners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func corners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func corners(topLeftRadius: UIKit.UICornerRadius?, topRightRadius: UIKit.UICornerRadius?, bottomLeftRadius: UIKit.UICornerRadius?, bottomRightRadius: UIKit.UICornerRadius?) -> UIKit.UICornerConfiguration",
+        "  public static func capsule(maximumRadius: Swift.Double? = nil) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2847,
+      "text": "public static func uniformEdges(topRadius: UIKit.UICornerRadius, bottomRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func corners(topLeftRadius: UIKit.UICornerRadius?, topRightRadius: UIKit.UICornerRadius?, bottomLeftRadius: UIKit.UICornerRadius?, bottomRightRadius: UIKit.UICornerRadius?) -> UIKit.UICornerConfiguration",
+        "  public static func capsule(maximumRadius: Swift.Double? = nil) -> UIKit.UICornerConfiguration",
+        "  public static func uniformCorners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2848,
+      "text": "public static func uniformEdges(leftRadius: UIKit.UICornerRadius, rightRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func capsule(maximumRadius: Swift.Double? = nil) -> UIKit.UICornerConfiguration",
+        "  public static func uniformCorners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformEdges(topRadius: UIKit.UICornerRadius, bottomRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2849,
+      "text": "public static func uniformTopRadius(_ topRadius: UIKit.UICornerRadius, bottomLeftRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func uniformCorners(radius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformEdges(topRadius: UIKit.UICornerRadius, bottomRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformEdges(leftRadius: UIKit.UICornerRadius, rightRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2850,
+      "text": "public static func uniformBottomRadius(_ bottomRadius: UIKit.UICornerRadius, topLeftRadius: UIKit.UICornerRadius? = nil, topRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func uniformEdges(topRadius: UIKit.UICornerRadius, bottomRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformEdges(leftRadius: UIKit.UICornerRadius, rightRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformTopRadius(_ topRadius: UIKit.UICornerRadius, bottomLeftRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2851,
+      "text": "public static func uniformLeftRadius(_ leftRadius: UIKit.UICornerRadius, topRightRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func uniformEdges(leftRadius: UIKit.UICornerRadius, rightRadius: UIKit.UICornerRadius) -> UIKit.UICornerConfiguration",
+        "  public static func uniformTopRadius(_ topRadius: UIKit.UICornerRadius, bottomLeftRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+        "  public static func uniformBottomRadius(_ bottomRadius: UIKit.UICornerRadius, topLeftRadius: UIKit.UICornerRadius? = nil, topRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2852,
+      "text": "public static func uniformRightRadius(_ rightRadius: UIKit.UICornerRadius, topLeftRadius: UIKit.UICornerRadius? = nil, bottomLeftRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+      "preceding": [
+        "  public static func uniformTopRadius(_ topRadius: UIKit.UICornerRadius, bottomLeftRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+        "  public static func uniformBottomRadius(_ bottomRadius: UIKit.UICornerRadius, topLeftRadius: UIKit.UICornerRadius? = nil, topRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration",
+        "  public static func uniformLeftRadius(_ leftRadius: UIKit.UICornerRadius, topRightRadius: UIKit.UICornerRadius? = nil, bottomRightRadius: UIKit.UICornerRadius? = nil) -> UIKit.UICornerConfiguration"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 2857,
+      "text": "public static func == (a: UIKit.UICornerConfiguration, b: UIKit.UICornerConfiguration) -> Swift.Bool",
+      "preceding": [
+        "  public var description: Swift.String {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3623,
+      "text": "@_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, selectedImage: UIImage? = nil, preferredImageVisibility: UIMenuElement.ImageVisibility = .automatic, action: ObjectiveC.Selector, input: Swift.String, modifierFlags: UIKeyModifierFlags = [], propertyList: Any? = nil, alternates: [UICommandAlternate] = [], discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off)",
+      "preceding": [
+        "  @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", image: UIImage? = nil, action: ObjectiveC.Selector, input: Swift.String, modifierFlags: UIKeyModifierFlags = [], propertyList: Any? = nil, alternates: [UICommandAlternate] = [], discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off)",
+        "  @available(iOS 27.0, tvOS 27.0, *)",
+        "  @available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3771,
+      "text": "@_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, selectedImage: UIImage? = nil, preferredImageVisibility: UIMenuElement.ImageVisibility = .automatic, identifier: UIAction.Identifier? = nil, discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off, handler: @escaping UIActionHandler)",
+      "preceding": [
+        "  @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = \"\", subtitle: Swift.String? = nil, image: UIImage? = nil, selectedImage: UIImage? = nil, identifier: UIAction.Identifier? = nil, discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off, handler: @escaping UIActionHandler)",
+        "  @available(iOS 27.0, tvOS 27.0, *)",
+        "  @available(watchOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1439,
+      "text": "extension SwiftUI.PrimitiveButtonStyle where Self == SwiftUI.GlassButtonStyle {",
+      "preceding": [
+        "#endif",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1440,
+      "text": "@export(implementation) nonisolated public static var glass: SwiftUI.GlassButtonStyle {",
+      "preceding": [
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)",
+        "extension SwiftUI.PrimitiveButtonStyle where Self == SwiftUI.GlassButtonStyle {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1443,
+      "text": "nonisolated public static func glass(_ glass: SwiftUICore.Glass) -> Self",
+      "preceding": [
+        "  @export(implementation) nonisolated public static var glass: SwiftUI.GlassButtonStyle {",
+        "    get { .init() }",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1448,
+      "text": "nonisolated public struct GlassButtonStyle : SwiftUI.PrimitiveButtonStyle, ~Swift.Sendable {",
+      "preceding": [
+        "#if compiler(>=5.3) && $TildeSendable",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1451,
+      "text": "nonisolated public init(_ glass: SwiftUICore.Glass)",
+      "preceding": [
+        "nonisolated public struct GlassButtonStyle : SwiftUI.PrimitiveButtonStyle, ~Swift.Sendable {",
+        "  nonisolated public init()",
+        "  @available(iOS 26.1, macOS 26.1, tvOS 26.1, watchOS 26.1, *)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1452,
+      "text": "nonisolated public func makeBody(configuration: SwiftUI.GlassButtonStyle.Configuration) -> some SwiftUICore.View",
+      "preceding": [
+        "  nonisolated public init()",
+        "  @available(iOS 26.1, macOS 26.1, tvOS 26.1, watchOS 26.1, *)",
+        "  nonisolated public init(_ glass: SwiftUICore.Glass)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1456,
+      "text": "public typealias Body = @_opaqueReturnTypeOf(\"$s7SwiftUI16GlassButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF\", 0) __",
+      "preceding": [
+        "  ",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1461,
+      "text": "nonisolated public struct GlassButtonStyle : SwiftUI.PrimitiveButtonStyle {",
+      "preceding": [
+        "#else",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1464,
+      "text": "nonisolated public init(_ glass: SwiftUICore.Glass)",
+      "preceding": [
+        "nonisolated public struct GlassButtonStyle : SwiftUI.PrimitiveButtonStyle {",
+        "  nonisolated public init()",
+        "  @available(iOS 26.1, macOS 26.1, tvOS 26.1, watchOS 26.1, *)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1465,
+      "text": "nonisolated public func makeBody(configuration: SwiftUI.GlassButtonStyle.Configuration) -> some SwiftUICore.View",
+      "preceding": [
+        "  nonisolated public init()",
+        "  @available(iOS 26.1, macOS 26.1, tvOS 26.1, watchOS 26.1, *)",
+        "  nonisolated public init(_ glass: SwiftUICore.Glass)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 1469,
+      "text": "public typealias Body = @_opaqueReturnTypeOf(\"$s7SwiftUI16GlassButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF\", 0) __",
+      "preceding": [
+        "  ",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4334,
+      "text": "extension SwiftUI.PrimitiveButtonStyle where Self == SwiftUI.GlassProminentButtonStyle {",
+      "preceding": [
+        "#endif",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4335,
+      "text": "@export(implementation) @_Concurrency.MainActor @preconcurrency public static var glassProminent: SwiftUI.GlassProminentButtonStyle {",
+      "preceding": [
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)",
+        "extension SwiftUI.PrimitiveButtonStyle where Self == SwiftUI.GlassProminentButtonStyle {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4342,
+      "text": "nonisolated public struct GlassProminentButtonStyle : SwiftUI.PrimitiveButtonStyle, ~Swift.Sendable {",
+      "preceding": [
+        "#if compiler(>=5.3) && $TildeSendable",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4344,
+      "text": "nonisolated public func makeBody(configuration: SwiftUI.GlassProminentButtonStyle.Configuration) -> some SwiftUICore.View",
+      "preceding": [
+        "@available(visionOS, unavailable)",
+        "nonisolated public struct GlassProminentButtonStyle : SwiftUI.PrimitiveButtonStyle, ~Swift.Sendable {",
+        "  nonisolated public init()"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4348,
+      "text": "public typealias Body = @_opaqueReturnTypeOf(\"$s7SwiftUI25GlassProminentButtonStyleV8makeBody13configurationQrAA09PrimitiveeF13ConfigurationV_tF\", 0) __",
+      "preceding": [
+        "  ",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4353,
+      "text": "nonisolated public struct GlassProminentButtonStyle : SwiftUI.PrimitiveButtonStyle {",
+      "preceding": [
+        "#else",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4355,
+      "text": "nonisolated public func makeBody(configuration: SwiftUI.GlassProminentButtonStyle.Configuration) -> some SwiftUICore.View",
+      "preceding": [
+        "@available(visionOS, unavailable)",
+        "nonisolated public struct GlassProminentButtonStyle : SwiftUI.PrimitiveButtonStyle {",
+        "  nonisolated public init()"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 4359,
+      "text": "public typealias Body = @_opaqueReturnTypeOf(\"$s7SwiftUI25GlassProminentButtonStyleV8makeBody13configurationQrAA09PrimitiveeF13ConfigurationV_tF\", 0) __",
+      "preceding": [
+        "  ",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7139,
+      "text": "nonisolated public func sharedBackgroundVisibility(_ visibility: SwiftUICore.Visibility) -> some SwiftUI.ToolbarContent",
+      "preceding": [
+        "@available(watchOS, unavailable)",
+        "@available(visionOS, unavailable)",
+        "extension SwiftUI.ToolbarContent {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7147,
+      "text": "nonisolated public func sharedBackgroundVisibility(_ visibility: SwiftUICore.Visibility) -> some SwiftUI.CustomizableToolbarContent",
+      "preceding": [
+        "@available(watchOS, unavailable)",
+        "@available(visionOS, unavailable)",
+        "extension SwiftUI.CustomizableToolbarContent {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 13822,
+      "text": "public static let atScrollEdge: SwiftUI.ToolbarMinimizationRestoration",
+      "preceding": [
+        "  @available(tvOS, unavailable)",
+        "  @available(watchOS, unavailable)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15403,
+      "text": "@_Concurrency.MainActor @preconcurrency public func backgroundExtensionEffect() -> some SwiftUICore.View",
+      "preceding": [
+        "}",
+        "extension SwiftUICore.View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15406,
+      "text": "@_Concurrency.MainActor @preconcurrency public func backgroundExtensionEffect(isEnabled: Swift.Bool) -> some SwiftUICore.View",
+      "preceding": [
+        "  @_Concurrency.MainActor @preconcurrency public func backgroundExtensionEffect() -> some SwiftUICore.View",
+        "  ",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15478,
+      "text": "public struct ScrollEdgeEffectStyle : Swift.Hashable, Swift.Sendable {",
+      "preceding": [
+        "  ",
+        "}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15479,
+      "text": "public static var automatic: SwiftUI.ScrollEdgeEffectStyle {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, visionOS 26.0, *)",
+        "public struct ScrollEdgeEffectStyle : Swift.Hashable, Swift.Sendable {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15482,
+      "text": "public static var hard: SwiftUI.ScrollEdgeEffectStyle {",
+      "preceding": [
+        "  public static var automatic: SwiftUI.ScrollEdgeEffectStyle {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15485,
+      "text": "public static var soft: SwiftUI.ScrollEdgeEffectStyle {",
+      "preceding": [
+        "  public static var hard: SwiftUI.ScrollEdgeEffectStyle {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15488,
+      "text": "public static func == (a: SwiftUI.ScrollEdgeEffectStyle, b: SwiftUI.ScrollEdgeEffectStyle) -> Swift.Bool",
+      "preceding": [
+        "  public static var soft: SwiftUI.ScrollEdgeEffectStyle {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15497,
+      "text": "nonisolated public func scrollEdgeEffectStyle(_ style: SwiftUI.ScrollEdgeEffectStyle?, for edges: SwiftUICore.Edge.Set) -> some SwiftUICore.View",
+      "preceding": [
+        "extension SwiftUICore.View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUI.framework/Modules/SwiftUI.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 15501,
+      "text": "nonisolated public func scrollEdgeEffectHidden(_ hidden: Swift.Bool = true, for edges: SwiftUICore.Edge.Set = .all) -> some SwiftUICore.View",
+      "preceding": [
+        "  ",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3064,
+      "text": "nonisolated public func glassEffect(_ glass: SwiftUICore::Glass = .regular, in shape: some Shape = DefaultGlassEffectShape()) -> some SwiftUICore::View",
+      "preceding": [
+        "extension SwiftUICore::View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3069,
+      "text": "public struct DefaultGlassEffectShape : SwiftUICore::Shape {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3084,
+      "text": "public typealias Body = SwiftUICore::_ShapeView<SwiftUICore::DefaultGlassEffectShape, SwiftUICore::ForegroundStyle>",
+      "preceding": [
+        "  public typealias AnimatableData = SwiftUICore::EmptyAnimatableData",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3498,
+      "text": "public struct GlassEffectTransition : Swift::Sendable {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3499,
+      "text": "public static var matchedGeometry: SwiftUICore::GlassEffectTransition {",
+      "preceding": [
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)",
+        "public struct GlassEffectTransition : Swift::Sendable {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3502,
+      "text": "public static var materialize: SwiftUICore::GlassEffectTransition {",
+      "preceding": [
+        "  public static var matchedGeometry: SwiftUICore::GlassEffectTransition {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3505,
+      "text": "public static var identity: SwiftUICore::GlassEffectTransition {",
+      "preceding": [
+        "  public static var materialize: SwiftUICore::GlassEffectTransition {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 3512,
+      "text": "@_Concurrency::MainActor @preconcurrency public func glassEffectTransition(_ transition: SwiftUICore::GlassEffectTransition) -> some SwiftUICore::View",
+      "preceding": [
+        "extension SwiftUICore::View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7245,
+      "text": "public struct Glass : Swift::Equatable, Swift::Sendable {",
+      "preceding": [
+        "#endif",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7246,
+      "text": "public static var regular: SwiftUICore::Glass {",
+      "preceding": [
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)",
+        "public struct Glass : Swift::Equatable, Swift::Sendable {"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7249,
+      "text": "public static var clear: SwiftUICore::Glass {",
+      "preceding": [
+        "  public static var regular: SwiftUICore::Glass {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7252,
+      "text": "public static var identity: SwiftUICore::Glass {",
+      "preceding": [
+        "  public static var clear: SwiftUICore::Glass {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7255,
+      "text": "public func tint(_ color: SwiftUICore::Color?) -> SwiftUICore::Glass",
+      "preceding": [
+        "  public static var identity: SwiftUICore::Glass {",
+        "    get",
+        "  }"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7256,
+      "text": "public func interactive(_ isEnabled: Swift::Bool = true) -> SwiftUICore::Glass",
+      "preceding": [
+        "    get",
+        "  }",
+        "  public func tint(_ color: SwiftUICore::Color?) -> SwiftUICore::Glass"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 7257,
+      "text": "public static func == (a: SwiftUICore::Glass, b: SwiftUICore::Glass) -> Swift::Bool",
+      "preceding": [
+        "  }",
+        "  public func tint(_ color: SwiftUICore::Color?) -> SwiftUICore::Glass",
+        "  public func interactive(_ isEnabled: Swift::Bool = true) -> SwiftUICore::Glass"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 11523,
+      "text": "@_Concurrency::MainActor @preconcurrency public struct GlassEffectContainer<Content> : SwiftUICore::View where Content : SwiftUICore::View {",
+      "preceding": [
+        "}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 11530,
+      "text": "public typealias Body = @_opaqueReturnTypeOf(\"$s7SwiftUI20GlassEffectContainerV4bodyQrvp\", 0) __<Content>",
+      "preceding": [
+        "  }",
+        "  @available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 12644,
+      "text": "@_Concurrency::MainActor @preconcurrency public func glassEffectUnion(id: (some (Hashable & Sendable))?, namespace: SwiftUICore::Namespace.SwiftUICore::ID) -> some SwiftUICore::View",
+      "preceding": [
+        "extension SwiftUICore::View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 22350,
+      "text": "nonisolated public func glassEffectID(_ id: (some (Hashable & Sendable))?, in namespace: SwiftUICore::Namespace.SwiftUICore::ID) -> some SwiftUICore::View",
+      "preceding": [
+        "extension SwiftUICore::View {",
+        "  @available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "  @available(visionOS, unavailable)"
+      ]
+    },
+    {
+      "file": "System/Library/Frameworks/SwiftUICore.framework/Modules/SwiftUICore.swiftmodule/arm64-apple-ios-simulator.swiftinterface",
+      "line": 26694,
+      "text": "extension SwiftUICore::GlassEffectContainer : Swift::Sendable {}",
+      "preceding": [
+        "extension SwiftUICore::UserInterfaceSizeClass : Swift::Hashable {}",
+        "@available(iOS 26.0, macOS 26.0, tvOS 26.0, watchOS 26.0, *)",
+        "@available(visionOS, unavailable)"
+      ]
+    }
+  ]
+}

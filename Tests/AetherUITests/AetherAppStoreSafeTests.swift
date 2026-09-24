@@ -18,16 +18,13 @@ final class AetherAppStoreSafeTests: XCTestCase {
         let previous = AetherGlassConfig.current
         defer { AetherGlassConfig.current = previous }
 
-        AetherGlassConfig.current = AetherGlassConfig(legacyBlurBackend: .custom)
+        AetherGlassConfig.current = AetherGlassConfig(legacyBlurBackend: .experimentalGlass)
         let view = LegacyGlassBackdropView()
 
-        #if APPSTORE_SAFE
         XCTAssertFalse(view.hasBackdropLayer)
-        XCTAssertTrue(view.subviews.contains { $0 is UIVisualEffectView })
-        #else
-        XCTAssertTrue(view.hasBackdropLayer)
-        XCTAssertNotNil(CALayer.blur())
-        #endif
+        // The experimental renderer uses public Metal + direct UIKit capture
+        // in both build modes. Metal-unavailable environments keep a material.
+        XCTAssertTrue(view.experimentalView != nil || view.subviews.contains { $0 is UIVisualEffectView })
     }
 
     func testSafeVariableBlurUsesPublicVisualEffectFallback() {

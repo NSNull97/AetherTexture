@@ -39,7 +39,8 @@ let package = Package(
             ],
             path: "Sources/AetherUI",
             resources: [
-                .process("ListView/DustEffect/Metal")
+                .process("ListView/DustEffect/Metal"),
+                .process("Glass/Experimental/Metal")
             ],
             swiftSettings: [
 //                .define("APPSTORE_SAFE", .when(configuration: .debug)),

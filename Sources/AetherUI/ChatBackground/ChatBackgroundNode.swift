@@ -535,24 +535,31 @@ private final class ChatBackgroundPatternNode: ASDisplayNode {
     }
 }
 
-private final class ChatBackgroundGradientMaskNode: ASDisplayNode {
+final class ChatBackgroundGradientMaskNode: ASDisplayNode {
     private let gradientNode = AetherMultiRadialGradientNode()
     private let imageMaskLayer = CALayer()
     private var image: UIImage?
     private var mode: ChatBackgroundSettings.ImageContentMode = .aspectFill
+    private var compositeSize = CGSize.zero
+    private var compositeGradient: CGImage?
+    private var compositeMask: CGImage?
+    private var compositeMode: ChatBackgroundSettings.ImageContentMode?
+    private(set) var compositeRenderCount = 0
 
     override init() {
         super.init()
         isOpaque = false
         clipsToBounds = true
         addSubnode(gradientNode)
+        // Keep Texture's layout/configuration lifecycle, but display a cached
+        // composite instead of reapplying a screen-sized mask in every capture.
+        gradientNode.isHidden = true
         imageMaskLayer.magnificationFilter = .linear
         imageMaskLayer.minificationFilter = .linear
     }
 
     override func didLoad() {
         super.didLoad()
-        layer.mask = imageMaskLayer
         updateMask()
     }
 
@@ -577,10 +584,22 @@ private final class ChatBackgroundGradientMaskNode: ASDisplayNode {
     }
 
     private func updateMask() {
+        guard bounds.width > 0, bounds.height > 0, let mask = image?.cgImage else { return }
+        gradientNode.layoutIfNeeded()
+        guard let gradientContents = gradientNode.layer.contents else { return }
+        // AetherMultiRadialGradientNode only assigns CGImage contents.
+        let gradient = gradientContents as! CGImage
+        guard compositeSize != bounds.size || compositeGradient !== gradient
+                || compositeMask !== mask || compositeMode != mode else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        imageMaskLayer.frame = bounds
-        imageMaskLayer.contents = image?.cgImage
+        let composite = CALayer()
+        composite.frame = CGRect(origin: .zero, size: bounds.size)
+        composite.contents = gradient
+        composite.contentsGravity = .resize
+        composite.mask = imageMaskLayer
+        imageMaskLayer.frame = composite.bounds
+        imageMaskLayer.contents = mask
         switch mode {
         case .aspectFill, .tile:
             imageMaskLayer.contentsGravity = .resizeAspectFill
@@ -589,6 +608,21 @@ private final class ChatBackgroundGradientMaskNode: ASDisplayNode {
         case .fill:
             imageMaskLayer.contentsGravity = .resize
         }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = gradientNode.layer.contentsScale
+        format.opaque = false
+        let result = UIGraphicsImageRenderer(size: bounds.size, format: format).image {
+            composite.render(in: $0.cgContext)
+        }
+        composite.mask = nil
+        layer.contents = result.cgImage
+        layer.contentsScale = result.scale
+        layer.contentsGravity = .resize
+        compositeSize = bounds.size
+        compositeGradient = gradient
+        compositeMask = mask
+        compositeMode = mode
+        compositeRenderCount += 1
         CATransaction.commit()
     }
 }

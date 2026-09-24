@@ -194,6 +194,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
     /// resolvable solid colour and an explicit frame update side-steps
     /// image-surface caching entirely.
     private var legacyThumbView: UIView?
+    private var experimentalLensView: ExperimentalGlassLensSurface?
 
     public var selectedContentView: UIView {
         liftedContainerView
@@ -394,6 +395,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         legacySelectionView = nil
         legacyThumbView?.removeFromSuperview()
         legacyThumbView = nil
+        experimentalLensView = nil
         legacyContentMaskBlobNode?.view.removeFromSuperview()
         legacyContentMaskBlobNode = nil
         legacyLiftedContentBlobMaskNode?.view.removeFromSuperview()
@@ -586,7 +588,15 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         selectionView.alpha = 0
         legacySelectionView = selectionView
 
-        let thumb = UIView()
+        let thumb: UIView
+        if #available(iOS 26.0, *) {
+            thumb = UIView()
+        } else if let experimental = ExperimentalGlassLensSurface() {
+            experimentalLensView = experimental
+            thumb = experimental
+        } else {
+            thumb = UIView()
+        }
         thumb.clipsToBounds = true
         thumb.layer.cornerCurve = .continuous
         legacyThumbView = thumb
@@ -1026,7 +1036,16 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         }
 
         let lensFrame = lensParams.baseFrame.insetBy(dx: lensParams.inset, dy: lensParams.inset)
-        let effectiveLensFrame = lensFrame.insetBy(dx: lensParams.isLifted ? -2.0 : 0.0, dy: lensParams.isLifted ? -2.0 : 0.0)
+        let effectiveLensFrame: CGRect
+        if experimentalLensView != nil, params.isCollapsed {
+            effectiveLensFrame = CGRect(origin: lensParams.baseFrame.origin, size: .zero)
+        } else if experimentalLensView != nil {
+            effectiveLensFrame = lensParams.isLifted
+                ? lensParams.baseFrame.insetBy(dx: -lensParams.liftedInset, dy: -lensParams.liftedInset)
+                : lensFrame
+        } else {
+            effectiveLensFrame = lensFrame.insetBy(dx: lensParams.isLifted ? -2 : 0, dy: lensParams.isLifted ? -2 : 0)
+        }
 
         #if APPSTORE_SAFE
         if let maskLayer = safeLegacyContentMaskLayer {
@@ -1063,7 +1082,12 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         // than fully opaque chrome.
         if let legacyThumbView {
             transition.updateFrame(view: legacyThumbView, frame: effectiveLensFrame)
-            legacyThumbView.backgroundColor = Self.legacyThumbColor(isDark: params.isDark)
+            if let experimentalLensView {
+                experimentalLensView.update(isDark: params.isDark, lifted: params.isLifted,
+                                            collapsed: params.isCollapsed, transition: transition)
+            } else {
+                legacyThumbView.backgroundColor = Self.legacyThumbColor(isDark: params.isDark)
+            }
             let cornerRadius = effectiveLensFrame.height * 0.5
             transition.updateCornerRadius(layer: legacyThumbView.layer, cornerRadius: cornerRadius)
         }
@@ -1085,7 +1109,9 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         genericBackgroundContainer?.overrideUserInterfaceStyle = interfaceStyle
         lensView?.overrideUserInterfaceStyle = interfaceStyle
         legacyThumbView?.overrideUserInterfaceStyle = interfaceStyle
-        legacyThumbView?.backgroundColor = Self.legacyThumbColor(isDark: isDark)
+        if experimentalLensView == nil {
+            legacyThumbView?.backgroundColor = Self.legacyThumbColor(isDark: isDark)
+        }
         classicTrackView?.overrideUserInterfaceStyle = interfaceStyle
         classicSelectionView?.overrideUserInterfaceStyle = interfaceStyle
         classicSelectedClipView?.overrideUserInterfaceStyle = interfaceStyle
@@ -1093,6 +1119,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
     }
 
     #if DEBUG
+    internal var usesExperimentalLensForTesting: Bool { experimentalLensView != nil }
     internal var resolvedIsDarkForTesting: Bool? { params?.isDark }
     internal var legacyThumbColorForTesting: UIColor? { legacyThumbView?.backgroundColor }
     internal var legacyThumbInterfaceStyleForTesting: UIUserInterfaceStyle? {

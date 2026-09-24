@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-09-14T13:24:34.404087+00:00",
+  "baselineGitHead": "222e25363464cb400f31fe8eff6ff40463aa4a31",
+  "note": "Read-only observation of concurrent production edits. This research task modified only AetherGlassRuntimeResearch.md and Research/GlassRuntime. Production changes are outside its integration validation.",
+  "sources": {
+    "Sources/AetherUI/Glass/GlassUtils.swift": {
+      "sha256": "cfa1df1ec90a8c55e8a122ef5f08bc6b7868ecb97adc0f61b67908660248ba7a",
+      "mtime": 1785856845.0304115
+    },
+    "Sources/AetherUI/Glass/GlassBackgroundView.swift": {
+      "sha256": "784d9c0a2765bac204d939d835bc176d1cd9fda7c564c18495f1f087410de5f0",
+      "mtime": 1789392163.4319701
+    },
+    "Sources/AetherUI/Glass/NativeGlassDescriptorAdapter.swift": {
+      "sha256": "506901291db697c66fe17f125cbe83c81d8156b4ccc25c99a8c7eb108272aeaa",
+      "mtime": 1789392212.016227
+    }
+  }
+}

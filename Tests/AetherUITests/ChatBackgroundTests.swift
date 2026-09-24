@@ -3,6 +3,57 @@ import UIKit
 @testable import AetherUI
 
 final class ChatBackgroundTests: XCTestCase {
+    @MainActor
+    func testGradientMaskCompositePreservesPixelsAndInvalidates() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let mask = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20), format: format).image {
+            UIColor.white.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 20, height: 10))
+        }
+        let node = ChatBackgroundGradientMaskNode()
+        node.frame = CGRect(x: 0, y: 0, width: 20, height: 20)
+        _ = node.view
+        let color = UIColor { $0.userInterfaceStyle == .dark ? .blue : .red }
+        func configure(_ style: UIUserInterfaceStyle) {
+            node.configure(image: mask, mode: .fill, gradient: .init(baseColor: color, fields: []),
+                           traits: UITraitCollection(userInterfaceStyle: style))
+            node.setNeedsLayout()
+            node.layoutIfNeeded()
+        }
+        func pixels() throws -> [UInt8] {
+            let image = try XCTUnwrap(node.layer.contents) as! CGImage
+            var bytes = [UInt8](repeating: 0, count: 20 * 20 * 4)
+            try bytes.withUnsafeMutableBytes {
+                let context = try XCTUnwrap(CGContext(data: $0.baseAddress, width: 20, height: 20,
+                    bitsPerComponent: 8, bytesPerRow: 80, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(image, in: CGRect(x: 0, y: 0, width: 20, height: 20))
+            }
+            return bytes
+        }
+        configure(.light)
+        let red = try pixels()
+        let opaque = (5 * 20 + 10) * 4
+        let transparent = (15 * 20 + 10) * 4
+        XCTAssertEqual(Array(red[opaque..<opaque + 4]), [255, 0, 0, 255])
+        XCTAssertEqual(red[transparent + 3], 0)
+        let count = node.compositeRenderCount
+        node.setNeedsLayout()
+        node.layoutIfNeeded()
+        XCTAssertEqual(node.compositeRenderCount, count)
+        configure(.dark)
+        let blue = try pixels()
+        XCTAssertEqual(Array(blue[opaque..<opaque + 4]), [0, 0, 255, 255])
+        XCTAssertGreaterThan(node.compositeRenderCount, count)
+        let darkCount = node.compositeRenderCount
+        node.frame.size.width = 40
+        node.setNeedsLayout()
+        node.layoutIfNeeded()
+        XCTAssertGreaterThan(node.compositeRenderCount, darkCount)
+        XCTAssertNil(node.layer.mask)
+    }
+
     func testGradientVectorForCardinalAngles() {
         let horizontal = ChatBackgroundSettings.gradientVector(rotation: 0.0)
         XCTAssertEqual(horizontal.startPoint.x, 0.0, accuracy: 0.001)

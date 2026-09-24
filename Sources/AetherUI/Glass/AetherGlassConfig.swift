@@ -45,12 +45,12 @@ public struct AetherGlassConfig: Equatable {
 
 /// Pre-iOS-26 glass backend.
 public enum LegacyBlurBackend: Equatable {
-    /// Hand-rolled `CABackdropLayer` + `CAFilter.blur` + `CAFilter.colorMatrix`
-    /// (saturation+brightness boost) + the in-`GlassBackgroundView`
-    /// specular highlight overlay. This backend is used when `APPSTORE_SAFE`
-    /// is absent. Safe builds keep the same case for source compatibility but
-    /// resolve it to the public visual-effect backend.
-    case custom
+    /// Experimental Metal refraction with direct UIKit background capture.
+    /// Works on iOS 15+; native glass still wins on iOS 26+.
+    case experimentalGlass
+
+    @available(*, deprecated, renamed: "experimentalGlass")
+    public static var custom: Self { .experimentalGlass }
 
     /// Public `UIVisualEffectView` material fallback. When the optional
     /// private runtime is compiled in it also supports fine-grained blur

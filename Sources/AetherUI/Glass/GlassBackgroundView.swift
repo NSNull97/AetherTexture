@@ -323,7 +323,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
         public let isVisible: Bool
     }
 
-    /// When `true`, always use the legacy CABackdropLayer renderer even on iOS 26+.
+    /// When `true`, always use the selected pre-iOS-26 renderer even on iOS 26+.
     /// Matches `useCustomGlassImpl` debug switch.
     public static var useCustomGlassImpl: Bool = !GlassCompatibility.isLiquidDesignAvailable
 
@@ -508,7 +508,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
         get { contentContainer.passesUnclaimedTouchesThrough }
         set {
             contentContainer.passesUnclaimedTouchesThrough = newValue
-                && nativeView != nil
+                && (nativeView != nil || legacyView?.experimentalView != nil)
         }
     }
 
@@ -1040,7 +1040,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
     }
 
     @objc private func reduceTransparencyStatusDidChange() {
-        guard appliedAppearanceStyle == .legacy else { return }
+        guard appliedAppearanceStyle == .legacy || legacyView?.experimentalView != nil else { return }
         #if DEBUG
         reduceTransparencyRefreshCountForTesting += 1
         #endif
@@ -1358,6 +1358,11 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
                 return nativeView
             }
             return nil
+        }
+        if let legacyView, legacyView.experimentalInteractionEnabled,
+           transitionMaterialInteractionEnabled, allowsBackgroundHitTesting,
+           self.point(inside: point, with: event) {
+            return legacyView
         }
         return nil
     }
@@ -2268,6 +2273,8 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
             case let .custom(style, _):
                 legacyStyle = style == .clear ? .clear : .normal
             }
+            legacyView.updateMaterial(owner: self, style: style, tint: tintColor,
+                                      isDark: isDark, isInteractive: isInteractive, transition: transition)
             legacyView.update(size: size, cornerRadius: cornerRadius, style: legacyStyle, transition: transition)
             transition.setFrame(view: legacyView, frame: CGRect(origin: .zero, size: size))
             transition.setAlpha(view: legacyView, alpha: isVisible ? 1.0 : 0.0)
@@ -2398,7 +2405,7 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
                     inset: shadowInset,
                     borderWidthFactor: borderWidthFactor,
                     isDark: isDark,
-                    fillColor: fillColor
+                    fillColor: legacyView?.experimentalView != nil ? .clear : fillColor
                 )
                 transition.setAlpha(view: foregroundNode.view, alpha: isVisible ? 1.0 : 0.0)
             } else if let nativeParamsView, let nativeView, #available(iOS 26.0, *) {
