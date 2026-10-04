@@ -29,7 +29,9 @@ public final class MenuGlassSurfaceView: UIView {
     public init(
         isDark: Bool,
         effectsEnabled: Bool = true,
-        appearanceStyle: AetherAppearanceStyle? = nil
+        appearanceStyle: AetherAppearanceStyle? = nil,
+        surfaceRole: AetherSurfaceRole = .popup,
+        legacySurfaceColorOverride: UIColor? = nil
     ) {
         self.isDark = isDark
         if effectsEnabled {
@@ -37,9 +39,10 @@ public final class MenuGlassSurfaceView: UIView {
                 style: .regular,
                 appearanceStyle: appearanceStyle
             )
-            surface.surfaceRole = .popup
+            surface.surfaceRole = surfaceRole
             surface.isDarkOverride = isDark
             surface.glassIsInteractive = true
+            surface.legacySurfaceColorOverride = legacySurfaceColorOverride
             self.surfaceView = surface
         } else {
             self.surfaceView = nil

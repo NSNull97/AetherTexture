@@ -302,6 +302,27 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     private var expandedSearchItemView: TabBarItemView?
     private var legacySearchItemView: TabBarItemView?
     private var searchItem: SearchTabItem?
+    private var insideSearchIndex: Int?
+
+    private var isSearchInside: Bool { searchItem?.style == .inside }
+    private var hasIntegratedSearchSlot: Bool { isSearchInside && insideSearchIndex != nil }
+    private var isInsideSearchMorphing = false
+
+    /// Used by the controller when the item has no custom search action.
+    internal var onSearchRequested: (() -> Void)?
+
+    private var searchSlotIndex: Int { insideSearchIndex ?? items.count }
+
+    private var additionalSearchSlotCount: Int {
+        isSearchInside && insideSearchIndex == nil ? 1 : 0
+    }
+
+    private var searchIconColor: UIColor {
+        resolvedChromeColor(
+            isSearchInside && insideSearchIndex == selectedIndex
+                ? theme.tabBarSelectedIconColor : theme.tabBarIconColor
+        )
+    }
 
     private var displayedSearchItemView: UIView? {
         legacySearchItemView ?? searchItemView
@@ -340,13 +361,24 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             ? Self.liquidGlassChromeBackgroundAlpha
             : Self.legacyChromeBackgroundAlpha
         let backgroundColor = resolvedChromeColor(theme.tabBarBackgroundColor)
+        // Native tint varies with the sampled backdrop. A neutral wash gives
+        // clear glass a faint surface on both white and black backgrounds.
+        let fillColor: UIColor?
+        if theme.appearanceStyle.usesLiquidGlass && theme.enableBlur {
+            fillColor = UIColor(
+                white: isEffectivelyDark ? 1.0 : 0.0,
+                alpha: isEffectivelyDark ? 0.03 : 0.008
+            )
+        } else {
+            fillColor = nil
+        }
         let tint: GlassBackgroundView.TintColor
         if backgroundColor.cgColor.alpha <= 0.001 {
             // `UIGlassEffect.tintColor = UIColor.clear` is not equivalent to
             // leaving the tint unset: on-device it produces an opaque dark
             // material. Use the semantic clear recipe so the native renderer
-            // receives `nil` in light appearance and remains truly untinted.
-            tint = .init(kind: .clear)
+            // receives `nil` in light appearance. The faint fill stays separate.
+            tint = .init(kind: .clear, innerColor: fillColor, innerInset: 0.0)
         } else {
             tint = .init(
                 kind: .custom(
@@ -354,7 +386,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
                     color: backgroundColor.withAlphaComponent(
                         backgroundColor.cgColor.alpha * backgroundAlpha
                     )
-                )
+                ),
+                innerColor: fillColor,
+                innerInset: 0.0
             )
         }
         return TabBarChromeGlassAppearance(
@@ -391,10 +425,29 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         return theme.bottomInset
     }
 
-    func setSearchItem(_ item: SearchTabItem?) {
-        guard searchItem !== item else { return }
+    func setSearchItem(_ item: SearchTabItem?, insideIndex: Int? = nil) {
+        minimizeContentAnimationGeneration &+= 1
+        isInsideSearchMorphing = false
         searchItem = item
+        insideSearchIndex = insideIndex
+        rebuildItemViews()
         rebuildSearchItemView()
+    }
+
+    internal func reloadSearchItem() {
+        guard let item = searchItem else { return }
+        let displayItem = AetherTabBarItem(
+            title: item.title ?? "Search",
+            image: item.image ?? item.selectedImage,
+            selectedImage: item.selectedImage ?? item.image,
+            badgeValue: item.badgeValue,
+            isEnabled: item.isEnabled
+        )
+        expandedSearchItemView?.updateItem(displayItem)
+        legacySearchItemView?.updateItem(displayItem)
+        searchItemView?.accessibilityLabel = displayItem.title
+        updateSearchSelection()
+        setNeedsLayout()
     }
 
     // MARK: - Minimize Mode (iOS 26 `tabBarMinimizeBehavior`)
@@ -424,6 +477,29 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
 
     /// Active-tab icon drawn inside `pillGeometryHost` while minimized.
     private var minimizedIconNode: ASImageNode?
+
+    /// The ordinary tab represented by the leading compact circle when
+    /// inside Search owns the trailing circle. The controller preserves this
+    /// by controller identity across item reloads and reordering.
+    internal var minimizedPrimaryIndex: Int? {
+        didSet { refreshMinimizedIconImage() }
+    }
+
+    private var resolvedMinimizedPrimaryIndex: Int? {
+        if hasIntegratedSearchSlot, selectedIndex == insideSearchIndex {
+            if let index = minimizedPrimaryIndex, items.indices.contains(index),
+               index != insideSearchIndex, items[index].isEnabled {
+                return index
+            }
+            return items.indices.first { $0 != insideSearchIndex && items[$0].isEnabled }
+        }
+        return items.indices.contains(selectedIndex) ? selectedIndex : nil
+    }
+
+    private var minimizedPrimaryTint: UIColor {
+        resolvedChromeColor(resolvedMinimizedPrimaryIndex == selectedIndex
+            ? theme.tabBarSelectedIconColor : theme.tabBarIconColor)
+    }
 
     private var elasticPressRecognizer: GlassHighlightGestureRecognizer?
 
@@ -581,40 +657,53 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     /// either Search representation or changing its geometry/identity.
     private func synchronizeSearchChromeEndpoint() {
         guard !isSearchActive else { return }
+        let usesMovingSearch = !hasIntegratedSearchSlot || isMinimized || isInsideSearchMorphing
         expandedSearchItemView?.alpha = isMinimized ? 0.0 : 1.0
         expandedSearchItemView?.isUserInteractionEnabled = false
         expandedSearchItemView?.accessibilityElementsHidden = true
         searchItemView?.alpha = 1.0
         searchItemView?.transform = .identity
         searchItemView?.chromeMorphKeepsContentIndependentOfMaterial = !usesNativeSearchMerge
-        searchItemView?.chromeMorphMaterialAlpha = usesNativeSearchMerge
-            ? 1.0
-            : (isMinimized ? 1.0 : 0.0)
-        searchItemView?.chromeMorphContentAlpha = 1.0
-        searchItemView?.isUserInteractionEnabled = true
-        searchItemView?.accessibilityElementsHidden = false
+        searchItemView?.chromeMorphMaterialAlpha = usesMovingSearch
+            && (usesNativeSearchMerge || isMinimized || !isSearchInside) ? 1.0 : 0.0
+        searchItemView?.chromeMorphContentAlpha = usesMovingSearch ? 1.0 : 0.0
+        searchItemView?.isUserInteractionEnabled = usesMovingSearch
+        searchItemView?.accessibilityElementsHidden = !usesMovingSearch
+        updateInsideSearchGlyphOwnership(usesMovingSearch: usesMovingSearch)
     }
 
-    /// Geometry owns the merge clock. Native material stays alive at full
-    /// opacity and `UIGlassContainerEffect` decides when the overlapping Search
-    /// lobe is still part of the pill and when it has separated. The Search
-    /// icon has one stable owner and trajectory; the pixel overlay contributes
-    /// only the expanded title, so no late icon handoff can jump vertically.
+    private func updateInsideSearchGlyphOwnership(usesMovingSearch: Bool) {
+        guard hasIntegratedSearchSlot, let index = insideSearchIndex else { return }
+        for views in [itemViews, selectedItemViews] where views.indices.contains(index) {
+            views[index].hidesIconForSearchMorph = usesMovingSearch
+        }
+        if itemViews.indices.contains(index) {
+            itemViews[index].isAccessibilityElement = !usesMovingSearch
+            itemViews[index].accessibilityElementsHidden = usesMovingSearch
+            itemViews[index].accessibilityTraits = selectedIndex == index ? [.button, .selected] : .button
+        }
+    }
+
+    /// Expanded Search uses the same content and press surface as every tab.
+    /// Only the merge/split animation leases its glyph to the detached button;
+    /// the settled expanded endpoint returns it to the pill's content planes.
     private func updateMinimizeContentVisibility(
         minimized: Bool,
         transition: ContainedViewLayoutTransition
     ) {
         minimizeContentAnimationGeneration &+= 1
         let generation = minimizeContentAnimationGeneration
+        isInsideSearchMorphing = hasIntegratedSearchSlot && transition.isAnimated
         let regularViews = itemViews + selectedItemViews
         let expandedSearch = expandedSearchItemView
         let minimizedSearch = searchItemView
         let minimizedIcon = minimizedIconNode?.view
         let nativeMerge = usesNativeSearchMerge
+        let separateSearch = !isSearchInside
+        let integratedSearch = hasIntegratedSearchSlot
 
-        // Search's moving glass host is the one stable interaction and
-        // accessibility owner at both endpoints. The expanded TabBarItemView
-        // is pixels only and therefore cannot steal a press from native glass.
+        // During the split the moving glyph starts at the normal tab icon's
+        // exact frame, then follows the independently deforming Search lobe.
         expandedSearch?.isUserInteractionEnabled = false
         expandedSearch?.accessibilityElementsHidden = true
         minimizedSearch?.isUserInteractionEnabled = !isSearchActive
@@ -622,6 +711,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         minimizedSearch?.alpha = 1.0
         minimizedSearch?.chromeMorphKeepsContentIndependentOfMaterial = !nativeMerge
         minimizedSearch?.chromeMorphContentAlpha = 1.0
+        updateInsideSearchGlyphOwnership(usesMovingSearch: true)
         if nativeMerge {
             // Never fade or replace a live native Search effect. Its overlap
             // with the pill is resolved by their shared container effect.
@@ -633,14 +723,15 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             expandedSearch?.alpha = minimized ? 0.0 : 1.0
             minimizedIcon?.alpha = minimized ? 1.0 : 0.0
             minimizedSearch?.alpha = 1.0
-            minimizedSearch?.chromeMorphMaterialAlpha = nativeMerge
-                ? 1.0
-                : (minimized ? 1.0 : 0.0)
-            minimizedSearch?.chromeMorphContentAlpha = 1.0
+            let usesMovingSearch = !integratedSearch || minimized
+            minimizedSearch?.chromeMorphMaterialAlpha = usesMovingSearch
+                && (nativeMerge || minimized || separateSearch) ? 1.0 : 0.0
+            minimizedSearch?.chromeMorphContentAlpha = usesMovingSearch ? 1.0 : 0.0
         }
 
         guard transition.isAnimated else {
             applyEndpoint()
+            synchronizeSearchChromeEndpoint()
             return
         }
 
@@ -678,19 +769,29 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
                         // over the same interval.
                         expandedSearch?.alpha = 1.0
                         if !nativeMerge {
-                            minimizedSearch?.chromeMorphMaterialAlpha = 0.0
+                            minimizedSearch?.chromeMorphMaterialAlpha = separateSearch ? 1.0 : 0.0
                         }
                     }
                 }
             },
             completion: { [weak self] _ in
                 guard self?.minimizeContentAnimationGeneration == generation else { return }
+                self?.isInsideSearchMorphing = false
                 applyEndpoint()
+                // Search opens while the pill is still minimizing. Its
+                // trigger must remain hidden behind the new input/close row.
+                if self?.isSearchActive == true {
+                    self?.setSearchTriggerHiddenForSearchMode(true)
+                } else {
+                    self?.synchronizeSearchChromeEndpoint()
+                }
             }
         )
     }
 
     private func forceExpandedWithoutMorph() {
+        minimizeContentAnimationGeneration &+= 1
+        isInsideSearchMorphing = false
         guard isMinimized else {
             pendingMinimizeTransition = nil
             return
@@ -705,10 +806,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         expandedSearchItemView?.accessibilityElementsHidden = true
         searchItemView?.alpha = 1.0
         searchItemView?.chromeMorphKeepsContentIndependentOfMaterial = !usesNativeSearchMerge
-        searchItemView?.chromeMorphMaterialAlpha = usesNativeSearchMerge ? 1.0 : 0.0
+        searchItemView?.chromeMorphMaterialAlpha = usesNativeSearchMerge || !isSearchInside ? 1.0 : 0.0
         searchItemView?.chromeMorphContentAlpha = 1.0
         searchItemView?.isUserInteractionEnabled = !isSearchActive
         searchItemView?.accessibilityElementsHidden = isSearchActive
+        synchronizeSearchChromeEndpoint()
         setNeedsLayout()
     }
 
@@ -736,9 +838,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     /// mode). The 48×48 glass capsule provides the surrounding chrome;
     /// the icon itself doesn't need to grow.
     private func refreshMinimizedIconImage() {
-        guard let icon = minimizedIconNode, let raw = activeTabIcon() else { return }
-        icon.image = raw.withRenderingMode(.alwaysTemplate)
-        icon.tintColor = resolvedChromeColor(theme.tabBarSelectedIconColor)
+        guard let icon = minimizedIconNode else { return }
+        icon.image = activeTabIcon()?.withRenderingMode(.alwaysTemplate)
+        icon.tintColor = minimizedPrimaryTint
     }
 
     private func handleMinimizedActiveTabTap() {
@@ -747,8 +849,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             return
         }
         guard isMinimized else { return }
+        let primaryIndex = resolvedMinimizedPrimaryIndex
         onExpandRequested?()
-        tabSelected?(selectedIndex)
+        if let primaryIndex {
+            tabSelected?(primaryIndex)
+        }
     }
 
     #if DEBUG
@@ -786,10 +891,8 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
 
     /// Resolves the reference layout for the expanded liquid-glass row.
     ///
-    /// The whole row is capped and centered first. With Search, the expanded
-    /// endpoint is one full-width surface and Search occupies its final slot;
-    /// only the minimized endpoint detaches Search into a trailing circle.
-    /// Without Search the pill keeps the content-sized behaviour.
+    /// Search placement comes only from the item: inside shares a tab slot,
+    /// separate reserves a trailing circle and a gap beside the pill.
     private func expandedChromeLayout(
         in size: CGSize,
         itemCount: Int,
@@ -798,6 +901,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         let sideInset = max(0.0, theme.sideInset)
         let horizontalCapacity = max(0.0, size.width - sideInset * 2.0)
         let hasSearchItem = searchItem != nil
+        let hasSeparateSearch = hasSearchItem && !isSearchInside
+        let searchDiameter = min(theme.pillHeight, horizontalCapacity)
+        let searchGap = hasSeparateSearch ? max(0.0, theme.showcaseSpacing) : 0.0
         // Four tabs (or a Search slot) use the production screen margins.
         // screen margins. Compact bars with up to three tabs keep the
         // centered, content-sized geometry.
@@ -808,11 +914,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         let rowX = usesFixedScreenMargins ? sideInset : max(sideInset, (size.width - rowWidth) / 2.0)
         let pillY = size.height - effectiveBottomInset - theme.pillHeight
 
-        let maximumPillWidth = rowWidth
+        let maximumPillWidth = max(0.0, rowWidth - (hasSeparateSearch ? searchDiameter + searchGap : 0.0))
         let preferredPillWidth: CGFloat
         if itemCount > 0 {
             preferredPillWidth = max(0.0, theme.innerPadding * 2.0)
-                + CGFloat(itemCount + (hasSearchItem ? 1 : 0))
+                + CGFloat(itemCount + additionalSearchSlotCount)
                     * max(0.0, theme.preferredItemWidth)
         } else {
             preferredPillWidth = 0.0
@@ -824,7 +930,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         let pillWidth = usesFixedScreenMargins
             ? maximumPillWidth
             : min(maximumPillWidth, preferredPillWidth)
-        let pillX = rowX + (rowWidth - pillWidth) / 2.0
+        let pillX = hasSeparateSearch ? rowX : rowX + (rowWidth - pillWidth) / 2.0
         let basePillFrame = CGRect(
             x: pillX,
             y: pillY,
@@ -843,12 +949,19 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         )
 
         let searchFrame: CGRect?
-        if hasSearchItem {
-            let slotCount = max(1, itemCount + 1)
+        if hasSeparateSearch {
+            searchFrame = CGRect(
+                x: rowX + rowWidth - searchDiameter - resolvedInset,
+                y: pillY,
+                width: searchDiameter,
+                height: theme.pillHeight
+            )
+        } else if hasSearchItem {
+            let slotCount = max(1, itemCount + additionalSearchSlotCount)
             let slotAreaWidth = max(0.0, pillFrame.width - theme.innerPadding * 2.0)
             let slotWidth = slotAreaWidth / CGFloat(slotCount)
             searchFrame = CGRect(
-                x: pillFrame.minX + theme.innerPadding + CGFloat(itemCount) * slotWidth,
+                x: pillFrame.minX + theme.innerPadding + CGFloat(searchSlotIndex) * slotWidth,
                 y: pillFrame.minY,
                 width: slotWidth,
                 height: pillFrame.height
@@ -1138,9 +1251,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     }
 
     private func activeTabIcon() -> UIImage? {
-        guard selectedIndex < itemViews.count else { return nil }
-        let item = items[selectedIndex]
-        return item.selectedImage ?? item.image
+        guard let index = resolvedMinimizedPrimaryIndex else { return nil }
+        let item = items[index]
+        return index == selectedIndex ? (item.selectedImage ?? item.image) : item.image
     }
 
     // -- Positioning
@@ -1995,9 +2108,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         selectedItemViews.forEach { $0.refreshAppearance(colorTraitCollection: colorTraits) }
         expandedSearchItemView?.refreshAppearance(colorTraitCollection: colorTraits)
         legacySearchItemView?.refreshAppearance(colorTraitCollection: colorTraits)
-        minimizedIconNode?.tintColor = resolvedChromeColor(theme.tabBarSelectedIconColor)
+        minimizedIconNode?.tintColor = minimizedPrimaryTint
         liquidLensView.glassTintColor = tabBarChromeTint
-        searchItemView?.contentTintColor = resolvedChromeColor(theme.tabBarIconColor)
+        updateSearchSelection()
         searchItemView?.glassTintColor = tabBarChromeTint
         searchItemView?.glassStyle = chromeGlassAppearance.viewStyle
         searchItemView?.isDarkAppearance = isEffectivelyDark
@@ -2094,6 +2207,10 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         }
 
         if theme.appearanceStyle == .legacy {
+            guard !isSearchInside else {
+                setNeedsLayout()
+                return
+            }
             let legacyItem = AetherTabBarItem(
                 title: item.title ?? "Search",
                 image: item.image,
@@ -2118,25 +2235,27 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         let expandedItem = AetherTabBarItem(
             title: item.title ?? "Search",
             image: item.image ?? item.selectedImage,
-            selectedImage: item.selectedImage ?? item.image
+            selectedImage: item.selectedImage ?? item.image,
+            badgeValue: item.badgeValue
         )
-        let expandedView = TabBarItemView(
-            item: expandedItem,
-            theme: theme,
-            selected: false,
-            colorTraitCollection: chromeColorTraitCollection
-        )
-        expandedView.alpha = isMinimized ? 0.0 : 1.0
-        // Pixel-only expanded endpoint. Search's stable GlassBarButton below
-        // it owns touch, native press feedback, and accessibility throughout
-        // the morph, so there is no responder/AX handoff at completion.
-        expandedView.isUserInteractionEnabled = false
-        expandedView.isAccessibilityElement = false
-        expandedView.accessibilityElementsHidden = true
-        expandedView.accessibilityIdentifier = "aether.tabbar.search.expandedVisual"
-        expandedView.hidesIconForSearchMorph = true
-        addSubview(expandedView)
-        expandedSearchItemView = expandedView
+        if isSearchInside && !hasIntegratedSearchSlot {
+            let expandedView = TabBarItemView(
+                item: expandedItem,
+                theme: theme,
+                selected: insideSearchIndex == selectedIndex,
+                colorTraitCollection: chromeColorTraitCollection
+            )
+            expandedView.alpha = isMinimized ? 0.0 : 1.0
+            // The stable GlassBarButton owns the glyph and interaction
+            // throughout the morph. This overlay draws only the tab label.
+            expandedView.isUserInteractionEnabled = false
+            expandedView.isAccessibilityElement = false
+            expandedView.accessibilityElementsHidden = true
+            expandedView.accessibilityIdentifier = "aether.tabbar.search.expandedVisual"
+            expandedView.hidesIconForSearchMorph = true
+            addSubview(expandedView)
+            expandedSearchItemView = expandedView
+        }
 
         let button = GlassBarButtonView(
             icon: item.image ?? item.selectedImage,
@@ -2145,15 +2264,31 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             appearanceStyle: theme.appearanceStyle
         )
         button.glassStyle = chromeGlassAppearance.viewStyle
-        button.contentTintColor = resolvedChromeColor(theme.tabBarIconColor)
+        button.contentTintColor = searchIconColor
         button.glassTintColor = tabBarChromeTint
         button.isDarkAppearance = isEffectivelyDark
-        button.action = { [weak item] _ in item?.action?() }
+        button.action = { [weak self] _ in self?.handleSearchItemTap() }
+        if isSearchInside {
+            let pan = TabSelectionRecognizer(target: self, action: #selector(lensPanned(_:)))
+            pan.delegate = self
+            button.addGestureRecognizer(pan)
+            for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
+                let swipe = UISwipeGestureRecognizer(target: self, action: #selector(lensSwiped(_:)))
+                swipe.direction = direction
+                swipe.delegate = self
+                button.addGestureRecognizer(swipe)
+            }
+            button.longPressAction = { [weak self, weak button] gesture in
+                guard let self, let button, let index = self.insideSearchIndex,
+                      self.interactionsEnabled, self.searchItem?.isEnabled == true else { return }
+                self.tabLongPressed?(index, button, gesture)
+            }
+        }
         button.alpha = 1.0
         button.chromeMorphKeepsContentIndependentOfMaterial = !usesNativeSearchMerge
         button.chromeMorphMaterialAlpha = usesNativeSearchMerge
             ? 1.0
-            : (isMinimized ? 1.0 : 0.0)
+            : (isMinimized || !isSearchInside ? 1.0 : 0.0)
         button.chromeMorphContentAlpha = 1.0
         button.isUserInteractionEnabled = !isSearchActive
         button.isAccessibilityElement = true
@@ -2166,12 +2301,42 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         // UIGlassContainerEffect and performs the optical union itself.
         tabBarGlassContainer.contentView.addSubview(button)
         searchItemView = button
+        updateSearchSelection()
+        synchronizeSearchChromeEndpoint()
         setNeedsLayout()
     }
 
     @objc private func legacySearchItemTapped(_ recognizer: UITapGestureRecognizer) {
         guard recognizer.state == .ended else { return }
-        searchItem?.action?()
+        handleSearchItemTap()
+    }
+
+    private func handleSearchItemTap() {
+        guard interactionsEnabled, searchItem?.isEnabled == true else {
+            disabledPressed?()
+            return
+        }
+        if isSearchInside, let index = insideSearchIndex {
+            activateItem(at: index)
+        } else if let action = searchItem?.action {
+            action()
+        } else {
+            onSearchRequested?()
+        }
+    }
+
+    private func updateSearchSelection() {
+        let selected = isSearchInside && insideSearchIndex == selectedIndex
+        expandedSearchItemView?.isSelected = selected
+        searchItemView?.contentTintColor = searchIconColor
+        searchItemView?.updateIcon(
+            selected ? (searchItem?.selectedImage ?? searchItem?.image)
+                : (searchItem?.image ?? searchItem?.selectedImage)
+        )
+        searchItemView?.accessibilityTraits = selected ? [.button, .selected] : .button
+        if let index = insideSearchIndex, itemViews.indices.contains(index) {
+            itemViews[index].accessibilityTraits = selected ? [.button, .selected] : .button
+        }
     }
 
     private func updateScrollMinimizeArmingScale(
@@ -2271,9 +2436,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             transition: activeTransition
         )
 
-        // The expanded representation remains parked at its final slot while
-        // the moving Search control travels. It is a non-interactive pixel
-        // overlay used only for the icon+label endpoint handoff.
+        // The compatibility overlay is used only by a standalone inside
+        // Search item without a controller slot. Integrated Search content
+        // belongs to the normal tab views inside the lens.
         if let expandedSearchItemView, let searchFrame = expandedLayout.searchFrame {
             activeTransition.updateFrame(view: expandedSearchItemView, frame: searchFrame)
         }
@@ -2316,12 +2481,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
 
             // Tab item views ride along inside the lens; keep them at
             // their normal frames so re-expand finds them in place, but
-            // they're invisible while the lens alpha is 0. No transition
-            // needed — they're not visible during the morph.
+            // their own alpha fades to zero while the lens stays visible.
             let itemHeight = theme.pillHeight
             let pillWidthForItems = expandedLayout.pillFrame.width
             let tabAreaWidth = pillWidthForItems - innerPadding * 2.0
-            let slotCount = count + (searchItem == nil ? 0 : 1)
+            let slotCount = count + additionalSearchSlotCount
             let itemWidth = max(1.0, tabAreaWidth / CGFloat(max(1, slotCount)))
             for (index, itemView) in itemViews.enumerated() {
                 itemView.frame = CGRect(x: innerPadding + CGFloat(index) * itemWidth, y: 0.0, width: itemWidth, height: itemHeight)
@@ -2348,11 +2512,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             return
         }
 
-        // Expanded layout — one pill with an optional final Search slot.
+        // Expanded layout — Search is either a normal pill slot or a circle
+        // outside the pill, according to the item's explicit style.
         let lensSize = expandedLayout.pillFrame.size
 
-        // The material-less Search overlay remains a sibling for independent
-        // press handling, but its pixels sit inside this single glass pill.
+        // Every integrated tab shares this glass pill and its press surface.
         let containerFrame = expandedLayout.pillFrame
         activeTransition.updateFrame(view: pillGeometryHost, frame: containerFrame)
 
@@ -2367,12 +2531,17 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         // Lens covers the whole unified pill.
         activeTransition.updateFrame(view: liquidLensView, frame: CGRect(origin: .zero, size: lensSize))
 
-        // Keep the dormant minimized material at the Search slot while
-        // expanded; it is alpha-zero, so the next detach begins from the
-        // correct model geometry without reparenting a live glass effect.
+        // Keep Search in the shared glass group at both endpoints, so an
+        // inside slot can detach without reparenting its live material.
         if let searchButton = searchItemView, let searchFrame = expandedLayout.searchFrame {
             activeTransition.updateFrame(view: searchButton, frame: searchFrame)
-            let iconFrame = expandedSearchItemView?.liquidIconFrame(
+            let iconOwner: TabBarItemView?
+            if let index = insideSearchIndex, itemViews.indices.contains(index) {
+                iconOwner = itemViews[index]
+            } else {
+                iconOwner = expandedSearchItemView
+            }
+            let iconFrame = iconOwner?.liquidIconFrame(
                 in: CGRect(origin: .zero, size: searchFrame.size)
             ) ?? CGRect(origin: .zero, size: searchFrame.size)
             searchButton.updateChromeMorphIconFrame(
@@ -2382,7 +2551,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         }
         // Tab items fill the pill width with inner side padding.
         let tabAreaWidth = lensSize.width - innerPadding * 2.0
-        let slotCount = count + (searchItem == nil ? 0 : 1)
+        let slotCount = count + additionalSearchSlotCount
         let itemWidth = max(1.0, tabAreaWidth / CGFloat(max(1, slotCount)))
         // `LiquidLensView` applies its own 4pt inset below. Expanding the
         // selection frame by the pill padding keeps the rendered lens at the
@@ -2493,6 +2662,17 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             )
             selectedItemView.tag = index
             selectedItemView.isUserInteractionEnabled = false
+            let isInsideSearch = isSearchInside && insideSearchIndex == index
+                && theme.style == .liquidGlass
+            itemView.alpha = isMinimized ? 0.0 : 1.0
+            selectedItemView.alpha = itemView.alpha
+            if isInsideSearch {
+                // Search lives on the same normal/selected content planes as
+                // every tab, so pressing it deforms the entire pill.
+                itemView.accessibilityLabel = item.title
+                itemView.accessibilityAction = { [weak self] in self?.activateItem(at: index) }
+                selectedItemView.accessibilityElementsHidden = true
+            }
 
             if theme.style == .liquidGlass {
                 liquidLensView.contentView.addSubview(itemView)
@@ -2505,10 +2685,12 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         }
 
         refreshLegacyTabItemVibrancy()
+        updateInsideSearchGlyphOwnership(usesMovingSearch: isMinimized || isInsideSearchMorphing)
         setNeedsLayout()
     }
 
     private func updateSelection(animated: Bool) {
+        updateSearchSelection()
         for (index, itemView) in itemViews.enumerated() {
             let isSelected = theme.style == .legacy && index == selectedIndex
             if animated {
@@ -2525,8 +2707,8 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
                 }
             }
         }
-        // Refresh the collapsed-pill icon when the active tab changes —
-        // the minimized circle shows whichever tab is currently selected.
+        // Search has its own trailing circle; the leading circle retains
+        // the last ordinary tab when inside Search is selected.
         if let icon = minimizedIconNode {
             let newImage = activeTabIcon()?.withRenderingMode(.alwaysTemplate)
             if animated, isMinimized {
@@ -2536,11 +2718,11 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
                     options: [.transitionCrossDissolve, .beginFromCurrentState]
                 ) {
                     icon.image = newImage
-                    icon.tintColor = self.resolvedChromeColor(self.theme.tabBarSelectedIconColor)
+                    icon.tintColor = self.minimizedPrimaryTint
                 }
             } else {
                 icon.image = newImage
-                icon.tintColor = resolvedChromeColor(theme.tabBarSelectedIconColor)
+                icon.tintColor = minimizedPrimaryTint
             }
         }
         setNeedsLayout()
@@ -2567,6 +2749,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
 
         selectedIndex = index
         tabSelected?(index)
+        if isSearchInside, index == insideSearchIndex {
+            searchItem?.action?()
+        }
     }
 
     private func index(at point: CGPoint) -> Int? {
@@ -2580,7 +2765,8 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     }
 
     @objc private func lensPanned(_ recognizer: TabSelectionRecognizer) {
-        guard theme.style == .liquidGlass, !items.isEmpty else { return }
+        guard theme.style == .liquidGlass, !items.isEmpty,
+              !isMinimized, !isSearchActive else { return }
 
         switch recognizer.state {
         case .began:
@@ -2593,7 +2779,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
                 liquidLensView.bounds.width / 2.0
             )
             let itemAreaWidth = max(0.0, liquidLensView.bounds.width - contentOriginX * 2.0)
-            let slotCount = items.count + (searchItem == nil ? 0 : 1)
+            let slotCount = items.count + additionalSearchSlotCount
             let itemW = max(1.0, itemAreaWidth / CGFloat(max(1, slotCount)))
             let currentIndex = indexInLens(x: location.x) ?? idx
             selectionGestureState = SelectionGestureState(
@@ -2673,7 +2859,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
             liquidLensView.bounds.width / 2.0
         )
         let itemAreaWidth = max(0.0, liquidLensView.bounds.width - contentOriginX * 2.0)
-        let slotCount = items.count + (searchItem == nil ? 0 : 1)
+        let slotCount = items.count + additionalSearchSlotCount
         let itemW = max(1.0, itemAreaWidth / CGFloat(max(1, slotCount)))
         let contentX = max(0.0, min(itemAreaWidth, x - contentOriginX))
         let idx = Int((contentX / itemW).rounded(.down))
@@ -2831,6 +3017,14 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
 // MARK: - TabBarItemView
 
 private final class TabBarItemView: UIView {
+    var accessibilityAction: (() -> Void)?
+
+    override func accessibilityActivate() -> Bool {
+        guard let accessibilityAction else { return super.accessibilityActivate() }
+        accessibilityAction()
+        return true
+    }
+
     private let imageNode: ASImageNode
     private let titleNode: ASTextNode
     private let badgeView: NavigationBarBadgeView
@@ -2937,6 +3131,13 @@ private final class TabBarItemView: UIView {
     func updateTheme(_ theme: TabBarView.Theme, colorTraitCollection: UITraitCollection) {
         self.theme = theme
         self.colorTraitCollectionOverride = colorTraitCollection
+        updateAppearance()
+        setNeedsLayout()
+    }
+
+    func updateItem(_ item: AetherTabBarItem) {
+        self.item = item
+        badgeView.text = item.badgeValue ?? ""
         updateAppearance()
         setNeedsLayout()
     }

@@ -86,6 +86,18 @@ enum ExampleRootFactory {
     static func makeRoot(window: AetherNativeWindow, observer: inout NSObjectProtocol?) -> UIViewController {
         let store = ExampleAppearanceStore.shared
         let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--modal-navigation-demo") {
+            let dark = arguments.contains("--modal-navigation-dark")
+            store.update(dark: dark)
+            let root = TextureModalNavigationDemoController(automaticallyPresent: true)
+            root.overrideUserInterfaceStyle = dark ? .dark : .light
+            let navigation = AetherNavigationController(mode: .single)
+            navigation.setViewControllers([root], animated: false)
+            navigation.updateAppearance(store.appearance)
+            window.overrideUserInterfaceStyle = dark ? .dark : .light
+            window.backgroundColor = store.backgroundColor
+            return navigation
+        }
         #if DEBUG
         let sharedGroupAutoplay = arguments.contains("--animation-reference-shared-group-autoplay")
         #else
@@ -492,6 +504,13 @@ final class TextureComponentsController: AetherViewController {
     private func reloadRows() {
         let rows: [TextureMenuItem] = [
             TextureMenuItem(
+                id: "modal-navigation",
+                title: "Modal Navigation",
+                subtitle: "Playlist form, search, push / pop, two sheet sizes",
+                iconName: "rectangle.stack.badge.plus",
+                tintColor: .systemPink
+            ) { [weak self] in self?.push(TextureModalNavigationDemoController()) },
+            TextureMenuItem(
                 id: "animation-reference",
                 title: "Animation Reference",
                 subtitle: "Edit / filter menus, profile, back badge, camera",
@@ -561,6 +580,364 @@ final class TextureComponentsController: AetherViewController {
     private func applyAppearance() {
         view.backgroundColor = ExampleAppearanceStore.shared.backgroundColor
         node.backgroundColor = ExampleAppearanceStore.shared.backgroundColor
+    }
+}
+
+// MARK: - Modal Navigation Demo
+
+private final class TextureModalNavigationDemoController: AetherViewController,
+    UITableViewDataSource {
+    private let table = UITableView(frame: .zero, style: .plain)
+    private let automaticallyPresent: Bool
+    private var hasPresented = false
+    private let titles = ["Favorites", "Evening drive", "Indigo", "First light", "Weekend", "Moonlight"]
+    private let colors: [UIColor] = [.systemPink, .systemOrange, .systemIndigo, .systemTeal, .systemPurple, .systemBlue]
+
+    init(automaticallyPresent: Bool = false) {
+        self.automaticallyPresent = automaticallyPresent
+        super.init(navigationBarPresentationData: .defaultTheme(edgeColor: .systemBackground))
+    }
+
+    required init(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.title = "All playlists"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Create", style: .plain, target: self, action: #selector(showModal)
+        )
+        view.backgroundColor = .systemBackground
+        table.dataSource = self
+        table.rowHeight = 90
+        table.contentInsetAdjustmentBehavior = .never
+        table.accessibilityIdentifier = "modal-demo-presenting-list"
+        view.insertSubview(table, at: 0)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if automaticallyPresent, !hasPresented {
+            hasPresented = true
+            DispatchQueue.main.async { [weak self] in self?.showModal() }
+        }
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        let top = max(layout.safeInsets.top, cleanNavigationHeight)
+        transition.updateFrame(view: table, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top)))
+        table.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: layout.safeInsets.bottom, right: 0)
+        table.scrollIndicatorInsets = table.contentInset
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 18 }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "playlist")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "playlist")
+        let index = indexPath.row % titles.count
+        cell.textLabel?.text = "\(titles[index]) \(indexPath.row + 1)"
+        cell.detailTextLabel?.text = "\(24 + indexPath.row * 7) tracks"
+        cell.imageView?.image = UIImage(systemName: "square.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 52))
+        cell.imageView?.tintColor = colors[index]
+        cell.selectionStyle = .none
+        return cell
+    }
+
+    @objc private func showModal() {
+        guard presentedViewController == nil else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        let form = TextureModalPlaylistFormController()
+        let modal = AetherModalNavigationController(
+            rootViewController: form,
+            config: .init(
+                detents: [.stage1, .stage2],
+                initialDetent: arguments.contains("--modal-navigation-stage1") ? .stage1 : .stage2
+            )
+        )
+        if arguments.contains("--modal-navigation-legacy") {
+            modal.appearanceStyle = .legacy
+        }
+        if arguments.contains("--modal-navigation-dark") {
+            modal.overrideUserInterfaceStyle = .dark
+        }
+        form.modal = modal
+        if arguments.contains("--modal-navigation-detail") {
+            let tracks = TextureModalTrackListController()
+            tracks.modal = modal
+            modal.setViewControllers([form, tracks], animated: false)
+        }
+        modal.view.accessibilityIdentifier = "modal-navigation-demo"
+        present(modal, animated: true) { [weak modal] in
+            #if DEBUG
+            guard let modal, arguments.contains("--modal-navigation-autoplay") else { return }
+            let steps: [(TimeInterval, () -> Void)] = [
+                (1.0, { [weak modal] in modal?.setDetent(.stage1, animated: true) }),
+                (3.0, { [weak modal] in
+                    let tracks = TextureModalTrackListController()
+                    tracks.modal = modal
+                    modal?.pushViewController(tracks, animated: true)
+                }),
+                (5.0, { [weak modal] in modal?.setDetent(.stage2, animated: true) }),
+                (7.0, { [weak modal] in modal?.popViewController(animated: true) }),
+                (9.0, { [weak modal] in
+                    let tracks = TextureModalTrackListController()
+                    tracks.modal = modal
+                    modal?.pushViewController(tracks, animated: true)
+                }),
+                (11.0, { [weak modal] in modal?.setDetent(.stage1, animated: true) }),
+                (13.0, { [weak modal] in modal?.popViewController(animated: true) }),
+                (15.0, { [weak modal] in modal?.setDetent(.stage2, animated: true) })
+            ]
+            for (delay, action) in steps {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak modal] in
+                    guard modal?.presentingViewController != nil else { return }
+                    action()
+                }
+            }
+            #endif
+        }
+    }
+}
+
+private final class TextureModalDemoFooter: UIView {
+    let button = UIButton(type: .system)
+
+    init(title: String, action: @escaping () -> Void) {
+        super.init(frame: .zero)
+        var configuration = UIButton.Configuration.filled()
+        configuration.title = title
+        configuration.cornerStyle = .large
+        button.configuration = configuration
+        button.accessibilityIdentifier = "modal-demo-footer"
+        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        addSubview(button)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        button.frame = CGRect(x: 16, y: 8, width: max(0, bounds.width - 32), height: 48)
+    }
+}
+
+private final class TextureModalPlaylistFormController: AetherViewController, AetherModalContent {
+    weak var modal: AetherModalNavigationController?
+    private let scroll = UIScrollView()
+    private let stack = UIStackView()
+    private let nameField = UITextField()
+    private var didAlignInitialTop = false
+    private lazy var saveFooter = TextureModalDemoFooter(title: "Save playlist") { [weak self] in
+        self?.view.endEditing(true)
+        self?.modal?.dismiss(animated: true)
+    }
+
+    var modalFooterView: UIView? { saveFooter }
+    var modalFooterHeight: CGFloat { 76 }
+    var modalPrimaryScrollView: UIScrollView? { scroll }
+    override var primaryScrollViewForChrome: UIScrollView? { scroll }
+
+    init() { super.init(navigationBarPresentationData: .defaultTheme(edgeColor: .systemBackground)) }
+    required init(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.title = "Create playlist"
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(close)
+        )
+        navigationItem.leftBarButtonItem?.accessibilityLabel = "Close playlist"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Resize", style: .plain, target: self, action: #selector(toggleDetent)
+        )
+        view.backgroundColor = .systemBackground
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.keyboardDismissMode = .interactive
+        scroll.alwaysBounceVertical = true
+        scroll.accessibilityIdentifier = "modal-demo-form-scroll"
+        view.insertSubview(scroll, at: 0)
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40)
+        ])
+
+        let addTracks = UIButton(type: .system)
+        var addConfiguration = UIButton.Configuration.tinted()
+        addConfiguration.title = "Add tracks"
+        addConfiguration.image = UIImage(systemName: "music.note.list")
+        addConfiguration.imagePadding = 10
+        addTracks.configuration = addConfiguration
+        addTracks.accessibilityIdentifier = "modal-demo-push"
+        addTracks.addTarget(self, action: #selector(showTracks), for: .touchUpInside)
+        addTracks.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        stack.addArrangedSubview(addTracks)
+
+        nameField.borderStyle = .roundedRect
+        nameField.placeholder = "Playlist name"
+        nameField.accessibilityLabel = "Playlist name"
+        nameField.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        stack.addArrangedSubview(nameField)
+
+        let artwork = UIImageView(image: UIImage(systemName: "photo.on.rectangle.angled"))
+        artwork.contentMode = .center
+        artwork.tintColor = .secondaryLabel
+        artwork.backgroundColor = .secondarySystemBackground
+        artwork.layer.cornerRadius = 18
+        artwork.heightAnchor.constraint(equalToConstant: 110).isActive = true
+        artwork.isAccessibilityElement = true
+        artwork.accessibilityLabel = "Playlist artwork"
+        stack.addArrangedSubview(artwork)
+
+        let description = UITextView()
+        description.font = .preferredFont(forTextStyle: .body)
+        description.backgroundColor = .secondarySystemBackground
+        description.layer.cornerRadius = 12
+        description.text = "A soundtrack for the way home."
+        description.accessibilityLabel = "Playlist description"
+        description.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        stack.addArrangedSubview(description)
+
+        let privacy = UIStackView()
+        privacy.axis = .horizontal
+        let label = UILabel()
+        label.text = "Private playlist"
+        label.font = .preferredFont(forTextStyle: .body)
+        let privacySwitch = UISwitch()
+        privacySwitch.accessibilityLabel = "Private playlist"
+        privacy.addArrangedSubview(label)
+        privacy.addArrangedSubview(privacySwitch)
+        stack.addArrangedSubview(privacy)
+
+        let hint = UILabel()
+        hint.text = "Drag the sheet to change its size. Swipe from the left edge on the track list to go back; reverse the swipe to cancel."
+        hint.font = .preferredFont(forTextStyle: .footnote)
+        hint.textColor = .secondaryLabel
+        hint.numberOfLines = 0
+        stack.addArrangedSubview(hint)
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        transition.updateFrame(view: scroll, frame: CGRect(origin: .zero, size: layout.size))
+        scroll.contentInset = UIEdgeInsets(
+            top: cleanNavigationHeight + 12, left: 0,
+            bottom: max(layout.safeInsets.bottom, layout.additionalInsets.bottom) + 16, right: 0
+        )
+        scroll.scrollIndicatorInsets = scroll.contentInset
+        if !didAlignInitialTop, cleanNavigationHeight > 0 {
+            didAlignInitialTop = true
+            scroll.contentOffset.y = -scroll.contentInset.top
+        }
+    }
+
+    @objc private func close() { modal?.dismiss(animated: true) }
+    @objc private func toggleDetent() {
+        view.endEditing(true)
+        guard let modal else { return }
+        modal.setDetent(modal.currentDetent == .stage1 ? .stage2 : .stage1, animated: true)
+    }
+    @objc private func showTracks() {
+        view.endEditing(true)
+        let tracks = TextureModalTrackListController()
+        tracks.modal = modal
+        modal?.pushViewController(tracks, animated: true)
+    }
+}
+
+private final class TextureModalTrackListController: AetherViewController,
+    AetherModalContent, UITableViewDataSource, UITableViewDelegate, AetherSearchControllerDelegate {
+    weak var modal: AetherModalNavigationController?
+    private let table = UITableView(frame: .zero, style: .plain)
+    private let trackTitles = ["First light", "Night drive", "After the rain", "Indigo sky", "Close to home", "Morning tide", "City lights", "Long way back"]
+    private var query = ""
+    private var selectedTracks = Set<Int>()
+    private var didAlignInitialTop = false
+    private lazy var doneFooter = TextureModalDemoFooter(title: "Done · 0 tracks") { [weak self] in
+        self?.searchController?.deactivate()
+        self?.modal?.popViewController(animated: true)
+    }
+    private var visibleTracks: [Int] {
+        (0..<40).filter { query.isEmpty || trackTitles[$0 % trackTitles.count].localizedCaseInsensitiveContains(query) }
+    }
+    var modalFooterView: UIView? { doneFooter }
+    var modalFooterHeight: CGFloat { 76 }
+    var modalPrimaryScrollView: UIScrollView? { table }
+    override var primaryScrollViewForChrome: UIScrollView? { table }
+
+    init() { super.init(navigationBarPresentationData: .defaultTheme(edgeColor: .systemBackground)) }
+    required init(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.title = "Choose tracks"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Resize", style: .plain, target: self, action: #selector(toggleDetent)
+        )
+        view.backgroundColor = .systemBackground
+        table.dataSource = self
+        table.delegate = self
+        table.rowHeight = 72
+        table.contentInsetAdjustmentBehavior = .never
+        table.keyboardDismissMode = .interactive
+        table.accessibilityIdentifier = "modal-demo-track-list"
+        view.insertSubview(table, at: 0)
+        let search = AetherSearchController()
+        search.placeholder = "Find a track"
+        search.prefersNavigationBarPlacement = true
+        search.delegate = self
+        searchController = search
+    }
+
+    override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
+        super.containerLayoutUpdated(layout, transition: transition)
+        transition.updateFrame(view: table, frame: CGRect(origin: .zero, size: layout.size))
+        table.contentInset = UIEdgeInsets(
+            top: cleanNavigationHeight, left: 0,
+            bottom: max(layout.safeInsets.bottom, layout.additionalInsets.bottom), right: 0
+        )
+        table.scrollIndicatorInsets = table.contentInset
+        if !didAlignInitialTop, cleanNavigationHeight > 0 {
+            didAlignInitialTop = true
+            table.contentOffset.y = -table.contentInset.top
+        }
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { visibleTracks.count }
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "track")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "track")
+        let index = visibleTracks[indexPath.row]
+        cell.textLabel?.text = trackTitles[index % trackTitles.count]
+        cell.detailTextLabel?.text = "Aether sessions · Track \(index + 1)"
+        cell.imageView?.image = UIImage(systemName: "music.note")
+        cell.imageView?.tintColor = .systemBlue
+        cell.accessoryType = selectedTracks.contains(index) ? .checkmark : .none
+        return cell
+    }
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let index = visibleTracks[indexPath.row]
+        if selectedTracks.contains(index) { selectedTracks.remove(index) }
+        else { selectedTracks.insert(index) }
+        doneFooter.button.configuration?.title = "Done · \(selectedTracks.count) tracks"
+        tableView.reloadRows(at: [indexPath], with: .none)
+    }
+    func searchController(_ controller: AetherSearchController, didChangeText text: String) {
+        query = text
+        table.reloadData()
+    }
+    @objc private func toggleDetent() {
+        searchController?.deactivate()
+        guard let modal else { return }
+        modal.setDetent(modal.currentDetent == .stage1 ? .stage2 : .stage1, animated: true)
     }
 }
 
@@ -749,15 +1126,29 @@ private final class TextureAppearanceGalleryController: AetherViewController {
         stackView.addArrangedSubview(floatingToolbar)
 
         let popup = TextureAppearanceGallerySurface(role: .popup, cornerRadius: 14)
-        popup.heightAnchor.constraint(equalToConstant: 66).isActive = true
+        popup.heightAnchor.constraint(equalToConstant: 112).isActive = true
+        let popupButtons = UIStackView()
+        popupButtons.axis = .vertical
+        popupButtons.alignment = .center
+        popupButtons.spacing = 8
+        popupButtons.translatesAutoresizingMaskIntoConstraints = false
+        popup.contentView.addSubview(popupButtons)
         let popupButton = GlassButton(title: "Open real Aether alert", image: UIImage(systemName: "rectangle.on.rectangle"))
-        popupButton.translatesAutoresizingMaskIntoConstraints = false
         popupButton.action = { [weak self] _ in self?.presentGalleryAlert() }
-        popup.contentView.addSubview(popupButton)
+        popupButtons.addArrangedSubview(popupButton)
+        let sheetButton = GlassButton(title: "Open ActionSheet", image: UIImage(systemName: "list.bullet.rectangle"))
+        sheetButton.action = { [weak self, weak sheetButton] _ in
+            guard let self, let sheetButton else { return }
+            self.presentGalleryActionSheet(from: sheetButton)
+        }
+        popupButtons.addArrangedSubview(sheetButton)
         NSLayoutConstraint.activate([
-            popupButton.centerXAnchor.constraint(equalTo: popup.contentView.centerXAnchor),
-            popupButton.centerYAnchor.constraint(equalTo: popup.contentView.centerYAnchor),
-            popupButton.heightAnchor.constraint(equalToConstant: 40)
+            popupButtons.centerXAnchor.constraint(equalTo: popup.contentView.centerXAnchor),
+            popupButtons.centerYAnchor.constraint(equalTo: popup.contentView.centerYAnchor),
+            popupButtons.leadingAnchor.constraint(greaterThanOrEqualTo: popup.contentView.leadingAnchor, constant: 16),
+            popupButtons.trailingAnchor.constraint(lessThanOrEqualTo: popup.contentView.trailingAnchor, constant: -16),
+            popupButton.heightAnchor.constraint(equalToConstant: 40),
+            sheetButton.heightAnchor.constraint(equalToConstant: 40)
         ])
         stackView.addArrangedSubview(makeSectionTitle("Popup / overlay"))
         stackView.addArrangedSubview(popup)
@@ -840,6 +1231,30 @@ private final class TextureAppearanceGalleryController: AetherViewController {
             textFields: [AetherAlertTextField(placeholder: "Input surface")]
         )
         present(alert, animated: true)
+    }
+
+    private func presentGalleryActionSheet(from sourceView: UIView) {
+        let sheet = AetherActionSheetController(
+            theme: ExampleAppearanceStore.shared.isDark ? .dark : .light,
+            sourceView: sourceView
+        )
+        let titles = [
+            "Только загруженная музыка",
+            "Управление плейлистами",
+            "Порядок треков",
+            "Порядок плейлистов",
+            "Очередь скачивания",
+            "Музыка на устройстве",
+            "Загрузить аудиофайл"
+        ]
+        let items: [AetherActionSheetItem] = [AetherActionSheetTextItem(title: "Медиатека")]
+            + titles.map { title in
+                AetherActionSheetButtonItem(title: title) { [weak sheet] in
+                    sheet?.dismissAnimated()
+                }
+            }
+        sheet.setItemGroups([AetherActionSheetItemGroup(items: items)])
+        present(sheet, animated: true)
     }
 
     private func makeSectionTitle(_ text: String) -> UILabel {

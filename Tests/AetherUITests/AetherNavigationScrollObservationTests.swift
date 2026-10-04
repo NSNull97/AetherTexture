@@ -77,6 +77,172 @@ final class AetherNavigationScrollObservationTests: XCTestCase {
     }
 
     @MainActor
+    func testInactivePageScrollCallbacksCannotHideHostingNavigationEdgeEffect() throws {
+        let data = AetherAppearance.withRuntimeCurrent(.liquidGlassV2) {
+            NavigationBarPresentationData.aetherAppearance()
+        }
+        let first = StandaloneNavigationScrollFixtureController(
+            navigationBarPresentationData: data
+        )
+        let second = StandaloneNavigationScrollFixtureController(
+            navigationBarPresentationData: data
+        )
+        first.chromeScrollView.contentOffset.y = 32.0
+        let pages = AetherPageViewController(
+            pages: [
+                .init(title: "First", viewController: first),
+                .init(title: "Second", viewController: second)
+            ],
+            installViewPagerAsTopBarAccessory: false,
+            navigationBarPresentationData: data
+        )
+        let window = installInWindow(pages)
+        defer { window.isHidden = true }
+        let bar = try XCTUnwrap(pages.navigationBarView as? NavigationBarImpl)
+        let effect = try XCTUnwrap(
+            allSubviews(in: bar).compactMap { $0 as? EdgeEffectView }.first
+        )
+
+        XCTAssertTrue(second.parent === pages)
+        second.updateNavigationBarScrollEdgeOffset(
+            for: second.chromeScrollView,
+            transition: .immediate
+        )
+        XCTAssertEqual(bar.stripeNode.alpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(effect.alpha, 1.0, accuracy: 0.001)
+
+        pages.setSelectedIndex(1, animated: false)
+        XCTAssertEqual(effect.alpha, 0.0, accuracy: 0.001)
+        first.updateNavigationBarScrollEdgeOffset(
+            for: first.chromeScrollView,
+            transition: .immediate
+        )
+        XCTAssertEqual(effect.alpha, 0.0, accuracy: 0.001)
+
+        second.chromeScrollView.contentOffset.y = 32.0
+        second.updateNavigationBarScrollEdgeOffset(
+            for: second.chromeScrollView,
+            transition: .immediate
+        )
+        XCTAssertEqual(effect.alpha, 1.0, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testNavigationEdgeAlphaResolvesActivePageBeforeScrollObservationStarts() {
+        let first = StandaloneNavigationScrollFixtureController()
+        let second = StandaloneNavigationScrollFixtureController()
+        first.chromeScrollView.contentOffset.y = 32.0
+        let pages = AetherPageViewController(
+            pages: [
+                .init(title: "First", viewController: first),
+                .init(title: "Second", viewController: second)
+            ],
+            installViewPagerAsTopBarAccessory: false
+        )
+
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 1.0)
+        pages.setSelectedIndex(1, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 0.0)
+        pages.setSelectedIndex(0, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 1.0)
+    }
+
+    @MainActor
+    func testNavigationEdgeAlphaRetainsManualUpdatesPerPage() {
+        let first = AetherViewController()
+        let second = AetherViewController()
+        let pages = AetherPageViewController(
+            pages: [
+                .init(title: "First", viewController: first),
+                .init(title: "Second", viewController: second)
+            ],
+            installViewPagerAsTopBarAccessory: false
+        )
+        first.applyNavigationBarScrollEdgeAlpha(1.0, transition: .immediate)
+        second.applyNavigationBarScrollEdgeAlpha(0.0, transition: .immediate)
+
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 1.0)
+        pages.setSelectedIndex(1, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 0.0)
+        pages.setSelectedIndex(0, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 1.0)
+    }
+
+    @MainActor
+    func testNavigationEdgeAlphaRetainsSeparateStateForPlainPagesUsingSameDriver() {
+        let pages = AetherPageViewController(
+            pages: [
+                .init(title: "First", viewController: UIViewController()),
+                .init(title: "Second", viewController: UIViewController())
+            ],
+            installViewPagerAsTopBarAccessory: false
+        )
+        pages.applyNavigationBarScrollEdgeAlpha(1.0, transition: .immediate)
+
+        pages.setSelectedIndex(1, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 0.0)
+        pages.applyNavigationBarScrollEdgeAlpha(0.25, transition: .immediate)
+
+        pages.setSelectedIndex(0, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 1.0)
+        pages.setSelectedIndex(1, animated: false)
+        XCTAssertEqual(pages.resolvedNavigationBarScrollEdgeAlpha, 0.25)
+    }
+
+    @MainActor
+    func testLocalChildNavigationBarKeepsScrollUpdatesDuringOuterNavigationTransition() throws {
+        let data = AetherAppearance.withRuntimeCurrent(.liquidGlassV2) {
+            NavigationBarPresentationData.aetherAppearance()
+        }
+        let root = AetherViewController(navigationBarPresentationData: data)
+        let child = StandaloneNavigationScrollFixtureController(
+            navigationBarPresentationData: data
+        )
+        child.chromeScrollView.contentOffset.y = 32.0
+        root.loadViewIfNeeded()
+        root.addChild(child)
+        root.view.addSubview(child.view)
+        child.view.frame = CGRect(x: 0.0, y: 0.0, width: 390.0, height: 844.0)
+        child.didMove(toParent: root)
+        let navigation = AetherNavigationController(rootViewController: root)
+        let window = installInWindow(navigation)
+        defer { window.isHidden = true }
+        let localBar = try XCTUnwrap(child.navigationBarView as? NavigationBarImpl)
+        let localEffect = try XCTUnwrap(
+            allSubviews(in: localBar).compactMap { $0 as? EdgeEffectView }.first
+        )
+
+        navigation.pushViewController(
+            AetherViewController(navigationBarPresentationData: data),
+            animated: true
+        )
+        XCTAssertTrue(navigation.isTransitioning)
+        let sourceBar = try XCTUnwrap(root.view.subviews.compactMap {
+            $0 as? NavigationBarImpl
+        }.first)
+        let sourceEffect = try XCTUnwrap(
+            allSubviews(in: sourceBar).compactMap { $0 as? EdgeEffectView }.first
+        )
+        let sourceAlpha = sourceEffect.alpha
+
+        child.chromeScrollView.contentOffset.y = 8.0
+        child.updateNavigationBarScrollEdgeOffset(
+            for: child.chromeScrollView,
+            transition: .immediate
+        )
+
+        XCTAssertFalse(child.navigationBarIsExternallyHosted)
+        XCTAssertEqual(localEffect.alpha, 0.5, accuracy: 0.001)
+        XCTAssertEqual(sourceEffect.alpha, sourceAlpha, accuracy: 0.001)
+
+        let deadline = Date().addingTimeInterval(2.0)
+        while navigation.isTransitioning && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertFalse(navigation.isTransitioning)
+    }
+
+    @MainActor
     func testNodeContainersPublishChromeSourceChanges() {
         var changedOwners = Set<ObjectIdentifier>()
         let token = NotificationCenter.default.addObserver(

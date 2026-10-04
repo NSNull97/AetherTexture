@@ -10,8 +10,8 @@ arbitration, keyboard handling, embedded navigation stack.
 
 - Два detent'а: `.stage1` (компактный с боковыми insets, glass виден
   с обеих сторон) и `.stage2` (full-width, edge-to-edge tint).
-- Top corners 27pt, bottom corners — соответствие display radius
-  устройства в `.stage2`.
+- Верхние углы 34pt по умолчанию; нижние задаются для каждого detent.
+  В `.stage2` без нижнего отступа они по умолчанию прямые.
 - Cooperation с inner scroll view (gesture arbitration: drag по scroll
   content переключает control между sheet drag и scroll).
 - Sticky footer с автоматическим edge-effect frost'ом.
@@ -62,8 +62,8 @@ let config = AetherModalController.Config(
 ### Single-detent mode
 
 ```swift
-// Только stage2, drag к stage1 заблокирован, dismiss только сильным
-// downward swipe'ом:
+// Только stage2: движение вниз может закрыть sheet;
+// промежуточного компактного положения нет.
 let config = AetherModalController.Config(
     detents: [.stage2]
 )
@@ -79,9 +79,11 @@ let config = AetherModalController.Config(
 | `topInsetStage1` | `CGFloat` | `-1` (automatic) | Расстояние от safe-area top; отрицательное значение пересчитывается как половина текущего контейнера. |
 | `topInsetStage2` | `CGFloat` | `10.0` | То же в `.stage2`. |
 | `topCornerRadius` | `CGFloat` | `34.0` | Top corner radius. |
+| `bottomCornerRadiusStage1` | `CGFloat?` | `nil` | Нижний радиус compact sheet. `nil` → `topCornerRadius`. |
+| `bottomCornerRadiusStage2` | `CGFloat?` | `nil` | Нижний радиус expanded sheet. `nil` → `0` при `bottomInsetStage2 == 0`, иначе `topCornerRadius`. |
 | `dimAlphaStage1` | `CGFloat` | `0.25` | Dim alpha над presenter в `.stage1`. |
 | `dimAlphaStage2` | `CGFloat` | `0.4` | То же в `.stage2`. |
-| `dimTintColor` | `UIColor` | `.systemBackground` | Цвет dim layer'а. |
+| `dimTintColor` | `UIColor` | `.systemBackground` | Tint поверхности sheet и фон встроенной навигации. |
 | `detents` | `Set<Detent>` | `[.stage1, .stage2]` | Допустимые detent'ы. |
 | `initialDetent` | `Detent?` | `nil` | Detent при открытии. `nil` → первый из allowed. |
 
@@ -120,10 +122,11 @@ modal.contentView.addSubview(label)
 // Раскладка label в layoutSubviews подкласса modal'а
 ```
 
-> Important: `contentView` остаётся фиксированным размером (равным
-> `.stage2` size) на всё время существования modal'а. При drag'е
-> меняется только outer `presentedView.frame`. Inner content не
-> re-layouts на каждом pan tick, что даёт высокую производительность.
+> Important: `contentView` соответствует текущим видимым bounds шторки.
+> При смене detent контент получает новый layout. Используйте актуальные
+> bounds, safe area и `ContainerViewLayout`, а не постоянный размер stage2.
+> Общий материал расположен позади контента отдельным sibling; modal не
+> масштабирует и не растеризует дерево страниц во время drag.
 
 ## Sticky footer
 
@@ -140,8 +143,8 @@ Footer:
 - Над footer'ом рендерится edge-effect frost (`footerEdgeFadeHeight = 28pt`
   по умолчанию).
 - `footerHeight` добавляется в `additionalSafeAreaInsets.bottom`
-  content area, что обеспечивает scroll content прохождение под
-  footer'ом.
+  content area у базового modal и ручного режима навигации. В автоматическом
+  режиме навигации каждая страница получает собственный footer inset.
 
 ### Кастомизация frost'а
 
@@ -159,9 +162,10 @@ modal.primaryScrollView = content.tableView
 
 При установке `primaryScrollView`:
 
-1. **Gesture arbitration**: drag, начатый внутри scroll content, отдаётся
-   scroll view (если scroll НЕ at top). При scroll at top drag
-   переключается на sheet (sheet начинает двигаться).
+1. **Gesture arbitration**: жест согласуется с положением scroll и
+   допустимыми detents. Движение вверх расширяет компактный sheet, если
+   доступен stage2; при единственном stage1 длинный контент прокручивается.
+   Движение вниз передаётся sheet, когда scroll достиг верхней границы.
 2. **Keyboard handling**: модальный controller наблюдает
    `keyboardWillChangeFrame`; обнаруженный overlap с keyboard
    добавляется в `primaryScrollView.contentInset.bottom` и
@@ -259,9 +263,10 @@ modal.transitionAnimation = MyModalTransition()
 
 ```swift
 public protocol AetherModalControllerDelegate: AnyObject {
-    func modalControllerWillChangeDetent(_ controller: AetherModalController, to detent: AetherModalController.Detent)
-    func modalControllerDidChangeDetent(_ controller: AetherModalController, to detent: AetherModalController.Detent)
-    func modalControllerDidDismiss(_ controller: AetherModalController)
+    func modalController(_ controller: AetherModalController, didUpdateDetentProgress progress: CGFloat)
+    func modalController(_ controller: AetherModalController, didChangeDetent detent: AetherModalController.Detent)
+    func modalControllerWillBeginInteractiveResize(_ controller: AetherModalController)
+    func modalControllerDidEndInteractiveResize(_ controller: AetherModalController)
 }
 ```
 
@@ -305,6 +310,12 @@ modal.viewControllers        // полный стек
 modal.internalNavigationController   // AetherNavigationController
 ```
 
+Контент, chrome и footer используют один прогресс push/pop. Footer остаётся
+в modal host со своим фоном; его не переносят внутрь движущейся страницы.
+Завершение и отмена перехода синхронно восстанавливают владельца footer,
+scroll configuration и набор видимых страниц. При активном navigation
+transition вертикальный sheet drag не начинается.
+
 > Note: Nav bar контроллеров внутри модалки автоматически адаптирован
 > под grabber-полосу: `statusBarHeight` заменяется на
 > ``AetherModalController/grabberContainerHeight`` (17pt), что
@@ -345,11 +356,30 @@ present(modal, animated: true)
 | `modalFooterEdgeFadeHeight` | `CGFloat` | `28` | Высота gradient fade. |
 | `modalFooterEdgeTintColor` | `UIColor?` | `nil` | Tint frost'а. |
 | `modalFooterEdgeBlurRadius` | `CGFloat` | `2` | Blur radius. |
+| `modalFooterEdgeEffectEnabled` | `Bool` | `true` | Показывать frosted band под footer; `false` для отдельной плавающей стеклянной кнопки. |
 | `modalPrimaryScrollView` | `UIScrollView?` | `nil` | Scroll view для arbitration. |
 
-Все свойства — opt-in. Conformance протоколу необязательна; VC, не
-конформирующий протоколу, презентуется as-is (без footer slot, без
-scroll arbitration).
+Все свойства — opt-in. По умолчанию
+`contentConfigurationMode == .perScreen`: навигатор берёт footer и scroll
+view у текущего верхнего экрана независимо от того, реализует ли протокол
+root. Если верхний экран не реализует протокол, footer убирается, а для
+scroll arbitration используется `primaryScrollViewForChrome`.
+
+Для общего footer, которым управляет сам modal или его подкласс, выберите
+ручной режим до загрузки view:
+
+```swift
+let modal = AetherModalNavigationController(rootViewController: root)
+modal.contentConfigurationMode = .manual
+modal.footerView = sharedFooter
+modal.footerHeight = 76
+modal.primaryScrollView = rootScrollView
+```
+
+> Important: Раньше отсутствие протокола у root неявно сохраняло ручную
+> настройку. При миграции такого подкласса явно задайте `.manual`.
+> В `.perScreen` footer inset уже входит в layout конкретной страницы;
+> не добавляйте `modalFooterHeight` к нему повторно.
 
 ## API сводка
 
@@ -383,8 +413,9 @@ scroll arbitration).
 | Свойство / метод | Назначение |
 |---|---|
 | `init(rootViewController:config:)` | Создание с root. |
-| `init(viewControllers:config:)` | Создание со стеком. |
+| `init(config:navigationMode:)` | Создание пустого стека. |
 | `internalNavigationController` | Встроенный nav controller. |
+| `contentConfigurationMode` | `.perScreen` по умолчанию; `.manual` для общего footer/scroll, настроенного владельцем modal. |
 | `rootViewController` / `topViewController` / `viewControllers` | Доступ к стеку. |
 | `pushViewController(_:animated:)` | Push. |
 | `popViewController(animated:)` | Pop. |
@@ -420,10 +451,11 @@ source view/frame в модалку и закрытия обратно в source
   сбрасывает overlap; footer возвращается в position без
   glitch'а. Если `primaryScrollView` was scrolled во время keyboard
   shown, `contentInset.bottom` корректно восстанавливается.
-- **Smashing detent boundary.** Strong downward velocity на drag end
-  вызывает dismiss модалки даже из `.stage2` (минуя `.stage1`).
-  Threshold velocity конфигурируется в imp; визуально соответствует
-  стандартному UIKit-поведению.
+- **Прерывание settle новым drag.** Движение продолжается от текущего
+  frame, без возврата к геометрии исходного detent.
+- **Push/pop и короткая шторка.** Footer привязан к видимому низу sheet,
+  а source и target получают собственные bottom insets. Отмена back-жеста
+  возвращает исходный footer, в том числе при общем экземпляре view.
 - **Embedded nav controller status bar.** При размещении
   ``AetherNavigationController`` внутри ``AetherModalController``
   status bar height заменяется на `grabberContainerHeight = 17pt`.

@@ -16,8 +16,8 @@ tab bar. В отличие от `UITabBarController`, не владеет nav ba
 - ``TabBarView`` — плавающая style-aware surface с item'ами и badges;
   Liquid Glass добавляет edge-effect на скролле, Legacy — классический
   `systemChromeMaterial` и тонкий separator со стороны контента.
-- ``SearchTabItem`` — последний слот общего expanded pill'а, который
-  физически отделяется в самостоятельный search-круг при минимизации.
+- ``SearchTabItem`` — отдельная кнопка поиска (`.separate`, по умолчанию)
+  или обычная поисковая вкладка внутри pill (`.inside`).
 - ``AetherTabBarController/bottomBarAccessory`` — accessory-полоса над
   pill'ом (Now Playing pill и аналогичные сценарии).
 - ``AetherTabBarController/tabBarMinimizeBehavior`` — авто-минимизация
@@ -103,7 +103,8 @@ fallback: floating pill держит фиксированный 21pt visual gap 
 
 В liquid-glass режиме pill использует контентную ширину, пока вкладок мало.
 Четыре и более вкладки, а также конфигурация с Search, используют всю
-доступную строку внутри 25pt боковых отступов. Для стандартной theme:
+доступную строку внутри 25pt боковых отступов. Отдельная кнопка Search
+резервирует справа `theme.pillHeight` и промежуток `theme.showcaseSpacing`:
 
 ```swift
 preferredPillWidth = theme.innerPadding * 2
@@ -111,20 +112,25 @@ preferredPillWidth = theme.innerPadding * 2
 pillWidth = tabCount >= 4 || hasSearch
     ? availableWidth
     : min(preferredPillWidth, theme.maximumRowWidth)
+if searchStyle == .separate {
+    pillWidth -= theme.pillHeight + theme.showcaseSpacing
+}
 ```
 
 - Без Search pill центрируется: 2 вкладки занимают 196pt, 3 — 284pt,
   а 4–6 заполняют строку внутри 25pt margins.
-- С Search используется одна full-width glass-поверхность. Search занимает
-  последний равный слот внутри pill; отдельный Search-круг появляется только
-  в minimized-состоянии.
+- С `.inside` Search занимает равный слот на своей позиции в общем pill.
+  Отдельный Search-круг появляется при минимизации.
+  Если Search выбран, левый круг показывает последнюю обычную вкладку
+  (или первую обычную, если истории нет); тап возвращает к ней и раскрывает pill.
+- С `.separate` справа всегда есть отдельный круг: 60×60pt в развёрнутом
+  состоянии и 48×48pt при минимизации. Вкладки делят оставшуюся ширину pill.
 - На узких экранах `sideInset` остаётся минимальным безопасным отступом,
   поэтому строка автоматически сжимается вместе с доступной шириной.
 
 ## Search tab item
 
-Search-слот внутри общего pill'а, который отделяется в круг при минимизации
-(Apple Music style):
+Стиль поиска задаётся явно и не зависит от `AppearanceStyle`:
 
 ```swift
 let search = UIViewController()
@@ -133,7 +139,26 @@ search.tabBarItem = SearchTabItem(image: UIImage(systemName: "magnifyingglass")!
 tabs.setControllers([chats, settings, search], selectedIndex: 0)
 ```
 
-При вызове ``AetherTabBarController/activateSearch()``:
+По умолчанию `.separate` размещает кнопку справа от pill и открывает
+нижнее поле поиска. Чтобы поиск стал обычной вкладкой внутри pill:
+
+```swift
+let search = AetherViewController()
+search.tabBarItem = SearchTabItem(style: .inside)
+search.tabBarItem.title = "Поиск"
+tabs.setControllers([chats, search, settings], selectedIndex: 0)
+```
+
+В `.inside` controller остаётся в `controllers` на исходном индексе.
+Тап выбирает его как обычную вкладку с поиском под навбаром; клавиатура
+появляется после тапа в поле. Нажатие использует общее увеличение pill,
+как у остальных вкладок. Для `AetherViewController` поисковый controller
+создаётся автоматически, если его ещё нет. При минимизации кнопка поиска отделяется
+в правый круг и продолжает выбирать ту же вкладку. `SearchTabItem` можно
+назначить корневому экрану обёрнутого `AetherNavigationController`.
+
+В `.separate` поисковый controller не входит в `controllers` обычных
+вкладок. При вызове ``AetherTabBarController/activateSearch()``:
 
 - Tab bar pill сжимается в иконку активной вкладки.
 - Search-кружок расширяется в горизонтальную glass-капсулу с встроенным
@@ -373,7 +398,7 @@ fullscreen-переходе, compact frame равен `nil`; его live-гео�
 публикуется в момент освобождения public accessory slot; короткий outgoing
 fade уже не считается его активной геометрией.
 
-> Note: При открытии search tab bar принудительно переходит в minimized
+> Note: При открытии `.separate` search tab bar принудительно переходит в minimized
 > active-tab состояние, даже если auto-minimize выключен. После закрытия
 > search восстанавливается состояние, которое было до активации. Это
 > Liquid Glass-механика; в Legacy minimizer остаётся выключенным.
@@ -500,7 +525,7 @@ tabs.chromeTopY(in: someView)    // CGFloat? — верхняя Y-координ
 - **Дочерние контроллеры — только `AetherNavigationController` или
   `ViewController`.** Использование `UINavigationController` нарушит
   layout dispatch (нет `containerLayoutUpdated` в стандартном API).
-- **Минимизация + search mode.** Search использует minimized active-tab
+- **Минимизация + `.separate` search mode.** Search использует minimized active-tab
   circle как постоянный anchor, а search-кнопка разворачивается в поле.
   Раскрывать tab bar обратно во время активного search нельзя; состояние
   восстанавливается через ``AetherTabBarController/deactivateSearch()``.

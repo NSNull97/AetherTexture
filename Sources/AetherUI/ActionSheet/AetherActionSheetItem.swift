@@ -17,13 +17,13 @@ public final class AetherActionSheetItemGroup {
 // MARK: - ItemNode
 
 open class AetherActionSheetItemNode: ASControlNode {
-    public static let defaultItemHeight: CGFloat = 57.0
+    public static let defaultItemHeight: CGFloat = 48.0
 
     public let theme: AetherActionSheetTheme
 
     public let backgroundNode = ASDisplayNode()
-    /// Hairline shown below this row when it is not the last row of its
-    /// group. The group container toggles `hasSeparator` on each item.
+    /// Kept for custom-item compatibility; the floating sheet uses spacing
+    /// between independent pill rows instead of visible separators.
     public let separatorNode = ASDisplayNode()
 
     public var hasSeparator: Bool = true {
@@ -34,11 +34,9 @@ open class AetherActionSheetItemNode: ASControlNode {
         self.theme = theme
         super.init()
 
-        // The appearance-aware group surface owns both Liquid and classic
-        // systemChromeMaterial rendering. Keeping idle rows transparent is
-        // essential in Legacy; a per-row solid fill would hide the blur.
-        backgroundNode.backgroundColor = .clear
+        backgroundNode.backgroundColor = theme.itemBackgroundColor
         backgroundNode.isUserInteractionEnabled = false
+        backgroundNode.clipsToBounds = true
         separatorNode.backgroundColor = theme.separatorColor
         separatorNode.isUserInteractionEnabled = false
 
@@ -57,6 +55,8 @@ open class AetherActionSheetItemNode: ASControlNode {
     open override func layout() {
         super.layout()
         backgroundNode.frame = bounds
+        backgroundNode.cornerRadius = bounds.height / 2.0
+        backgroundNode.layer.cornerCurve = .continuous
         separatorNode.frame = CGRect(
             x: 0,
             y: bounds.height,
@@ -67,7 +67,7 @@ open class AetherActionSheetItemNode: ASControlNode {
 
     /// Called by the controller when arrow-key/enter focus lands on the row.
     open func setHighlighted(_ highlighted: Bool, animated: Bool) {
-        let idle: UIColor = .clear
+        let idle = theme.itemBackgroundColor
         let color = highlighted ? theme.itemHighlightedBackgroundColor : idle
         if animated && !highlighted {
             UIView.animate(withDuration: 0.3) {

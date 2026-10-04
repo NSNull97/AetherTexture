@@ -1,12 +1,13 @@
 import UIKit
 
-/// Optional protocol for `ViewController`s that will be presented inside
-/// a `AetherModalNavigationController`. Lets the modal pull the
-/// content's footer / scroll preferences when it embeds the root —
-/// callers don't have to repeat the boilerplate at every present site.
+/// Optional protocol for `ViewController`s presented inside
+/// `AetherModalNavigationController`. In the default `.perScreen` mode,
+/// the modal follows each screen's footer and scroll preferences. The root
+/// does not need to conform. Use `.manual` for a caller-owned shared footer.
 ///
 /// Conforming is opt-in. A VC that doesn't conform is presented as-is
-/// (no footer slot, no scroll arbitration). All members carry sensible
+/// (no footer; its `primaryScrollViewForChrome` is used for scrolling).
+/// All members carry sensible
 /// defaults via the extension below, so a VC only declares the bits it
 /// actually wants to customize.
 ///
@@ -15,7 +16,7 @@ import UIKit
 ///     private(set) lazy var sendButton: UIButton = ...
 ///     private(set) var scroll: UIScrollView?
 ///
-///     var modalFooterView: UIView? { sendButton.padding(...) }
+///     var modalFooterView: UIView? { sendButton }
 ///     var modalFooterHeight: CGFloat { 98 }
 ///     var modalPrimaryScrollView: UIScrollView? { scroll }
 /// }
@@ -27,8 +28,10 @@ import UIKit
 /// )
 /// present(modal, animated: true)
 /// ```
+@MainActor
 public protocol AetherModalContent: AnyObject {
-    /// View to install in the modal's `footerView` slot. `nil` → no footer.
+    /// Stable view instance to install in the modal's footer slot. Return nil
+    /// for no footer; do not allocate a new wrapper on each property access.
     var modalFooterView: UIView? { get }
     /// Total height (in points) of the footer including any internal
     /// padding. Drives the modal's edge-effect band height and the
@@ -42,6 +45,9 @@ public protocol AetherModalContent: AnyObject {
     var modalFooterEdgeTintColor: UIColor? { get }
     /// Blur radius behind the footer band.
     var modalFooterEdgeBlurRadius: CGFloat { get }
+    /// Draw a frosted edge behind the footer. Set to `false` for a floating
+    /// glass button without a full-width footer background.
+    var modalFooterEdgeEffectEnabled: Bool { get }
     /// Scroll view inside the content the modal should yield to during
     /// drag (gesture arbitration).
     var modalPrimaryScrollView: UIScrollView? { get }
@@ -53,5 +59,6 @@ public extension AetherModalContent {
     var modalFooterEdgeFadeHeight: CGFloat { 28 }
     var modalFooterEdgeTintColor: UIColor? { nil }
     var modalFooterEdgeBlurRadius: CGFloat { 2 }
+    var modalFooterEdgeEffectEnabled: Bool { true }
     var modalPrimaryScrollView: UIScrollView? { nil }
 }

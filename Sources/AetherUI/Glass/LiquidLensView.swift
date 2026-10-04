@@ -4,19 +4,21 @@ import AsyncDisplayKit
 private final class LiquidLensRestingBackgroundView: UIVisualEffectView {
     private var isDarkValue: Bool?
 
+    // The resting selection darkens the sampled material in both themes
+    // while keeping the backdrop's colors visible through the lens.
     private static func matrixValues(isDark: Bool) -> [Float32] {
         if isDark {
             return [
-                1.082, -0.113, -0.011, 0.0, 0.135,
-                -0.034, 1.003, -0.011, 0.0, 0.135,
-                -0.034, -0.113, 1.105, 0.0, 0.135,
+                1.082, -0.113, -0.011, 0.0, -0.09,
+                -0.034, 1.003, -0.011, 0.0, -0.09,
+                -0.034, -0.113, 1.105, 0.0, -0.09,
                 0.0, 0.0, 0.0, 1.0, 0.0
             ]
         } else {
             return [
-                1.185, -0.05, -0.005, 0.0, -0.2,
-                -0.015, 1.15, -0.005, 0.0, -0.2,
-                -0.015, -0.05, 1.195, 0.0, -0.2,
+                1.185, -0.05, -0.005, 0.0, -0.215,
+                -0.015, 1.15, -0.005, 0.0, -0.215,
+                -0.015, -0.05, 1.195, 0.0, -0.215,
                 0.0, 0.0, 0.0, 1.0, 0.0
             ]
         }
@@ -56,14 +58,10 @@ private final class LiquidLensRestingBackgroundView: UIVisualEffectView {
         overrideUserInterfaceStyle = isDark ? .dark : .light
 
         #if APPSTORE_SAFE
-        contentView.backgroundColor = isDark
-            ? UIColor.white.withAlphaComponent(0.08)
-            : UIColor.black.withAlphaComponent(0.05)
+        contentView.backgroundColor = UIColor.black.withAlphaComponent(isDark ? 0.70 : 0.08)
         #else
         guard let filter = CALayer.aetherMatrixFilter() else {
-            contentView.backgroundColor = isDark
-                ? UIColor.white.withAlphaComponent(0.08)
-                : UIColor.black.withAlphaComponent(0.05)
+            contentView.backgroundColor = UIColor.black.withAlphaComponent(isDark ? 0.70 : 0.08)
             return
         }
 
@@ -1074,28 +1072,24 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         transition.updateFrame(view: legacyLiftedContentBlobMaskNode.view, frame: effectiveLensFrame)
         transition.updateFrame(view: legacySelectionView, frame: effectiveLensFrame)
 
-        // Plain UIView thumb — no image-view stretching, no template
-        // re-tinting — just a coloured rounded rect that reliably moves
-        // with the selection. `systemGray3` adapts per appearance so the
-        // thumb reads as a neutral pill against any backdrop (white,
-        // dark, busy). Alpha 0.55 keeps it visibly glass-like rather
-        // than fully opaque chrome.
+        // Match the native lens's darker selection capsule in both themes.
+        // A plain view avoids template-image tint and stretching caches while
+        // keeping the fallback thumb attached to its current selection frame.
         if let legacyThumbView {
             transition.updateFrame(view: legacyThumbView, frame: effectiveLensFrame)
             if let experimentalLensView {
                 experimentalLensView.update(isDark: params.isDark, lifted: params.isLifted,
                                             collapsed: params.isCollapsed, transition: transition)
             } else {
-                legacyThumbView.backgroundColor = Self.legacyThumbColor(isDark: params.isDark)
+                legacyThumbView.backgroundColor = Self.liquidSelectionColor(isDark: params.isDark)
             }
             let cornerRadius = effectiveLensFrame.height * 0.5
             transition.updateCornerRadius(layer: legacyThumbView.layer, cornerRadius: cornerRadius)
         }
     }
 
-    private static func legacyThumbColor(isDark: Bool) -> UIColor {
-        let traits = UITraitCollection(userInterfaceStyle: isDark ? .dark : .light)
-        return UIColor.systemGray3.resolvedColor(with: traits).withAlphaComponent(0.55)
+    private static func liquidSelectionColor(isDark: Bool) -> UIColor {
+        UIColor.black.withAlphaComponent(isDark ? 0.70 : 0.08)
     }
 
     /// Pins every internal glass participant to the same resolved
@@ -1110,7 +1104,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         lensView?.overrideUserInterfaceStyle = interfaceStyle
         legacyThumbView?.overrideUserInterfaceStyle = interfaceStyle
         if experimentalLensView == nil {
-            legacyThumbView?.backgroundColor = Self.legacyThumbColor(isDark: isDark)
+            legacyThumbView?.backgroundColor = Self.liquidSelectionColor(isDark: isDark)
         }
         classicTrackView?.overrideUserInterfaceStyle = interfaceStyle
         classicSelectionView?.overrideUserInterfaceStyle = interfaceStyle

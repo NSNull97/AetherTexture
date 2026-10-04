@@ -14,6 +14,7 @@ import UIKit
 ///     }
 ///     override func viewDidLoad() {
 ///         super.viewDidLoad()
+///         contentConfigurationMode = .manual
 ///         footerView = sendButton
 ///         footerHeight = 98
 ///         primaryScrollView = (rootViewController as? MyFormVC)?.scroll
@@ -40,7 +41,41 @@ open class AetherModalNavigationController: AetherModalController {
     /// transitions). Most consumers should use the forwarded methods on
     /// this class instead.
     public let internalNavigationController: AetherNavigationController
-    private var savedNavigationLayoutSuppression: Bool?
+    public enum ContentConfigurationMode {
+        /// Each visible screen supplies its own footer and scroll view.
+        case perScreen
+        /// The modal's caller configures footerView and primaryScrollView.
+        case manual
+    }
+
+    /// Automatic configuration no longer depends on the root adopting a
+    /// protocol. Choose manual when a subclass owns a stack-wide footer.
+    public var contentConfigurationMode: ContentConfigurationMode = .perScreen {
+        didSet {
+            if isViewLoaded, contentTransition == nil { refreshContentConfiguration() }
+        }
+    }
+
+    private struct ContentTransition {
+        let source: AetherViewController
+        let target: AetherViewController
+        let sourceFooter: AetherModalFooterConfiguration
+        let targetFooter: AetherModalFooterConfiguration
+        let managesFooter: Bool
+    }
+    private var contentTransition: ContentTransition?
+
+    private var usesPerScreenContentConfiguration: Bool {
+        contentTransition?.managesFooter ?? (contentConfigurationMode == .perScreen)
+    }
+
+    override var isContentTransitioning: Bool {
+        internalNavigationController.isTransitioning || contentTransition != nil
+    }
+
+    override var reservesFooterSafeArea: Bool {
+        !usesPerScreenContentConfiguration
+    }
 
     /// Convenience for "the VC at the bottom of the stack" — what a
     /// vanilla `UINavigationController` calls `viewControllers.first`.
@@ -113,38 +148,105 @@ open class AetherModalNavigationController: AetherModalController {
 
     open override func viewDidLoad() {
         super.viewDidLoad()
-        // Keep construction lazy: touching `.view` in an initializer loads
-        // the hosted navigation hierarchy before the modal has resolved and
-        // propagated its appearance. The view is first needed here, after
-        // `AetherModalController.loadView()` has selected the renderer.
-        internalNavigationController.view.backgroundColor = .clear
-        // Embed the nav inside the content host. Subclass overrides of
-        // `viewDidLoad` should always call `super.viewDidLoad()` first
-        // so the nav is mounted before they reach for `topViewController`
-        // / `viewControllers` to wire footer / scroll / etc.
+        internalNavigationController.transitionCornerRadius = max(0, config.topCornerRadius)
+        internalNavigationController.pageBackgroundColor = config.dimTintColor
+        internalNavigationController.layoutForController = { [weak self] controller, layout in
+            guard let self, self.usesPerScreenContentConfiguration else { return layout }
+            let footer: AetherModalFooterConfiguration
+            if let state = self.contentTransition, controller === state.source {
+                footer = state.sourceFooter
+            } else if let state = self.contentTransition, controller === state.target {
+                footer = state.targetFooter
+            } else {
+                footer = self.configuration(for: controller)
+            }
+            var insets = layout.additionalInsets
+            insets.bottom += max(0, footer.visibleHeight - layout.safeInsets.bottom)
+            return layout.withUpdatedAdditionalInsets(insets)
+        }
+        internalNavigationController.topControllerDidChange = { [weak self] _ in
+            guard let self, !self.isContentTransitioning else { return }
+            self.applyTopContentConfiguration()
+        }
+        internalNavigationController.bottomBarVisibilityTransitionBegan = { [weak self] direction, source, target, _ in
+            self?.beginContentTransition(from: source, to: target, direction: direction)
+        }
+        internalNavigationController.bottomBarVisibilityTransitionProgress = { [weak self] progress, _ in
+            guard let self, let state = self.contentTransition, state.managesFooter else { return }
+            self.updateFooterTransition(progress: progress,
+                sourceOffset: state.source.view.frame.minX,
+                targetOffset: state.target.view.frame.minX)
+        }
+        internalNavigationController.bottomBarVisibilityTransitionEnded = { [weak self] completed in
+            self?.finishContentTransition(completed: completed)
+        }
         embedContent(internalNavigationController)
-        // The embed step above loads the nav's view, which loads the
-        // root VC's view, which runs its `viewDidLoad`. By this point
-        // any lazy-initialized properties on the root (send buttons,
-        // scroll views) are set, so we can safely query the
-        // `AetherModalContent` protocol for footer / scroll prefs.
-        applyRootContentConfiguration()
+        applyTopContentConfiguration()
+        (presentationController as? AetherModalPresentationController)?.resumePendingDetentIfPossible()
     }
 
-    private func applyRootContentConfiguration() {
-        guard let content = rootViewController as? AetherModalContent else { return }
-        if let footer = content.modalFooterView, content.modalFooterHeight > 0 {
-            footerView = footer
-            footerHeight = content.modalFooterHeight
-            footerEdgeFadeHeight = content.modalFooterEdgeFadeHeight
-            if let tint = content.modalFooterEdgeTintColor {
-                footerEdgeTintColor = tint
-            }
-            footerEdgeBlurRadius = content.modalFooterEdgeBlurRadius
+    open override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let corners = resolvedCornerRadii()
+        internalNavigationController.transitionCornerRadius = corners.top
+        internalNavigationController.transitionBottomCornerRadius = corners.bottom
+        guard contentConfigurationMode == .perScreen, !isContentTransitioning else { return }
+        let configuration = configuration(for: topViewController)
+        if footerView !== configuration.view || abs(footerHeight - configuration.visibleHeight) > 0.5 {
+            applyFooterConfiguration(configuration)
+            internalNavigationController.requestLayout(transition: .immediate)
         }
-        if let scroll = content.modalPrimaryScrollView {
-            primaryScrollView = scroll
+    }
+
+    private func configuration(for controller: AetherViewController?) -> AetherModalFooterConfiguration {
+        controller?.loadViewIfNeeded()
+        guard let content = controller as? AetherModalContent else { return .init() }
+        return .init(view: content.modalFooterView, height: content.modalFooterHeight,
+                     fadeHeight: content.modalFooterEdgeFadeHeight, tintColor: content.modalFooterEdgeTintColor,
+                     blurRadius: content.modalFooterEdgeBlurRadius, drawsEdge: content.modalFooterEdgeEffectEnabled)
+    }
+
+    private func applyTopContentConfiguration() {
+        guard isViewLoaded, contentConfigurationMode == .perScreen else { return }
+        let top = topViewController
+        top?.loadViewIfNeeded()
+        primaryScrollView = (top as? AetherModalContent)?.modalPrimaryScrollView ?? top?.primaryScrollViewForChrome
+        applyFooterConfiguration(configuration(for: top))
+    }
+
+    private func refreshContentConfiguration() {
+        applyTopContentConfiguration()
+        // Switching ownership changes where the footer's inset is reserved,
+        // even when the footer view and its height are unchanged.
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        internalNavigationController.requestLayout(transition: .immediate)
+    }
+
+    private func beginContentTransition(from source: AetherViewController,
+                                        to target: AetherViewController,
+                                        direction: NavigationTransitionDirection) {
+        let managesFooter = contentConfigurationMode == .perScreen
+        let sourceFooter = managesFooter ? configuration(for: source) : .init()
+        let targetFooter = managesFooter ? configuration(for: target) : .init()
+        contentTransition = ContentTransition(source: source, target: target,
+            sourceFooter: sourceFooter, targetFooter: targetFooter, managesFooter: managesFooter)
+        (presentationController as? AetherModalPresentationController)?.suspendForContentTransition()
+        if managesFooter {
+            beginFooterTransition(from: sourceFooter, to: targetFooter, direction: direction)
         }
+    }
+
+    private func finishContentTransition(completed: Bool) {
+        guard let state = contentTransition else { return }
+        // Navigation guarantees that both the stack and its bars are settled
+        // before notifying us. Cancellation has exactly the same cleanup path.
+        contentTransition = nil
+        if state.managesFooter {
+            endFooterTransition(completed: completed)
+        }
+        refreshContentConfiguration()
+        (presentationController as? AetherModalPresentationController)?.resumePendingDetentIfPossible()
     }
 
     // MARK: - Forwarded navigation API
@@ -170,27 +272,4 @@ open class AetherModalNavigationController: AetherModalController {
         internalNavigationController.replaceTopController(controller, animated: animated)
     }
 
-    // The internal navigation controller normally derives and propagates
-    // a complete ContainerViewLayout from every bounds / safe-area update.
-    // A modal detent drag does not change its logical stage2 canvas, so
-    // those updates are redundant and particularly costly for long lists.
-    // Hold its last valid layout while the surface is transformed, then
-    // perform one final reconciliation at the destination detent.
-    override func beginInteractiveResize() {
-        if savedNavigationLayoutSuppression == nil {
-            savedNavigationLayoutSuppression = internalNavigationController.suppressesSelfComputedLayoutDuringBottomBarTransition
-        }
-        internalNavigationController.suppressesSelfComputedLayoutDuringBottomBarTransition = true
-        super.beginInteractiveResize()
-    }
-
-    override func endInteractiveResize() {
-        let wasSuppressed = savedNavigationLayoutSuppression ?? false
-        savedNavigationLayoutSuppression = nil
-        internalNavigationController.suppressesSelfComputedLayoutDuringBottomBarTransition = wasSuppressed
-        if !wasSuppressed {
-            internalNavigationController.requestLayout(transition: .immediate)
-        }
-        super.endInteractiveResize()
-    }
 }

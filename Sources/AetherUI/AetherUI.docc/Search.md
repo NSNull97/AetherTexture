@@ -16,8 +16,8 @@ AetherUI предоставляет несколько вариантов пои
 - ``AetherActiveSearchBar`` — активный search bar с встроенным
   `UITextField` и cancel-кнопкой; используется как
   `NavigationBarContentView` в `.replacement` режиме.
-- ``SearchTabItem`` — search-кружок рядом с tab bar pill'ом
-  в стиле Apple Music; запускает поиск во весь экран.
+- ``SearchTabItem`` — отдельная поисковая кнопка или поисковая вкладка
+  внутри tab bar; размещение выбирается через `style`.
 
 ## AetherSearchController
 
@@ -146,7 +146,7 @@ search.updateEdgeEffect(color: .systemGray6)
 ### Tab bar integration
 
 Если ViewController находится внутри ``AetherTabBarController``, а один из
-переданных контроллеров имеет `tabBarItem is SearchTabItem`, search-кружок
+переданных контроллеров имеет `SearchTabItem(style: .separate)`, search-кружок
 tab bar'а может триггерить активацию поиска через override:
 
 ```swift
@@ -255,8 +255,15 @@ activeBar.deactivate()  // resign first responder
 
 ## SearchTabItem
 
-Search-слот внутри общей tab bar glass-поверхности, который отделяется в
-круг только в minimized-состоянии (Apple Music style):
+`SearchTabItem.Style` выбирает размещение и поведение поиска независимо от
+`AppearanceStyle`, включая Liquid Glass v1 и v2:
+
+| Стиль | Размещение и действие |
+| --- | --- |
+| `.separate` (по умолчанию) | Отдельная кнопка справа от tab bar. При активации превращается в нижнее поле поиска и показывает поисковый controller поверх текущей вкладки. |
+| `.inside` | Обычная вкладка в переданной позиции. Выбор показывает её controller с поиском под навбаром. При минимизации её кнопка отделяется в правый круг. |
+
+Отдельная кнопка сохраняет существующий сценарий нижнего поиска:
 
 ```swift
 let search = UIViewController()
@@ -265,7 +272,25 @@ search.tabBarItem = SearchTabItem(image: UIImage(systemName: "magnifyingglass")!
 tabs.setControllers([home, settings, search], selectedIndex: 0)
 ```
 
-При вызове ``AetherTabBarController/activateSearch()``:
+Вариант внутри tab bar:
+
+```swift
+let search = AetherViewController()
+search.tabBarItem = SearchTabItem(style: .inside)
+search.tabBarItem.title = "Поиск"
+tabs.setControllers([home, search, settings], selectedIndex: 0)
+```
+
+В `.inside` поисковый controller остаётся в `tabs.controllers` на исходном
+индексе и выбирается как обычная вкладка. Можно передать его напрямую или
+внутри `AetherNavigationController`, установив `SearchTabItem` на корневой
+экран. Для `AetherViewController` tab bar создаёт `AetherSearchController`,
+если своего ещё нет, и размещает его под навбаром. Выбор вкладки не
+открывает клавиатуру автоматически. В `.separate`
+поисковый controller хранится отдельно от обычных вкладок и подключается
+только на время поисковой сессии.
+
+Для `.separate` при вызове ``AetherTabBarController/activateSearch()``:
 
 1. Tab bar pill сжимается до иконки активной вкладки.
 2. Search-кружок расширяется в горизонтальную glass-капсулу с
@@ -308,6 +333,7 @@ override func tabBarDeactivateSearch() {
 | `searchResultsController` | Опциональный controller с результатами. |
 | `closeButtonSize` | Размер close-кнопки (default 44pt). |
 | `prefersBottomPlacement` | Принудительное использование `.bottom` placement. |
+| `prefersNavigationBarPlacement` | Оставить поиск в навбаре даже без tab bar (например, в модальном навигаторе). Задаётся до установки `searchController`. |
 | `placement` | Текущее placement (read-only). |
 | `activate()` | Программная активация. |
 | `deactivate()` | Программная деактивация. |

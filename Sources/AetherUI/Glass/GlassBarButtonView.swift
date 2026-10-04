@@ -36,6 +36,7 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
 
     private var displayState: DisplayState = .glass
     public var action: ((UIView) -> Void)?
+    internal var longPressAction: ((UILongPressGestureRecognizer) -> Void)?
     private var elasticRecognizer: GlassHighlightGestureRecognizer?
     private var classicPressRecognizer: AetherClassicPressGestureRecognizer?
 
@@ -271,6 +272,19 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
 
     // MARK: - Layout
 
+    internal func updateIcon(_ image: UIImage?) {
+        if iconNode == nil, image != nil {
+            let node = ASImageNode()
+            node.contentMode = .center
+            node.view.isUserInteractionEnabled = false
+            contentContainer.addSubview(node.view)
+            iconNode = node
+        }
+        iconNode?.image = image?.withRenderingMode(.alwaysTemplate)
+        updateIconAppearance()
+        setNeedsLayout()
+    }
+
     private func updateIconAppearance() {
         let resolvedColor = contentTintColor.resolvedColor(with: traitCollection)
         iconNode?.tintColor = resolvedColor
@@ -351,6 +365,12 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
 
     @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
         guard contextMenuTrigger == .longPress, recognizer.state == .began else { return }
+        if let longPressAction {
+            tapRecognizer?.isEnabled = false
+            DispatchQueue.main.async { [weak self] in self?.tapRecognizer?.isEnabled = true }
+            longPressAction(recognizer)
+            return
+        }
         guard let items = contextMenuItemsProvider?(), !items.isEmpty else { return }
         // Suppress the tap so a single long-press opens only the menu.
         tapRecognizer?.isEnabled = false

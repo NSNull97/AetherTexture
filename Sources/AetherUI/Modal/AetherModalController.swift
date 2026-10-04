@@ -10,8 +10,7 @@ public protocol AetherModalControllerDelegate: AnyObject {
         didUpdateDetentProgress progress: CGFloat
     )
     /// Fires when the sheet commits to a detent — at the start of a settle
-    /// animation, a programmatic `setDetent`, or on a live drag crossing
-    /// to a different nearest detent.
+    /// animation or a programmatic `setDetent`.
     func modalController(
         _ controller: AetherModalController,
         didChangeDetent detent: AetherModalController.Detent
@@ -21,9 +20,8 @@ public protocol AetherModalControllerDelegate: AnyObject {
     /// programmatic-`setDetent` animation. Bracketed with a matching
     /// `didEndInteractiveResize` once motion has fully stopped.
     ///
-    /// AetherUI automatically caches the content layer during this bracket.
-    /// Use this hook for additional work outside that subtree — e.g. pause
-    /// custom timers or live media while the sheet is moving.
+    /// Content remains live and is laid out for the visible sheet bounds.
+    /// Consumers can use this hook to pause expensive work while resizing.
     func modalControllerWillBeginInteractiveResize(
         _ controller: AetherModalController
     )
@@ -71,6 +69,10 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         public var topInsetStage1: CGFloat
         public var topInsetStage2: CGFloat
         public var topCornerRadius: CGFloat
+        /// Nil uses the top radius for the floating compact sheet.
+        public var bottomCornerRadiusStage1: CGFloat?
+        /// Nil uses zero at the screen edge, or the top radius when floating.
+        public var bottomCornerRadiusStage2: CGFloat?
         /// Dim alpha applied over the presenting view at stage1.
         public var dimAlphaStage1: CGFloat
         /// Dim alpha applied over the presenting view at stage2.
@@ -92,6 +94,8 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             topInsetStage1: CGFloat = -1.0,
             topInsetStage2: CGFloat = 10.0,
             topCornerRadius: CGFloat = 34.0,
+            bottomCornerRadiusStage1: CGFloat? = nil,
+            bottomCornerRadiusStage2: CGFloat? = nil,
             dimAlphaStage1: CGFloat = 0.25,
             dimAlphaStage2: CGFloat = 0.4,
             dimTintColor: UIColor = .systemBackground,
@@ -104,6 +108,8 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             self.topInsetStage1 = topInsetStage1
             self.topInsetStage2 = topInsetStage2
             self.topCornerRadius = topCornerRadius
+            self.bottomCornerRadiusStage1 = bottomCornerRadiusStage1
+            self.bottomCornerRadiusStage2 = bottomCornerRadiusStage2
             self.dimAlphaStage1 = dimAlphaStage1
             self.dimAlphaStage2 = dimAlphaStage2
             self.dimTintColor = dimTintColor
@@ -142,12 +148,8 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     /// Public host for your sheet's content. Subclasses populate this
     /// in `viewDidLoad` (`contentView.addSubview(...)` or `embedContent(_:)`).
     ///
-    /// **Stays at fixed (stage2) size for the lifetime of the modal** —
-    /// only resizes when the container bounds change (rotation, scene
-    /// resize). During a detent transition the complete glass surface is
-    /// scaled as one GPU-composited layer to fit the current side inset;
-    /// the content host's bounds therefore stay constant and its layout
-    /// subtree does not re-run on every pan tick.
+    /// Bounds always match the visible sheet. Content and material are
+    /// separate siblings; neither is scaled or rasterized during resizing.
     public let contentView: UIView
 
     /// Optional sticky footer — anchored to the bottom of the visible
@@ -158,19 +160,15 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     ///     inside an internal host
     ///   * applies a scroll-edge frost that fades upward into the
     ///     content area (`footerEdgeFadeHeight`)
-    ///   * adds `footerHeight` to `additionalSafeAreaInsets.bottom` so
-    ///     scroll content inside `contentView` scrolls past the footer
+    ///   * reserves its full height at the bottom, accounting for the inherited
+    ///     safe area so scroll content can move clear of the footer
     ///
     /// Use `footerHeight` to declare the footer's total height (the
     /// modal can't reliably ask the view itself — auto-layout-only
     /// footers without intrinsic height would report 0).
     public var footerView: UIView? {
         didSet {
-            if oldValue !== footerView {
-                oldValue?.removeFromSuperview()
-                if let footerView { footerHost.addSubview(footerView) }
-                if isViewLoaded { view.setNeedsLayout() }
-            }
+            if isViewLoaded { view.setNeedsLayout() }
         }
     }
 
@@ -217,6 +215,16 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         didSet { invalidateFooterEdgeCache() }
     }
 
+    /// Whether the modal draws its frosted edge behind the footer. Disable
+    /// this for a standalone glass control that should float over content.
+    public var footerEdgeEffectEnabled = true {
+        didSet {
+            if oldValue != footerEdgeEffectEnabled, isViewLoaded {
+                view.setNeedsLayout()
+            }
+        }
+    }
+
     /// Scroll view inside the modal that should cooperate with sheet drag.
     /// Subclasses set this in `viewDidLoad` to opt into:
     ///   * gesture arbitration — the modal yields to scroll when the
@@ -235,9 +243,10 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             if lastKeyboardScrollInset != 0 {
                 oldValue?.contentInset.bottom -= lastKeyboardScrollInset
                 oldValue?.verticalScrollIndicatorInsets.bottom -= lastKeyboardScrollInset
-                primaryScrollView?.contentInset.bottom += lastKeyboardScrollInset
-                primaryScrollView?.verticalScrollIndicatorInsets.bottom += lastKeyboardScrollInset
             }
+            lastKeyboardScrollInset = keyboardOverlap
+            primaryScrollView?.contentInset.bottom += lastKeyboardScrollInset
+            primaryScrollView?.verticalScrollIndicatorInsets.bottom += lastKeyboardScrollInset
         }
     }
 
@@ -262,15 +271,10 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     private let tintOverlayView = UIView()
     private let grabberContainer = UIView()
     private let grabberView = UIView()
-    private let footerHost = UIView()
+    private let footerHost = AetherModalFooterHostView()
+    private let incomingFooterHost = AetherModalFooterHostView()
     private let maskLayer = CAShapeLayer()
 
-    /// Last footer-host height the edge-effect attachment was applied at.
-    /// `setEdgeEffect` re-creates the underlying `EdgeEffectView` (and its
-    /// `CABackdropLayer` + filters), so we apply only when the height
-    /// shifts by more than 2pt — rotation / dynamic-type / mode flip,
-    /// not every drag tick.
-    private var lastAppliedFooterHostHeight: CGFloat = -1
     /// Footer's contribution to `additionalSafeAreaInsets.bottom`.
     /// Tracked separately so subclasses can add to the same bottom inset
     /// without us overwriting their delta.
@@ -284,6 +288,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     /// reaches `layoutFooter()` and slides the footer over the
     /// keyboard — without it the call would be a no-op and the
     /// footer would stay flush against the modal's bottom edge.
+    private var keyboardFrameInWindow: CGRect?
     private var keyboardOverlap: CGFloat = 0 {
         didSet {
             if oldValue != keyboardOverlap, isViewLoaded {
@@ -298,31 +303,27 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     private var lastKeyboardScrollInset: CGFloat = 0
     private var keyboardObserversInstalled = false
 
-    /// The glass and all content are laid out once at the stage2 size.
-    /// Only this scale changes while the outer presentation frame moves.
-    private var surfaceScale: CGFloat = 1.0
     private var lastAppliedGlassSize: CGSize = .zero
 
-    /// Preserve caller-owned rasterization settings while the modal uses
-    /// a cached content texture for drag / settle animation.
-    private struct RasterizationState {
-        let isEnabled: Bool
-        let scale: CGFloat
+    private(set) var isInteractivelyResizing = false
+    var isContentTransitioning: Bool { false }
+    var reservesFooterSafeArea: Bool { true }
+
+    private struct FooterTransition {
+        let source: AetherModalFooterConfiguration
+        let target: AetherModalFooterConfiguration
+        let direction: NavigationTransitionDirection
+        var progress: CGFloat
+        var sourceOffsetFraction: CGFloat?
+        var targetOffsetFraction: CGFloat?
     }
-    private var savedRasterizationState: RasterizationState?
+    private var footerTransition: FooterTransition?
 
     private func invalidateFooterEdgeCache() {
-        lastAppliedFooterHostHeight = -1
         if isViewLoaded {
             view.setNeedsLayout()
         }
     }
-
-    /// stage2 frame size pushed in by `AetherModalPresentationController`
-    /// once per container layout. Drives the immutable size of `contentView`.
-    /// `.zero` until the first `setExpectedContentSize` call — `layoutChrome`
-    /// falls back to `view.bounds.size` for that initial pass.
-    private var expectedContentSize: CGSize = .zero
 
     /// Height of the grabber container area at the top of the sheet.
     /// Content anchored to `view.safeAreaLayoutGuide.topAnchor` ends up
@@ -418,7 +419,6 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
 
     private func applyResolvedAppearance(animated: Bool) {
         let resolvedStyle = resolvedAppearanceStyle(for: inheritedAppearance)
-        let previousStyle = appliedAppearanceStyle
         appliedAppearanceStyle = resolvedStyle
         propagateResolvedAppearanceToHostedNavigation(resolvedStyle)
 
@@ -429,17 +429,12 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             (transitionAnimation as? AetherModalLiquidTransitionStateControlling)?
                 .aetherModalCancelLiquidTransitionState()
 
-            // The footer edge effect uses Aether's private backdrop pipeline.
-            // Legacy is already hosted inside systemChromeMaterial, so remove
-            // the redundant edge renderer instead of keeping it hidden.
-            if previousStyle.usesLiquidGlass || lastAppliedFooterHostHeight != 0 {
-                footerHost.setEdgeEffect(nil)
-                lastAppliedFooterHostHeight = 0
-            }
         }
 
         guard isViewLoaded, let glassBackground else { return }
         glassBackground.appearanceStyleOverride = resolvedStyle
+        lastCornerSignature = nil
+        lastAppliedGlassSize = .zero
         invalidateFooterEdgeCache()
         view.setNeedsLayout()
         if !animated {
@@ -470,7 +465,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     }
 
     internal var hasFooterLiquidEdgeEffectForTesting: Bool {
-        lastAppliedFooterHostHeight > 0 && appliedAppearanceStyle.usesLiquidGlass
+        footerHost.hasEdgeEffect && appliedAppearanceStyle.usesLiquidGlass
     }
 
     private func propagateResolvedAppearanceToHostedNavigation(
@@ -542,38 +537,19 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         )
         glassBackground.surfaceRole = .card
         self.glassBackground = glassBackground
-        // On iOS 26+ we shape the sheet via `cornerConfiguration` directly
-        // on the native glass view — see `updateCornerShape()`. On legacy
-        // we no longer install the CAShapeLayer mask up front: when top
-        // and bottom radii are equal (chamfer-less device) `updateMaskPath`
-        // takes the cheap `layer.cornerRadius` path; only when asymmetric
-        // (iPhone X+ with a chamfer-matching bottom radius) does it
-        // attach `maskLayer` lazily.
-
+        // Live material and navigation are siblings in the same coordinates.
+        // A material must never be captured in a scaled/rasterized page tree.
         root.addSubview(glassBackground)
-        // Anchor the immutable stage2 surface at its top centre. Detent
-        // changes update only `position` and `transform`; its bounds do
-        // not change and GlassBackgroundView therefore does not rebuild
-        // UIGlassEffect / backdrop subviews every frame.
-        glassBackground.layer.anchorPoint = CGPoint(x: 0.5, y: 0.0)
-
-        // Public content host first (lower z-order) so chrome (grabber,
-        // footer) sits visually above the form. Everything below sits
-        // inside the rounded glass clip — the legacy CAShapeLayer mask
-        // on root (or `cornerConfiguration` on the native glass) clips
-        // overflow when `contentView`'s stage2-sized bounds extend past
-        // the modal's current visible bounds.
+        glassBackground.isUserInteractionEnabled = false
+        glassBackground.glassIsInteractive = false
         tintOverlayView.backgroundColor = config.dimTintColor
         tintOverlayView.isUserInteractionEnabled = false
-        glassBackground.contentView.addSubview(tintOverlayView)
-        glassBackground.contentView.addSubview(contentView)
-        // Footer host overlays content. It anchors to the BOTTOM of the
-        // current `view.bounds` (i.e. the modal's visible bottom edge),
-        // so it follows the sheet across detents instead of staying
-        // pinned to the fixed-size content host.
-        glassBackground.contentView.addSubview(footerHost)
-        glassBackground.contentView.addSubview(grabberContainer)
-        glassBackground.glassIsInteractive = true
+        root.addSubview(tintOverlayView)
+        root.addSubview(contentView)
+        root.addSubview(footerHost)
+        root.addSubview(incomingFooterHost)
+        root.addSubview(grabberContainer)
+        incomingFooterHost.isHidden = true
 
         grabberView.backgroundColor = UIColor.label.withAlphaComponent(0.28)
         grabberView.layer.cornerRadius = Self.grabberSize.height / 2.0
@@ -594,37 +570,10 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         installKeyboardObserversIfNeeded()
     }
 
-    open override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        compensatePhantomSafeArea()
-    }
-
     open override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutChrome()
         updateCornerShape()
-    }
-
-    /// Pre-warm the top safe area for the upcoming frame change.
-    /// Reads `RootView.safeAreaInsets.top` so UIKit caches the new value
-    /// before our caller (`AetherModalPresentationController.applyDrag`
-    /// / `tickSettleLink`) snaps the frame, which avoids a one-frame
-    /// seam between the navbar (anchored to `safeAreaLayoutGuide`) and
-    /// the rest of the content.
-    ///
-    /// `RootView.safeAreaInsets.top` is computed from the view's current
-    /// position in the window plus the grabber strip — so the prior
-    /// `additionalSafeAreaInsets`-based "compensation" formula is no
-    /// longer needed. (It was actually a no-op against the override
-    /// anyway: `view.safeAreaInsets.top - additionalSafeAreaInsets.top`
-    /// doesn't isolate the inherited-only contribution when the override
-    /// returns a value that ignores additional.)
-    private func compensatePhantomSafeArea() {
-        _ = view.safeAreaInsets
-    }
-
-    func compensateSafeAreaForUpcomingFrame(_ frame: CGRect, in container: UIView) {
-        _ = view.safeAreaInsets
     }
 
     public func setDetent(_ detent: Detent, animated: Bool) {
@@ -655,6 +604,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
 
         guard abs(detentProgress - clamped) > 0.0001 else { return }
         detentProgress = clamped
+        if isViewLoaded { view.setNeedsLayout() }
         delegate?.modalController(self, didUpdateDetentProgress: clamped)
     }
 
@@ -675,158 +625,123 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         delegate?.modalController(self, didChangeDetent: detent)
     }
 
-    /// 0 when the host device has no physical screen chamfer.
-    func deviceCornerRadius() -> CGFloat {
-        if let presentation = presentationController as? AetherModalPresentationController {
-            return presentation.deviceCornerRadius
-        }
-        return 0
-    }
-
     private func layoutChrome() {
-        // Disable implicit CALayer actions for the entire chrome layout
-        // pass. `glassBackground.update` and `legacyView.update` underneath
-        // hit `CALayer.frame` setters directly (via the `.immediate`
-        // ContainedViewLayoutTransition), which still queue implicit
-        // animations on the BACKING layer because UIView's actionForLayer
-        // suppression only covers properties UIView itself sets through
-        // its own setters — not direct CALayer.frame writes against
-        // child layers like `CABackdropLayer`. Without this wrap, every
-        // pan tick stacks a default 0.25s layer animation onto each glass
-        // / grabber / footer sublayer; on a slow drag they edge-chase
-        // each other into visible jitter.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
-        // Keep every write immediate. The presentation controller already
-        // supplies the interactive / settle timing; nested animations here
-        // would make the surface lag behind its outer frame.
-        let surfaceSize = expectedContentSize == .zero
-            ? view.bounds.size
-            : expectedContentSize
-        let resolvedScale: CGFloat
-        if surfaceSize.width > 0 {
-            resolvedScale = min(1.0, max(0.01, view.bounds.width / surfaceSize.width))
-        } else {
-            resolvedScale = 1.0
+        let bounds = view.bounds
+        if let keyboardFrameInWindow, let window = view.window {
+            let keyboard = view.convert(keyboardFrameInWindow, from: window)
+            let intersection = bounds.intersection(keyboard)
+            keyboardOverlap = intersection.isNull ? 0 : intersection.height
+            syncPrimaryScrollViewKeyboardInset()
         }
-        surfaceScale = resolvedScale
-
-        let surfaceBounds = CGRect(origin: .zero, size: surfaceSize)
-        if glassBackground.bounds != surfaceBounds {
-            glassBackground.bounds = surfaceBounds
+        glassBackground.frame = bounds
+        if lastAppliedGlassSize != bounds.size {
+            lastAppliedGlassSize = bounds.size
+            glassBackground.update(size: bounds.size, cornerRadius: 0, transition: .immediate)
         }
-        let surfacePosition = CGPoint(x: view.bounds.midX, y: 0.0)
-        if glassBackground.layer.position != surfacePosition {
-            glassBackground.layer.position = surfacePosition
-        }
-        let surfaceTransform = CGAffineTransform(scaleX: resolvedScale, y: resolvedScale)
-        if glassBackground.transform != surfaceTransform {
-            glassBackground.transform = surfaceTransform
-        }
-
-        // The expensive effect tree is sized only when the stage2 surface
-        // itself changes (rotation / scene resize), never during a pan.
-        if lastAppliedGlassSize != surfaceSize {
-            lastAppliedGlassSize = surfaceSize
-            glassBackground.update(size: surfaceSize, cornerRadius: 0.0, transition: .immediate)
-        }
-
-        let grabberHeight = Self.grabberContainerHeight
-        grabberContainer.frame = CGRect(
-            x: 0.0,
-            y: 0.0,
-            width: surfaceSize.width,
-            height: grabberHeight
-        )
+        contentView.frame = bounds
+        tintOverlayView.frame = bounds
+        grabberContainer.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Self.grabberContainerHeight)
         grabberView.frame = CGRect(
-            x: (surfaceSize.width - Self.grabberSize.width) / 2.0,
-            y: (grabberHeight - Self.grabberSize.height) / 2.0,
-            width: Self.grabberSize.width,
-            height: Self.grabberSize.height
+            x: (bounds.width - Self.grabberSize.width) / 2,
+            y: (Self.grabberContainerHeight - Self.grabberSize.height) / 2,
+            width: Self.grabberSize.width, height: Self.grabberSize.height
         )
-
-        let hostFrame = surfaceBounds
-        if contentView.frame != hostFrame {
-            contentView.frame = hostFrame
-        }
-        if tintOverlayView.frame != surfaceBounds {
-            tintOverlayView.frame = surfaceBounds
-        }
-
         layoutFooter()
     }
 
+    private var currentFooterConfiguration: AetherModalFooterConfiguration {
+        AetherModalFooterConfiguration(view: footerView, height: footerHeight,
+            fadeHeight: footerEdgeFadeHeight, tintColor: footerEdgeTintColor,
+            blurRadius: footerEdgeBlurRadius, drawsEdge: footerEdgeEffectEnabled)
+    }
+
+    func applyFooterConfiguration(_ configuration: AetherModalFooterConfiguration) {
+        footerView = configuration.view
+        footerHeight = configuration.visibleHeight
+        footerEdgeFadeHeight = configuration.fadeHeight
+        footerEdgeTintColor = configuration.tintColor
+        footerEdgeBlurRadius = configuration.blurRadius
+        footerEdgeEffectEnabled = configuration.drawsEdge
+        if isViewLoaded { layoutFooter() }
+    }
+
+    func beginFooterTransition(from source: AetherModalFooterConfiguration,
+                               to target: AetherModalFooterConfiguration,
+                               direction: NavigationTransitionDirection) {
+        footerTransition = FooterTransition(source: source, target: target, direction: direction, progress: 0)
+        footerHost.configure(source)
+        if source.view !== target.view {
+            incomingFooterHost.configure(target)
+        }
+        footerHost.isUserInteractionEnabled = false
+        incomingFooterHost.isUserInteractionEnabled = false
+        layoutFooter()
+    }
+
+    func updateFooterTransition(progress: CGFloat, sourceOffset: CGFloat, targetOffset: CGFloat) {
+        guard footerTransition != nil else { return }
+        footerTransition?.progress = progress
+        let width = max(1, view.bounds.width)
+        footerTransition?.sourceOffsetFraction = sourceOffset / width
+        footerTransition?.targetOffsetFraction = targetOffset / width
+        layoutFooter()
+    }
+
+    func endFooterTransition(completed: Bool) {
+        guard let transition = footerTransition else { return }
+        footerTransition = nil
+        // Detach the incoming slot before transferring its content to the
+        // persistent slot. Reassigning the same view also restores ownership.
+        incomingFooterHost.configure(AetherModalFooterConfiguration())
+        incomingFooterHost.isHidden = true
+        footerHost.isUserInteractionEnabled = true
+        applyFooterConfiguration(completed ? transition.target : transition.source)
+    }
+
     private func layoutFooter() {
-        let hasFooter = footerView != nil && footerHeight > 0
-        let fade = footerEdgeFadeHeight
-        let totalH = hasFooter ? (footerHeight + fade) : 0
-
-        let localVisibleHeight = view.bounds.height / max(0.01, surfaceScale)
-        let localKeyboardOverlap = keyboardOverlap / max(0.01, surfaceScale)
-        let surfaceWidth = expectedContentSize == .zero
-            ? view.bounds.width
-            : expectedContentSize.width
-        let footerHostFrame = CGRect(
-            x: 0,
-            y: localVisibleHeight - localKeyboardOverlap - totalH,
-            width: surfaceWidth,
-            height: totalH
-        )
-        // During detent movement only the origin changes; its bounds stay
-        // in stage2 coordinates and therefore do not relayout the footer.
-        if footerHost.frame != footerHostFrame {
-            footerHost.frame = footerHostFrame
+        guard isViewLoaded else { return }
+        let width = view.bounds.width
+        let bottom = max(0, view.bounds.height - keyboardOverlap)
+        var sourceOffset: CGFloat = 0
+        var targetOffset: CGFloat = 0
+        var sourceVisibleWidth: CGFloat?
+        if let state = footerTransition {
+            if state.source.view !== state.target.view {
+                switch state.direction {
+                case .push:
+                    sourceOffset = -width * 0.3 * state.progress
+                    targetOffset = width * (1 - state.progress)
+                    view.insertSubview(footerHost, belowSubview: incomingFooterHost)
+                case .pop:
+                    sourceOffset = width * state.progress
+                    targetOffset = -width * 0.3 * (1 - state.progress)
+                    view.insertSubview(incomingFooterHost, belowSubview: footerHost)
+                }
+                sourceOffset = state.sourceOffsetFraction.map { $0 * width } ?? sourceOffset
+                targetOffset = state.targetOffsetFraction.map { $0 * width } ?? targetOffset
+                let targetVisibleWidth: CGFloat?
+                switch state.direction {
+                case .push:
+                    sourceVisibleWidth = targetOffset - sourceOffset
+                    targetVisibleWidth = nil
+                case .pop:
+                    targetVisibleWidth = sourceOffset - targetOffset
+                }
+                incomingFooterHost.update(width: width, bottom: bottom, offsetX: targetOffset, visibleWidth: targetVisibleWidth,
+                    usesLiquidGlass: appliedAppearanceStyle.usesLiquidGlass, defaultTint: config.dimTintColor)
+            }
+        } else {
+            footerHost.configure(currentFooterConfiguration)
         }
+        footerHost.update(width: width, bottom: bottom, offsetX: sourceOffset, visibleWidth: sourceVisibleWidth,
+            usesLiquidGlass: appliedAppearanceStyle.usesLiquidGlass, defaultTint: config.dimTintColor)
 
-        if let footerView, hasFooter {
-            footerView.frame = CGRect(
-                x: 0,
-                y: fade,
-                width: surfaceWidth,
-                height: footerHeight
-            )
-        }
-
-        if hasFooter,
-           appliedAppearanceStyle.usesLiquidGlass,
-           abs(totalH - lastAppliedFooterHostHeight) > 2.0 {
-            let tint = footerEdgeTintColor
-                ?? config.dimTintColor.withAlphaComponent(0.86)
-            footerHost.setEdgeEffect(.init(
-                edge: .bottom,
-                thickness: totalH,
-                fadeHeight: fade,
-                tintColor: tint,
-                tintAlpha: 1.0,
-                blurRadius: footerEdgeBlurRadius
-            ))
-            lastAppliedFooterHostHeight = totalH
-        } else if (!hasFooter || !appliedAppearanceStyle.usesLiquidGlass),
-                  lastAppliedFooterHostHeight != 0 {
-            footerHost.setEdgeEffect(nil)
-            lastAppliedFooterHostHeight = 0
-        }
-
-        // `setEdgeEffect` does `addSubview(effect)`, which puts the
-        // frosted band ON TOP of any subviews already in `footerHost`
-        // (i.e. the user's `footerView`). Promote the footer so it sits
-        // above the frost — otherwise the button is faded/blurred by
-        // its own edge effect.
-        if let footerView, footerView.superview === footerHost {
-            footerHost.bringSubviewToFront(footerView)
-        }
-
-        // Push only the footer's height onto the bottom safe-area inset
-        // via a delta. Keyboard overlap is handled separately via direct
-        // `primaryScrollView.contentInset.bottom` adjustment in
-        // `syncPrimaryScrollViewKeyboardInset()` — adding it to the safe
-        // area would double-inset any scroll inside the modal that uses
-        // `contentInsetAdjustmentBehavior = .automatic` (the default),
-        // because UIKit auto-adds safe area into `adjustedContentInset`
-        // on top of our explicit `contentInset` write.
-        let target = hasFooter ? footerHeight : 0
+        let inheritedBottom = max(0, view.safeAreaInsets.bottom - lastFooterBottomInset)
+        let target = reservesFooterSafeArea ? max(0, currentFooterConfiguration.visibleHeight - inheritedBottom) : 0
         if abs(target - lastFooterBottomInset) > 0.5 {
             let delta = target - lastFooterBottomInset
             lastFooterBottomInset = target
@@ -857,15 +772,20 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         else { return }
         let converted: CGRect
         if let screen = window.windowScene?.screen {
-            converted = view.convert(screen.coordinateSpace.convert(end, to: window), from: window)
+            let frameInWindow = screen.coordinateSpace.convert(end, to: window)
+            keyboardFrameInWindow = frameInWindow
+            converted = view.convert(frameInWindow, from: window)
         } else {
             converted = view.convert(end, from: nil)
+            keyboardFrameInWindow = window.convert(end, from: nil)
         }
-        let overlap = max(0.0, view.bounds.maxY - converted.origin.y)
+        let intersection = view.bounds.intersection(converted)
+        let overlap = intersection.isNull ? 0 : intersection.height
         applyKeyboardOverlap(overlap, using: note)
     }
 
     @objc private func handleKeyboardWillHide(_ note: Notification) {
+        keyboardFrameInWindow = nil
         applyKeyboardOverlap(0, using: note)
     }
 
@@ -897,13 +817,12 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     /// on the scroll view's bottom inset survive — we only add/remove our
     /// own contribution.
     private func syncPrimaryScrollViewKeyboardInset() {
-        guard let scroll = primaryScrollView else { return }
-        let target = keyboardOverlap / max(0.01, surfaceScale)
+        let target = keyboardOverlap
         guard abs(target - lastKeyboardScrollInset) > 0.5 else { return }
         let delta = target - lastKeyboardScrollInset
         lastKeyboardScrollInset = target
-        scroll.contentInset.bottom += delta
-        scroll.verticalScrollIndicatorInsets.bottom += delta
+        primaryScrollView?.contentInset.bottom += delta
+        primaryScrollView?.verticalScrollIndicatorInsets.bottom += delta
     }
 
     /// Walks `primaryScrollView`'s subview tree, finds the active first
@@ -929,37 +848,12 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         return nil
     }
 
-    /// Pushed in by `AetherModalPresentationController` once per container
-    /// layout pass — the size we want `contentView` (and everything inside)
-    /// to lay out for. Drag does NOT call this; only orientation / scene
-    /// resize does.
-    func setExpectedContentSize(_ size: CGSize) {
-        guard expectedContentSize != size else { return }
-        expectedContentSize = size
-        if isViewLoaded {
-            view.setNeedsLayout()
-        }
-    }
-
-    /// Freezes the rendered content subtree for the duration of an
-    /// interactive resize. The cached texture is transformed together
-    /// with the immutable stage2 surface; no cell, text or navigation
-    /// layer needs to redraw while the finger is moving.
     func beginInteractiveResize() {
-        guard savedRasterizationState == nil else { return }
-        savedRasterizationState = RasterizationState(
-            isEnabled: contentView.layer.shouldRasterize,
-            scale: contentView.layer.rasterizationScale
-        )
-        contentView.layer.rasterizationScale = view.window?.screen.scale ?? UIScreen.main.scale
-        contentView.layer.shouldRasterize = true
+        isInteractivelyResizing = true
     }
 
     func endInteractiveResize() {
-        guard let savedRasterizationState else { return }
-        self.savedRasterizationState = nil
-        contentView.layer.shouldRasterize = savedRasterizationState.isEnabled
-        contentView.layer.rasterizationScale = savedRasterizationState.scale
+        isInteractivelyResizing = false
     }
 
     private struct MaskSignature: Equatable {
@@ -975,41 +869,21 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     }
     private var lastCornerSignature: CornerSignature?
 
-    /// Top corners are fixed at `config.topCornerRadius` (34 by default)
-    /// on every device. Bottom corners depend on whether the physical
-    /// screen has a chamfer:
-    ///   - `deviceRadius > 0` (iPhone X and newer): bottom matches the
-    ///     device's own corner radius (read via the private
-    ///     `_displayCornerRadius`) so the sheet nests into the bezel.
-    ///   - `deviceRadius == 0` (pre-iPhone X, iPad, anything without
-    ///     a chamfer): bottom matches the top radius. We *used to* ramp
-    ///     it from `topCornerRadius` to 0 over `detentProgress` so the
-    ///     bottom flattened against the device edge at stage2, but on
-    ///     legacy that ramp meant the `CAShapeLayer` mask path rebuilt
-    ///     every settle tick — sustained ~60% CPU on iPhone 7. Symmetric
-    ///     corners let `updateMaskPath` route through `layer.cornerRadius`
-    ///     instead, which is GPU-rendered and free per-frame.
-    private func resolvedCornerRadii() -> (top: CGFloat, bottom: CGFloat) {
-        let deviceRadius = deviceCornerRadius()
-        let topRadius = config.topCornerRadius
-        let bottomRadius: CGFloat
-        if deviceRadius > 0 {
-            bottomRadius = deviceRadius
-        } else {
-            bottomRadius = topRadius
-        }
-        return (topRadius, bottomRadius)
+    /// Shared by the live sheet and the optional source morph. The host
+    /// supplies its intended shape instead of consulting private device APIs.
+    func resolvedCornerRadii(for size: CGSize? = nil) -> (top: CGFloat, bottom: CGFloat) {
+        let boundsSize = size ?? view.bounds.size
+        let limit = max(0, min(boundsSize.width, boundsSize.height) / 2)
+        let top = max(0, min(config.topCornerRadius, limit))
+        let compact = config.bottomCornerRadiusStage1 ?? config.topCornerRadius
+        let expanded = config.bottomCornerRadiusStage2
+            ?? (config.bottomInsetStage2 > 0 ? config.topCornerRadius : 0)
+        let bottom = compact + (expanded - compact) * detentProgress
+        return (top, max(0, min(bottom, limit)))
     }
 
     private func updateCornerShape() {
-        // iOS 26+ uses a native, bounds-independent corner configuration.
-        // It is installed once and the root clips the immutable stage2
-        // surface as its visible bounds move between detents. Older systems
-        // fall back to the CALayer / CAShapeLayer implementation below.
         if #available(iOS 26.0, *) {
-            // The surface is intentionally larger than stage1 and is
-            // revealed through the root's animated bounds. Root clipping
-            // is therefore required for both native and legacy glass.
             applyCornerConfiguration(clipRoot: true)
         } else {
             updateMaskPath()
@@ -1038,11 +912,9 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         // their own animated values.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // Apply to both the visible root clip and the full glass surface.
+        // Identical unscaled geometry for the sheet and its live material.
         view.cornerConfiguration = configuration
         glassBackground.setNativeCornerConfiguration(configuration)
-        glassBackground.contentView.cornerConfiguration = configuration
-        glassBackground.contentView.clipsToBounds = true
         view.clipsToBounds = clipRoot
         // The mask layer is the alternate, expensive path — drop it so
         // we don't end up with both a corner-config shape AND a stale
@@ -1058,13 +930,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         let bounds = view.bounds
         let (topRadius, bottomRadius) = resolvedCornerRadii()
 
-        // Symmetric top/bottom corners — let CALayer round them via
-        // `cornerRadius` (GPU path, no per-frame CPU cost). The
-        // CAShapeLayer mask path was the dominant CPU bottleneck on
-        // iPhone 7 / iOS 15: every settle tick rebuilt a UIBezierPath
-        // and re-rasterised the mask layer, holding the device at
-        // ~60–70% CPU through the entire animation. cornerRadius costs
-        // nothing once set.
+        // Equal corners use the continuous CALayer path.
         if topRadius == bottomRadius {
             if view.layer.mask != nil {
                 view.layer.mask = nil
@@ -1081,11 +947,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             return
         }
 
-        // Asymmetric corners — fall back to the CAShapeLayer mask.
-        // Reached on devices with a screen chamfer (iPhone X+), where
-        // the bottom radius matches `_displayCornerRadius` and stays
-        // fixed across detent changes, so the path signature cache
-        // below catches the no-op cases.
+        // Pre-iOS 26 needs a path for independent top and bottom radii.
         if view.layer.mask !== maskLayer {
             view.layer.cornerRadius = 0.0
             view.layer.masksToBounds = false

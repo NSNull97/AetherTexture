@@ -145,13 +145,16 @@ final class NavigationTransitionCoordinator {
     private let dimView: UIView
     private let shadowNode: ASImageNode
 
-    private var topInitialCorners: (clipsToBounds: Bool, cornerRadius: CGFloat, maskedCorners: CACornerMask, cornerCurve: CALayerCornerCurve)?
+    private var restoreTopViewCornerState: (() -> Void)?
+    private var requestedTopCornerRadius: CGFloat = 0
+    private var requestedBottomCornerRadius: CGFloat?
+    private let transitionCornerMask = CAShapeLayer()
 
     private var currentCompletion: (() -> Void)?
     private var progressDisplayLink: CADisplayLink?
     private var progressDisplayLinkTarget: NavigationProgressDisplayLinkTarget?
     private var progressAnimationElapsed: CFTimeInterval = 0.0
-    private var progressAnimationLastTimestamp: CFTimeInterval?
+    private var progressAnimationStartTimestamp: CFTimeInterval?
     private var progressAnimationDuration: CFTimeInterval = 0.0
     private var progressAnimationFrom: CGFloat = 0.0
     private var progressAnimationTo: CGFloat = 0.0
@@ -159,6 +162,8 @@ final class NavigationTransitionCoordinator {
     private var progressAnimationCompletion: (() -> Void)?
     private var previousInteractiveProgressSample: (progress: CGFloat, timestamp: CFTimeInterval)?
     private var currentInteractiveProgressSample: (progress: CGFloat, timestamp: CFTimeInterval)?
+    private var specializedAnimationProgress: CGFloat = 0
+    private var updateSpecializedLayout: (() -> Void)?
 
     var completionTransition: ContainedViewLayoutTransition {
         return makeCompletionTransition(velocity: 0.0)
@@ -211,14 +216,8 @@ final class NavigationTransitionCoordinator {
     ///     parallax translation unless `isFlat`).
     ///   - isInteractive: whether this was initiated by a pan gesture.
     ///   - isFlat: when true, no parallax — `bottomView` simply slides in sync.
-    ///   - screenCornerRadius: matches the device's display corner radius;
-    ///     used to round **all four corners** of `topView` during the transition
-    ///     for the iOS 26 card-like feel — the moving controller looks like a
-    ///     full carded surface. The right-side corners spend most of the
-    ///     animation flush with the device bezel (so the rounding visually
-    ///     fuses with the physical screen radius), and `restoreTopViewCorners`
-    ///     resets the layer back to flat once the transition settles, so no
-    ///     visible notch appears in the final full-bounds state.
+    ///   - screenCornerRadius: supplied by the containing surface. The
+    ///     controller's original corner state is restored at settlement.
     init(
         container: UIView,
         direction: NavigationTransitionDirection,
@@ -229,6 +228,7 @@ final class NavigationTransitionCoordinator {
         isInteractive: Bool,
         isFlat: Bool = false,
         screenCornerRadius: CGFloat = 0.0,
+        bottomCornerRadius: CGFloat? = nil,
         progressUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)? = nil
     ) {
         self.container = container
@@ -268,31 +268,7 @@ final class NavigationTransitionCoordinator {
             container.insertSubview(dimView, belowSubview: topView)
             container.insertSubview(shadowNode.view, belowSubview: dimView)
 
-            if screenCornerRadius > 0.0 {
-                // Snapshot existing corner state so `restoreTopViewCorners`
-                // can put it back exactly as we found it (different consumers
-                // of the framework may already be applying their own rounding).
-                topInitialCorners = (
-                    topView.clipsToBounds,
-                    topView.layer.cornerRadius,
-                    topView.layer.maskedCorners,
-                    topView.layer.cornerCurve
-                )
-                // Round all four corners (iOS 26 native nav-stack look —
-                // the moving controller reads as a full carded surface, not
-                // a half-rounded slab). The right side stays flush with the
-                // physical bezel through most of the animation, so its
-                // rounding fuses visually with the device radius.
-                // `restoreTopViewCorners` resets to flat at completion, so
-                // no notch appears in the settled full-bounds state.
-                topView.layer.maskedCorners = [
-                    .layerMinXMinYCorner, .layerMaxXMinYCorner,
-                    .layerMinXMaxYCorner, .layerMaxXMaxYCorner
-                ]
-                topView.layer.cornerCurve = .continuous
-                topView.clipsToBounds = true
-                topView.layer.cornerRadius = screenCornerRadius
-            }
+            updateCornerRadii(top: screenCornerRadius, bottom: bottomCornerRadius)
         }
 
         dimView.frame = container.bounds
@@ -304,6 +280,97 @@ final class NavigationTransitionCoordinator {
     }
 
     // MARK: - Progress
+
+    func updateCornerRadii(top: CGFloat, bottom: CGFloat?) {
+        requestedTopCornerRadius = top
+        requestedBottomCornerRadius = bottom
+        guard !isFlat else { return }
+        let limit = max(0, min(container.bounds.width, container.bounds.height) / 2)
+        let topRadius = max(0, min(top, limit))
+        let bottomRadius = max(0, min(bottom ?? top, limit))
+        guard topRadius > 0 || bottomRadius > 0 else {
+            restoreTopViewCorners()
+            return
+        }
+        if restoreTopViewCornerState == nil {
+            let clipsToBounds = topView.clipsToBounds
+            let radius = topView.layer.cornerRadius
+            let maskedCorners = topView.layer.maskedCorners
+            let curve = topView.layer.cornerCurve
+            let mask = topView.layer.mask
+            var restoreNativeConfiguration: (() -> Void)?
+            if #available(iOS 26.0, *) {
+                let configuration = topView.cornerConfiguration
+                restoreNativeConfiguration = { [weak topView] in
+                    topView?.cornerConfiguration = configuration
+                }
+            }
+            restoreTopViewCornerState = { [weak topView] in
+                guard let topView else { return }
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                restoreNativeConfiguration?()
+                topView.layer.cornerCurve = curve
+                topView.layer.maskedCorners = maskedCorners
+                topView.layer.cornerRadius = radius
+                topView.layer.mask = mask
+                topView.clipsToBounds = clipsToBounds
+                CATransaction.commit()
+            }
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        topView.layer.maskedCorners = [
+            .layerMinXMinYCorner, .layerMaxXMinYCorner,
+            .layerMinXMaxYCorner, .layerMaxXMaxYCorner
+        ]
+        topView.layer.cornerCurve = .continuous
+        topView.clipsToBounds = true
+        if #available(iOS 26.0, *) {
+            topView.cornerConfiguration = .uniformEdges(
+                topRadius: .fixed(topRadius), bottomRadius: .fixed(bottomRadius)
+            )
+            topView.layer.cornerRadius = 0
+            topView.layer.mask = nil
+        } else if topRadius == bottomRadius {
+            topView.layer.cornerRadius = topRadius
+            topView.layer.mask = nil
+        } else {
+            topView.layer.cornerRadius = 0
+            let size = container.bounds.size
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: topRadius, y: 0))
+            path.addLine(to: CGPoint(x: size.width - topRadius, y: 0))
+            path.addArc(center: CGPoint(x: size.width - topRadius, y: topRadius), radius: topRadius,
+                        startAngle: -.pi / 2, endAngle: 0, clockwise: false)
+            path.addLine(to: CGPoint(x: size.width, y: size.height - bottomRadius))
+            path.addArc(center: CGPoint(x: size.width - bottomRadius, y: size.height - bottomRadius), radius: bottomRadius,
+                        startAngle: 0, endAngle: .pi / 2, clockwise: false)
+            path.addLine(to: CGPoint(x: bottomRadius, y: size.height))
+            path.addArc(center: CGPoint(x: bottomRadius, y: size.height - bottomRadius), radius: bottomRadius,
+                        startAngle: .pi / 2, endAngle: .pi, clockwise: false)
+            path.addLine(to: CGPoint(x: 0, y: topRadius))
+            path.addArc(center: CGPoint(x: topRadius, y: topRadius), radius: topRadius,
+                        startAngle: .pi, endAngle: 3 * .pi / 2, clockwise: false)
+            path.closeSubpath()
+            transitionCornerMask.frame = CGRect(origin: .zero, size: size)
+            transitionCornerMask.path = path
+            topView.layer.mask = transitionCornerMask
+        }
+        CATransaction.commit()
+    }
+
+    /// Reapply the current motion to a resized surface without restarting its
+    /// clock or changing gesture progress.
+    func updateLayout() {
+        updateCornerRadii(top: requestedTopCornerRadius, bottom: requestedBottomCornerRadius)
+        if let updateSpecializedLayout {
+            updateSpecializedLayout()
+        } else {
+            updateContentProgress(progress, transition: .immediate, completion: {})
+            progressUpdated?(progress, .immediate)
+        }
+    }
 
     /// Maps `progress` (0 → 1) to the on-screen position of the transition.
     /// Mirrors the original: `position = 1 - progress` for `.push`, `position =
@@ -336,8 +403,20 @@ final class NavigationTransitionCoordinator {
         if recordsInteractiveSample {
             recordInteractiveProgressSample(progress)
         }
+        var framesWereApplied = false
+        var completedSynchronously = false
+        updateContentProgress(progress, transition: transition) {
+            if framesWereApplied {
+                completion()
+            } else {
+                completedSynchronously = true
+            }
+        }
         progressUpdated?(progress, transition)
-        updateContentProgress(progress, transition: transition, completion: completion)
+        framesWereApplied = true
+        if completedSynchronously {
+            completion()
+        }
     }
 
     private func updateContentProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
@@ -573,6 +652,9 @@ final class NavigationTransitionCoordinator {
         )
 
         let applyFrame: (NavigationTransitionCoordinator, CGFloat, Bool) -> Void = { coordinator, linearProgress, finished in
+            coordinator.specializedAnimationProgress = linearProgress
+            let currentSize = coordinator.container.bounds.size
+            let widthScale = currentSize.width / width
             let clampedProgress = max(0.0, min(1.0, linearProgress))
             let externalProgress = finished ? 1.0 : startProgress + (1.0 - startProgress) * clampedProgress
             let topLinearProgress = min(1.0, clampedProgress / topExitProgress)
@@ -587,8 +669,8 @@ final class NavigationTransitionCoordinator {
             let bottomRubberbandX = bottomRubberbandAmplitude * bottomPullProgress * (1.0 - bottomSettleProgress)
             let bottomX = finished ? 0.0 : bottomBaseX + bottomRubberbandX
 
-            let topFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(topX), y: 0.0), size: size)
-            let bottomFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(bottomX), y: 0.0), size: size)
+            let topFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(topX * widthScale), y: 0.0), size: currentSize)
+            let bottomFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(bottomX * widthScale), y: 0.0), size: currentSize)
             coordinator.topView.frame = topFrame
             coordinator.bottomView.transform = .identity
             coordinator.bottomView.frame = bottomFrame
@@ -597,28 +679,31 @@ final class NavigationTransitionCoordinator {
                 x: topFrame.minX - navigationShadowWidth,
                 y: 0.0,
                 width: navigationShadowWidth,
-                height: size.height
+                height: currentSize.height
             )
-            coordinator.shadowNode.view.alpha = finished ? 0.0 : max(0.0, 1.0 - topFrame.minX / width) * 0.9
-            coordinator.dimView.frame = CGRect(origin: .zero, size: CGSize(width: size.width, height: size.height))
+            coordinator.shadowNode.view.alpha = finished ? 0.0 : max(0.0, 1.0 - topX / width) * 0.9
+            coordinator.dimView.frame = CGRect(origin: .zero, size: currentSize)
             coordinator.dimView.alpha = 0.0
             coordinator.progress = externalProgress
             coordinator.progressUpdated?(externalProgress, .immediate)
         }
 
-        var elapsed: CFTimeInterval = 0.0
+        updateSpecializedLayout = { [weak self] in
+            guard let self else { return }
+            applyFrame(self, self.specializedAnimationProgress, false)
+        }
         applyFrame(self, 0.0, false)
-        var lastTimestamp = CACurrentMediaTime()
+        let startTimestamp = CACurrentMediaTime()
         let target = NavigationProgressDisplayLinkTarget()
         target.tick = { [weak self] link in
             guard let self else {
                 return
             }
-            let frameTimestamp = link.targetTimestamp > link.timestamp ? link.targetTimestamp : link.timestamp
-            let maximumFrameDelta = link.duration > 0.0 ? link.duration : 1.0 / 60.0
-            let delta = min(max(0.0, frameTimestamp - lastTimestamp), maximumFrameDelta)
-            elapsed += min(delta, 1.0 / 30.0)
-            lastTimestamp = frameTimestamp
+            let frameTimestamp = max(CACurrentMediaTime(), max(link.timestamp, link.targetTimestamp))
+            // A skipped frame must not lengthen the pop. The presentation
+            // clock advances while the main thread is busy even if the
+            // display link does not deliver every callback.
+            let elapsed = max(0.0, frameTimestamp - startTimestamp)
 
             if elapsed >= duration {
                 applyFrame(self, 1.0, true)
@@ -640,6 +725,7 @@ final class NavigationTransitionCoordinator {
     /// Abort the transition (e.g. interactive pan released without enough
     /// velocity/distance). Animates back to `progress = 0` and tears down.
     func animateCancel(velocity: CGFloat = 0.0, _ completion: @escaping () -> Void) {
+        animatingCompletion = true
         currentCompletion = completion
         let transition = cancelTransition(velocity: velocity)
         let progressVelocity = min(0.0, velocity) / max(1.0, container.bounds.width)
@@ -710,9 +796,7 @@ final class NavigationTransitionCoordinator {
         )
         progressAnimationCompletion = completion
         progressAnimationElapsed = 0.0
-        progressAnimationLastTimestamp = nil
-
-        progressAnimationLastTimestamp = CACurrentMediaTime()
+        progressAnimationStartTimestamp = CACurrentMediaTime()
 
         let target = NavigationProgressDisplayLinkTarget()
         target.tick = { [weak self] link in
@@ -729,23 +813,13 @@ final class NavigationTransitionCoordinator {
     }
 
     private func handleProgressDisplayLink(_ link: CADisplayLink) {
-        let frameTimestamp = link.targetTimestamp > link.timestamp ? link.targetTimestamp : link.timestamp
-        let maximumFrameDelta = link.duration > 0.0 ? link.duration : 1.0 / 60.0
-        let frameDelta: CFTimeInterval
-        if let lastTimestamp = progressAnimationLastTimestamp {
-            frameDelta = min(max(0.0, frameTimestamp - lastTimestamp), maximumFrameDelta)
-        } else {
-            frameDelta = maximumFrameDelta
-        }
-        if advanceProgressAnimation(by: frameDelta) {
-            return
-        }
-        progressAnimationLastTimestamp = frameTimestamp
+        let frameTimestamp = max(CACurrentMediaTime(), max(link.timestamp, link.targetTimestamp))
+        guard let startTimestamp = progressAnimationStartTimestamp else { return }
+        advanceProgressAnimation(toElapsed: max(progressAnimationElapsed, frameTimestamp - startTimestamp))
     }
 
-    @discardableResult
-    private func advanceProgressAnimation(by delta: CFTimeInterval) -> Bool {
-        progressAnimationElapsed += min(max(0.0, delta), 1.0 / 30.0)
+    private func advanceProgressAnimation(toElapsed elapsed: CFTimeInterval) {
+        progressAnimationElapsed = max(0.0, elapsed)
 
         let linearProgress = progressAnimationDuration > 0.0
             ? min(1.0, progressAnimationElapsed / progressAnimationDuration)
@@ -764,9 +838,7 @@ final class NavigationTransitionCoordinator {
             updateContentProgress(finalProgress, transition: .immediate, completion: {})
             progressUpdated?(finalProgress, .immediate)
             completion?()
-            return true
         }
-        return false
     }
 
     private func preferredProgressFramesPerSecond() -> Int {
@@ -784,7 +856,8 @@ final class NavigationTransitionCoordinator {
         progressDisplayLinkTarget = nil
         progressAnimationCompletion = nil
         progressAnimationElapsed = 0.0
-        progressAnimationLastTimestamp = nil
+        progressAnimationStartTimestamp = nil
+        updateSpecializedLayout = nil
     }
 
     private func progressTiming(for curve: ContainedViewLayoutTransitionCurve) -> NavigationProgressTiming {
@@ -822,11 +895,7 @@ final class NavigationTransitionCoordinator {
     }
 
     private func restoreTopViewCorners() {
-        guard let (clipsToBounds, cornerRadius, maskedCorners, cornerCurve) = topInitialCorners else { return }
-        topView.layer.cornerCurve = cornerCurve
-        topView.layer.maskedCorners = maskedCorners
-        topView.clipsToBounds = clipsToBounds
-        topView.layer.cornerRadius = cornerRadius
-        topInitialCorners = nil
+        restoreTopViewCornerState?()
+        restoreTopViewCornerState = nil
     }
 }

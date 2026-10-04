@@ -846,6 +846,10 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         buttonHostingMode == .separatedLayer
     }
 
+    private var usesSeparatedTitleHosting: Bool {
+        usesSeparatedButtonHosting && !titleTransitionMode
+    }
+
     private var isButtonLayerExternallyHosted: Bool {
         usesSeparatedButtonHosting && buttonLayerHostView != nil && buttonLayer.superview !== self
     }
@@ -920,7 +924,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         }
 
         installButtonLayerForCurrentHost(preservePresentationLayer: preservePresentationLayer)
-        let hostView: UIView = usesSeparatedButtonHosting ? buttonLayer : buttonsContainerView
+        // During navigation the title travels with its screen, while bar
+        // buttons stay in the persistent chrome layer.
+        let hostView: UIView = usesSeparatedTitleHosting ? buttonLayer : buttonsContainerView
         if titleContentView.superview !== hostView {
             AetherNavigationBarButtonLayer.reparentPreservingPresentation(
                 view: titleContentView,
@@ -930,7 +936,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                 preservePresentationLayer: preservePresentationLayer
             )
         }
-        if !usesSeparatedButtonHosting {
+        if !usesSeparatedTitleHosting {
             buttonLayer.removeButtonPlacement(id: ButtonChromePlacementID.titleContentView, detachView: false)
         }
     }
@@ -1325,7 +1331,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         transform: CGAffineTransform? = nil,
         transition: ContainedViewLayoutTransition
     ) {
-        guard usesSeparatedButtonHosting, let id = buttonChromePlacementID(for: view) else {
+        guard usesSeparatedButtonHosting,
+              !(view === titleContentView && titleTransitionMode),
+              let id = buttonChromePlacementID(for: view) else {
             if let frame {
                 transition.updateFrame(view: view, frame: frame)
             }
@@ -1447,7 +1455,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     }
 
     private func shouldUpdateButtonChrome(targetFrame: CGRect) -> Bool {
-        if contentViewTransitionLocksButtonChrome, rectsAreEqual(currentButtonsRowFrame, targetFrame) {
+        // An accessory-only crossfade keeps buttons fixed, but a navigation
+        // morph must still install and animate its new semantic contents.
+        if activeButtonMorphTransition() == nil,
+           contentViewTransitionLocksButtonChrome,
+           rectsAreEqual(currentButtonsRowFrame, targetFrame) {
             return false
         }
         return true
@@ -1653,6 +1665,7 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     public func setTitleTransitionMode(_ enabled: Bool) {
         titleTransitionMode = enabled
         isUserInteractionEnabled = !enabled
+        installTitleContentViewForCurrentHostingMode(preservePresentationLayer: false)
         if enabled {
             applyTransitionVisibilityState()
         } else {
@@ -2382,10 +2395,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
             transition.updateAlpha(node: stripeNode, alpha: presentationData.theme.glassStyle == .strong ? scrollEdgeAlpha : 0.0)
         }
 
-        // Scroll-edge frost anchored to the BOTTOM of the nav bar. The fade
-        // zone terminates exactly at the nav bar bottom (transparent there)
-        // and ramps up to full frost near the top of the screen. No bleed
-        // past the nav bar — the bottom boundary is a clean transparent edge.
+        // Scroll-edge frost ends at the bottom of the nav bar. Regular glass
+        // dissolves into clear content; V2 keeps a softer blur and tint there
+        // while strengthening toward the top of the screen.
         if let edgeEffect = edgeEffectView {
             if presentationData.theme.style != .glass {
                 updateEdgeEffectVisibility(transition: transition)
@@ -2407,6 +2419,9 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                 // visible "просвет" between the nav bar's frost and the
                 // status bar / dynamic island area.
                 let usesRegularEdgeEffect = presentationData.theme.edgeEffectStyle == .regular
+                let usesGradientEdgeEffect = usesRegularEdgeEffect
+                    || (presentationData.theme.appearanceStyle == .liquidGlassV2
+                        && !presentationData.theme.edgeEffectSolidBlur)
                 edgeEffect.clipsToBounds = true
                 let topInset: CGFloat = usesRegularEdgeEffect ? 8.0 : 0.0
                 // Regular glass must not draw any pixels below the navbar
@@ -2464,10 +2479,20 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                     width: edgeEffectFrame.width,
                     height: edgeEffectFrame.height + regularBottomOverscan
                 )
-                let fadeZone: CGFloat = usesRegularEdgeEffect ? edgeEffectUpdateSize.height : 0.0
+                let fadeZone: CGFloat = usesGradientEdgeEffect ? edgeEffectUpdateSize.height : 0.0
                 let fadeCurveExponent: CGFloat = usesRegularEdgeEffect ? 2.0 : 1.0
                 let edgeBlurRadius = presentationData.theme.edgeEffectBlurRadiusAtEdge
-                let fadeBlurRadius: CGFloat = usesRegularEdgeEffect ? 0.0 : edgeBlurRadius
+                let fadeBlurRadius: CGFloat = usesRegularEdgeEffect ? 0.0
+                    : (usesGradientEdgeEffect
+                        ? max(0.0, min(edgeBlurRadius, presentationData.theme.edgeEffectBlurRadiusAtFade))
+                        : edgeBlurRadius)
+                // V2 keeps some blur at the content boundary and retains a
+                // dense tint across the bar. The public material fallback
+                // uses the same nonzero floor in its blur-opacity mask.
+                let minimumFadeAlpha: CGFloat = usesRegularEdgeEffect ? 0.0
+                    : (usesGradientEdgeEffect
+                        ? min(1.0, fadeBlurRadius / max(0.001, edgeBlurRadius))
+                        : 0.04)
                 let edgeContentColor = presentationData.theme.edgeEffectColor ?? presentationData.theme.opaqueBackgroundColor
                 edgeEffect.update(
                     content: edgeContentColor,
@@ -2475,13 +2500,14 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
                     alpha: presentationData.theme.edgeEffectAlpha,
                     rect: CGRect(origin: .zero, size: edgeEffectUpdateSize),
                     edge: .top,
-                    edgeSize: usesRegularEdgeEffect ? fadeZone : 0.0,
+                    edgeSize: fadeZone,
                     blurRadiusAtEdge: edgeBlurRadius,
                     blurRadiusAtFade: fadeBlurRadius,
-                    solidBlur: !usesRegularEdgeEffect,
+                    solidBlur: !usesGradientEdgeEffect,
                     fadeCurveExponent: fadeCurveExponent,
-                    minimumFadeAlpha: usesRegularEdgeEffect ? 0.0 : 0.04,
-                    prefersStaticVariableBlurMask: usesRegularEdgeEffect,
+                    minimumFadeAlpha: minimumFadeAlpha,
+                    prefersStaticVariableBlurMask: usesGradientEdgeEffect,
+                    minimumTintAlpha: usesRegularEdgeEffect ? nil : 0.65,
                     transition: .immediate
                 )
             }
@@ -3943,12 +3969,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         }
 
         let titleAlpha: CGFloat = titleContentHiddenForTransition || buttonsOnlyTransitionMode ? 0.0 : 1.0
-        let customTitleAlpha: CGFloat = titleTransitionMode || buttonContentHiddenForTransition ? 0.0 : 1.0
         let contentAlpha: CGFloat = titleContentHiddenForTransition || buttonsOnlyTransitionMode ? 0.0 : 1.0
         titleNode.alpha = titleAlpha
         subtitleNode.alpha = titleAlpha
         if let titleContentView {
-            updateButtonLayerHostedView(view: titleContentView, alpha: customTitleAlpha, transition: .immediate)
+            updateButtonLayerHostedView(view: titleContentView, alpha: titleAlpha, transition: .immediate)
         }
         ownedContentView?.alpha = contentAlpha
     }

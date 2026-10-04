@@ -14,6 +14,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     private(set) var controllers: [AetherViewController] = []
     private var controllerViews: [UIView] = []
     private var transitionCoordinator: NavigationTransitionCoordinator?
+    private var transitionControllers: [AetherViewController] = []
 
     private struct PendingControllersUpdate {
         let controllers: [AetherViewController]
@@ -34,7 +35,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     /// controller's view from the hierarchy — leaving the outgoing screen
     /// blank at animation start. Treat this flag as "coordinator is about
     /// to be installed, stay out."
-    private var isInstallingTransition: Bool = false
+    private(set) var isInstallingTransition: Bool = false
 
     private var isTransitionActive: Bool {
         return transitionCoordinator != nil || isInstallingTransition || isDeferringPendingControllersUpdate
@@ -65,20 +66,24 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     var bottomBarTransitionProgress: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     var bottomBarTransitionResolutionBegan: ((Bool, ContainedViewLayoutTransition) -> Void)?
     var bottomBarTransitionEnded: ((Bool) -> Void)?
+    /// Runs after both end observers have seen the settled hierarchy. Queued
+    /// routing must wait until this point so an old transition cannot tear
+    /// down views belonging to the next one.
+    var transitionDidSettle: (() -> Void)?
     var layoutForController: ((AetherViewController, ContainerViewLayout) -> ContainerViewLayout)?
 
-    /// The host device's display corner radius, used to round the **left
-    /// edge** of the moving controller's view during push/pop — matches the
-    /// iOS 26 native nav-bar transition where the card looks like it's
-    /// emerging from / sliding into the device's curved bezel.
-    ///
-    /// Read via the same `_displayCornerRadius` KVC trick already used in
-    /// `AetherTabBarController.deviceDisplayCornerRadius`. Returns `0` when
-    /// the value isn't available (older OSes, simulator with non-bezeled
-    /// display, embedded hosts) — and the coordinator skips rounding entirely
-    /// in that case, so windowed/pop-up hosts behave normally.
-    private var screenCornerRadius: CGFloat {
-        return 0
+    /// Radius of the moving page, supplied by the containing surface.
+    /// Embedded navigation never assumes the physical display's geometry.
+    public var transitionCornerRadius: CGFloat = 0 {
+        didSet {
+            transitionCoordinator?.updateCornerRadii(top: transitionCornerRadius, bottom: transitionBottomCornerRadius)
+        }
+    }
+
+    public var transitionBottomCornerRadius: CGFloat? {
+        didSet {
+            transitionCoordinator?.updateCornerRadii(top: transitionCornerRadius, bottom: transitionBottomCornerRadius)
+        }
     }
 
     // MARK: - Init
@@ -131,6 +136,10 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
         // cascades back into this method before the coordinator has been
         // assigned. See the flag's declaration for the full story.
         if isTransitionActive {
+            // Layout refreshes repeat the current committed stack. Recording
+            // that echo as a pending update would resurrect the popped page
+            // after an interactive transition removes it.
+            guard !controllersAreEqual(self.controllers, dedupedControllers) else { return }
             let shouldKeepAnimatedPendingUpdate: Bool
             if let pending = pendingControllersUpdate, pending.animated, controllersAreEqual(pending.controllers, dedupedControllers) {
                 shouldKeepAnimatedPendingUpdate = true
@@ -144,6 +153,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
             return
         }
 
+        pendingControllersUpdate = nil
         self.controllers = dedupedControllers
 
         if let layout = validLayout {
@@ -219,17 +229,9 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
 
     public func popController(animated: Bool) -> AetherViewController? {
         guard controllers.count > 1 else { return nil }
-
-        let removedController = controllers.removeLast()
-        let newTop = controllers.last!
-
-        if let layout = validLayout, animated {
-            performTransition(from: removedController, to: newTop, push: false, layout: layout)
-        } else if let layout = validLayout {
-            removedController.view.removeFromSuperview()
-            updateControllerViews(layout: layout, transition: .immediate)
-        }
-
+        var updatedControllers = controllers
+        let removedController = updatedControllers.removeLast()
+        setControllers(updatedControllers, animated: animated)
         return removedController
     }
 
@@ -251,26 +253,26 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
             // "to" controller's contentInset stays stuck at whatever it
             // was when the animation started — the exact "scroll
             // contentInset wrong after pop" bug.
-            for controller in controllers where controller.isViewLoaded {
+            var updated = Set<ObjectIdentifier>()
+            for controller in controllers + transitionControllers where controller.isViewLoaded && updated.insert(ObjectIdentifier(controller)).inserted {
                 controller.containerLayoutUpdated(resolvedLayout(for: controller, baseLayout: layout), transition: transition)
             }
+            transitionCoordinator?.updateLayout()
         }
     }
 
     private func updateControllerViews(layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
-        guard let topController = controllers.last else { return }
-
-        let activeViews = Set(controllers.map { ObjectIdentifier($0.view) })
-        for subview in subviews {
-            guard activeViews.contains(ObjectIdentifier(subview)), subview !== topController.view else {
-                continue
-            }
-            subview.removeFromSuperview()
+        let topController = controllers.last
+        for view in controllerViews where view !== topController?.viewIfLoaded {
+            view.removeFromSuperview()
         }
+        controllerViews.removeAll()
+        guard let topController else { return }
 
         if topController.view.superview !== self {
             addSubview(topController.view)
         }
+        controllerViews = [topController.view]
 
         let frame = CGRect(origin: .zero, size: layout.size)
         transition.updateFrame(view: topController.view, frame: frame)
@@ -282,8 +284,6 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     private func performTransition(from: AetherViewController, to: AetherViewController, push: Bool, layout: ContainerViewLayout) {
         let frame = CGRect(origin: .zero, size: layout.size)
 
-        to.view.frame = frame
-
         // Mark the transition as "being installed" BEFORE any call that
         // could reach the view hierarchy for `to` (including
         // `to.containerLayoutUpdated` which lays out the bar, and
@@ -292,6 +292,9 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
         // `requestLayout` reentry into this container before the
         // coordinator reference is assigned.
         isInstallingTransition = true
+        transitionControllers = [from, to]
+        controllerViews = [from.view, to.view]
+        to.view.frame = frame
         bottomBarTransitionBegan?(push ? .push : .pop, from, to, layout, false)
         to.containerLayoutUpdated(resolvedLayout(for: to, baseLayout: layout), transition: .immediate)
 
@@ -309,7 +312,8 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                 topBar: nil,
                 bottomBar: nil,
                 isInteractive: false,
-                screenCornerRadius: screenCornerRadius,
+                screenCornerRadius: transitionCornerRadius,
+                bottomCornerRadius: transitionBottomCornerRadius,
                 progressUpdated: { [weak self] progress, transition in
                     self?.navigationBarTransitionProgress?(progress, transition)
                     self?.bottomBarTransitionProgress?(progress, transition)
@@ -320,11 +324,8 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
 
             coordinator.animateCompletion { [weak self] in
                 guard let self = self else { return }
-                self.navigationBarTransitionEnded?(true)
-                self.bottomBarTransitionEnded?(true)
                 from.view.removeFromSuperview()
-                self.transitionCoordinator = nil
-                self.applyPendingControllersUpdateIfPossible(deferred: true)
+                self.finishTransition(completed: true)
             }
         } else {
             navigationBarTransitionBegan?(.pop, from, to, layout, false)
@@ -339,7 +340,8 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                 topBar: nil,
                 bottomBar: nil,
                 isInteractive: false,
-                screenCornerRadius: screenCornerRadius,
+                screenCornerRadius: transitionCornerRadius,
+                bottomCornerRadius: transitionBottomCornerRadius,
                 progressUpdated: { [weak self] progress, transition in
                     self?.navigationBarTransitionProgress?(progress, transition)
                     self?.bottomBarTransitionProgress?(progress, transition)
@@ -350,15 +352,23 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
 
             coordinator.animateCompletion { [weak self] in
                 guard let self = self else { return }
-                self.navigationBarTransitionEnded?(true)
-                self.bottomBarTransitionEnded?(true)
                 from.view.removeFromSuperview()
-                self.transitionCoordinator = nil
-                self.applyPendingControllersUpdateIfPossible(deferred: true) { [weak self] in
-                    self?.controllerRemoved?(from)
-                }
+                self.finishTransition(completed: true, removedController: from)
             }
         }
+    }
+
+    private func finishTransition(completed: Bool, removedController: AetherViewController? = nil) {
+        transitionCoordinator = nil
+        transitionControllers.removeAll()
+        controllerViews = controllers.last.map { [$0.view!] } ?? []
+        navigationBarTransitionEnded?(completed)
+        if let removedController {
+            controllerRemoved?(removedController)
+        }
+        bottomBarTransitionEnded?(completed)
+        transitionDidSettle?()
+        applyPendingControllersUpdateIfPossible(deferred: true)
     }
 
     // MARK: - Interactive Gesture
@@ -429,6 +439,9 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                     return
                 }
 
+                isInstallingTransition = true
+                transitionControllers = [currentController, previousController]
+                controllerViews = [currentController.view, previousController.view]
                 previousController.view.frame = CGRect(origin: .zero, size: layout.size)
                 previousController.containerLayoutUpdated(resolvedLayout(for: previousController, baseLayout: layout), transition: .immediate)
                 navigationBarTransitionBegan?(.pop, currentController, previousController, layout, true)
@@ -444,13 +457,15 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                     topBar: nil,
                     bottomBar: nil,
                     isInteractive: true,
-                    screenCornerRadius: screenCornerRadius,
+                    screenCornerRadius: transitionCornerRadius,
+                    bottomCornerRadius: transitionBottomCornerRadius,
                     progressUpdated: { [weak self] progress, transition in
                         self?.navigationBarTransitionProgress?(progress, transition)
                         self?.bottomBarTransitionProgress?(progress, transition)
                     }
                 )
                 self.transitionCoordinator = coordinator
+                isInstallingTransition = false
                 coordinator.updateProgress(progress, transition: .immediate, completion: {})
 
                 // Dismiss the keyboard along with the outgoing view. Done *after*
@@ -477,12 +492,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                     guard let self = self else { return }
                     let removed = self.controllers.removeLast()
                     removed.view.removeFromSuperview()
-                    self.transitionCoordinator = nil
-                    self.navigationBarTransitionEnded?(true)
-                    self.bottomBarTransitionEnded?(true)
-                    self.applyPendingControllersUpdateIfPossible(deferred: true) { [weak self] in
-                        self?.controllerRemoved?(removed)
-                    }
+                    self.finishTransition(completed: true, removedController: removed)
                 }
                 navigationBarTransitionResolutionBegan?(true, completionTransition)
                 bottomBarTransitionResolutionBegan?(true, completionTransition)
@@ -493,10 +503,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                     guard let self = self else { return }
                     let previousController = self.controllers[self.controllers.count - 2]
                     previousController.view.removeFromSuperview()
-                    self.transitionCoordinator = nil
-                    self.navigationBarTransitionEnded?(false)
-                    self.bottomBarTransitionEnded?(false)
-                    self.applyPendingControllersUpdateIfPossible(deferred: true)
+                    self.finishTransition(completed: false)
                 }
                 navigationBarTransitionResolutionBegan?(false, cancelTransition)
                 bottomBarTransitionResolutionBegan?(false, cancelTransition)
@@ -510,7 +517,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     // MARK: - UIGestureRecognizerDelegate
 
     override public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard controllers.count > 1, transitionCoordinator == nil else {
+        guard controllers.count > 1, !isTransitionActive else {
             return false
         }
         guard let topController = controllers.last else {

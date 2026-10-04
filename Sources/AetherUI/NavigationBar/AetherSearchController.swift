@@ -147,6 +147,11 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     /// Default `false` — placement is determined automatically.
     public var prefersBottomPlacement: Bool = false
 
+    /// Keep search in the navigation bar when this screen is presented
+    /// without a tab bar, for example inside a modal navigation stack.
+    /// Set before assigning the controller to `ViewController.searchController`.
+    public var prefersNavigationBarPlacement: Bool = false
+
     /// Current placement (determined automatically when installed on a ViewController).
     public private(set) var placement: Placement = .navBar
 
@@ -180,6 +185,9 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     weak var viewController: AetherViewController?
     var savedNavigationBarContent: NavigationBarContentView?
     private var inheritedAppearance: AetherAppearance
+    private var tabItemPlacementOverride: Placement?
+    private var searchTransitionGeneration = 0
+    internal var tabItemTextChanged: ((String) -> Void)?
 
     // Bottom mode views
     private static let bottomBarHeight: CGFloat = 42.0
@@ -213,9 +221,14 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
         // before snapping down to the bottom — visible jump on every
         // launch.
         let hasTabBarSync = Self.responderChainContainsTabBar(starting: vc)
-        placement = (hasTabBarSync && !prefersBottomPlacement) ? .navBar : .bottom
+        let wantsNavigationBar = prefersNavigationBarPlacement
+            || (hasTabBarSync && !prefersBottomPlacement)
+        placement = tabItemPlacementOverride
+            ?? (wantsNavigationBar ? .navBar : .bottom)
         if placement == .bottom {
             installBottomPill(on: vc)
+        } else {
+            removeBottomPill()
         }
         applyResolvedAppearance()
         searchBar.updateIconTintColor(resolvedPlaceholderColor(in: vc.view))
@@ -225,9 +238,10 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
         // case the sync chain walk finds nothing. Re-check on the next
         // runloop tick so a late-attaching tab bar still routes the pill
         // up into the nav bar.
-        if !hasTabBarSync {
+        if !hasTabBarSync, tabItemPlacementOverride == nil {
             DispatchQueue.main.async { [weak self, weak vc] in
                 guard let self, let vc else { return }
+                guard self.viewController === vc, self.tabItemPlacementOverride == nil else { return }
                 guard self.placement == .bottom, !self.prefersBottomPlacement else { return }
                 guard Self.responderChainContainsTabBar(starting: vc) else { return }
                 // Promote to nav bar placement: tear down the bottom pill
@@ -237,6 +251,29 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
                 vc.rebuildTopBarAccessory()
             }
         }
+    }
+
+    /// An inside Search tab owns placement, while preserving the caller's
+    /// ordinary preference for use outside that tab configuration.
+    internal func setTabItemPlacementOverride(_ placementOverride: Placement?) {
+        guard tabItemPlacementOverride != placementOverride else { return }
+        tabItemPlacementOverride = placementOverride
+        guard let vc = viewController else { return }
+        let wantsNavigationBar = prefersNavigationBarPlacement
+            || (Self.responderChainContainsTabBar(starting: vc) && !prefersBottomPlacement)
+        let resolved = placementOverride
+            ?? (wantsNavigationBar ? .navBar : .bottom)
+        guard placement != resolved else { return }
+        if isActive {
+            deactivate()
+        }
+        removeBottomPill()
+        placement = resolved
+        if resolved == .bottom {
+            installBottomPill(on: vc)
+        }
+        applyResolvedAppearance()
+        vc.rebuildTopBarAccessory()
     }
 
     private static func responderChainContainsTabBar(starting responder: UIResponder) -> Bool {
@@ -250,6 +287,20 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
 
     /// Remove bottom pill if present.
     func uninstall() {
+        searchTransitionGeneration += 1
+        let wasActive = isActive
+        isActive = false
+        textField?.resignFirstResponder()
+        textField?.removeFromSuperview()
+        textField = nil
+        closeButton?.layer.removeAllAnimations()
+        closeButton?.removeFromSuperview()
+        closeButton = nil
+        searchBarStorage?.setSearchActive(false)
+        searchBarStorage?.rightExtraInset = 0
+        if wasActive, placement == .navBar {
+            viewController?.navigationBarView?.setSearchMode(false, animated: false)
+        }
         removeSearchResults(animated: false)
         removeBottomPill()
         viewController = nil
@@ -262,9 +313,20 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     /// - `.bottom`: pill shrinks, close button appears, keyboard lifts pill
     public func activate() {
         guard !isActive, let vc = viewController else { return }
+        searchTransitionGeneration += 1
+        let generation = searchTransitionGeneration
+        // A dismissal can still own controls while its animation is running.
+        // Retire them before a new activation installs its own field and close.
+        textField?.resignFirstResponder()
+        textField?.removeFromSuperview()
+        textField = nil
+        closeButton?.removeFromSuperview()
+        closeButton = nil
         isActive = true
         delegate?.searchControllerWillActivate(self)
+        guard searchTransitionGeneration == generation, viewController === vc, isActive else { return }
         installSearchResults(in: vc)
+        guard searchTransitionGeneration == generation, viewController === vc, isActive else { return }
 
         switch placement {
         case .navBar:
@@ -277,8 +339,11 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     /// Deactivate search. Keyboard and UI restore simultaneously.
     public func deactivate() {
         guard isActive, let vc = viewController else { return }
+        searchTransitionGeneration += 1
+        let generation = searchTransitionGeneration
         isActive = false
         delegate?.searchControllerWillDeactivate(self)
+        guard searchTransitionGeneration == generation, viewController === vc, !isActive else { return }
         removeSearchResults(animated: true)
 
         switch placement {
@@ -293,6 +358,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
 
     private func activateNavBar(vc: AetherViewController) {
         guard let navBar = vc.navigationBarView else { return }
+        let generation = searchTransitionGeneration
 
         searchBar.setSearchActive(true)
         searchBar.rightExtraInset = closeButtonSize + 8.0
@@ -337,12 +403,13 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
             close.alpha = 1
             close.transform = .identity
         } completion: { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.searchTransitionGeneration == generation, self.isActive else { return }
             self.delegate?.searchControllerDidActivate(self)
         }
     }
 
     private func deactivateNavBar(vc: AetherViewController) {
+        let generation = searchTransitionGeneration
         textField?.resignFirstResponder()
         textField?.removeFromSuperview()
         textField = nil
@@ -362,7 +429,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
             self.closeButton?.alpha = 0
             self.closeButton?.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
         } completion: { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.searchTransitionGeneration == generation, !self.isActive else { return }
             self.closeButton?.removeFromSuperview()
             self.closeButton = nil
             self.delegate?.searchControllerDidDeactivate(self)
@@ -616,6 +683,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
 
     private func activateBottom(vc: AetherViewController) {
         guard let pill = bottomPill else { return }
+        let generation = searchTransitionGeneration
         let h = Self.bottomBarHeight
 
         if let edge = bottomEdgeEffect {
@@ -651,7 +719,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
             close.alpha = 1
             close.transform = .identity
         } completion: { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.searchTransitionGeneration == generation, self.isActive else { return }
             self.delegate?.searchControllerDidActivate(self)
         }
 
@@ -666,6 +734,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     }
 
     private func deactivateBottom(vc: AetherViewController) {
+        let generation = searchTransitionGeneration
         textField?.resignFirstResponder()
 
         let profile = AetherMotion.search.dismissal
@@ -680,7 +749,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
             self.closeButton?.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
             self.layoutBottomPill(in: vc.view)
         } completion: { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.searchTransitionGeneration == generation, !self.isActive else { return }
             self.textField?.removeFromSuperview()
             self.textField = nil
             self.closeButton?.removeFromSuperview()
@@ -934,6 +1003,7 @@ public final class AetherSearchController: NSObject, UITextFieldDelegate {
     @objc private func textDidChange() {
         let text = textField?.text ?? ""
         delegate?.searchController(self, didChangeText: text)
+        tabItemTextChanged?(text)
         if let searchDisplayController {
             searchDisplayController.updateSearchText(text)
         } else {

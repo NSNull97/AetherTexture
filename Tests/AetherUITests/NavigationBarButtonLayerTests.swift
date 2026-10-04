@@ -338,7 +338,7 @@ final class NavigationBarButtonLayerTests: XCTestCase {
         XCTAssertFalse(targetTitleView.isDescendant(of: bar.debugButtonsContainerView))
     }
 
-    func testCustomTitleViewIsHiddenInTitleTransitionMode() {
+    func testCustomTitleViewMovesInlineInTitleTransitionMode() {
         NavigationBarImpl.defaultButtonHostingMode = .separatedLayer
 
         let hostView = UIView(frame: CGRect(x: 0.0, y: 0.0, width: 320.0, height: 104.0))
@@ -355,8 +355,14 @@ final class NavigationBarButtonLayerTests: XCTestCase {
         bar.setTitleTransitionMode(true)
         layout(bar)
 
+        XCTAssertTrue(titleView.isDescendant(of: bar.debugButtonsContainerView))
+        XCTAssertFalse(titleView.isDescendant(of: bar.debugButtonLayer))
+        XCTAssertEqual(titleView.alpha, 1.0, accuracy: 0.001)
+
+        bar.setTitleTransitionMode(false)
+        layout(bar)
         XCTAssertTrue(titleView.isDescendant(of: bar.debugButtonLayer))
-        XCTAssertEqual(titleView.alpha, 0.0, accuracy: 0.001)
+        XCTAssertEqual(titleView.alpha, 1.0, accuracy: 0.001)
     }
 
     func testTransitionTitleBarDoesNotStealCustomTitleViewFromButtonLayer() {
@@ -646,6 +652,52 @@ final class NavigationBarButtonLayerTests: XCTestCase {
 
         let animatedChromeViews = chromeChain.filter { !($0.layer.animationKeys() ?? []).isEmpty }
         XCTAssertTrue(animatedChromeViews.isEmpty, "Right button chrome should stay static during accessory-only crossfade")
+    }
+
+    func testExplicitButtonMorphBypassesAccessoryCrossfadeLock() throws {
+        guard !UIAccessibility.isReduceMotionEnabled else {
+            throw XCTSkip("Material pulses are intentionally disabled with Reduce Motion")
+        }
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 138))
+        let bar = makeBar(hostView: host, style: .glass)
+        let source = NavigationBarItem()
+        source.rightBarButtonItems = [UIBarButtonItem(title: "Done", style: .plain, target: nil, action: nil)]
+        bar.item = source
+        layout(bar)
+
+        let content = FixedExpansionContentView(height: 34)
+        bar.setContentView(content, animated: true)
+        // Preserve the row frame while the expansion accessory materializes.
+        layout(bar, height: 138, transition: .animated(duration: 0.32, curve: .easeInOut))
+        bar.setContentView(content, animated: false)
+
+        let destination = NavigationBarItem()
+        destination.rightBarButtonItems = [UIBarButtonItem(title: "Share", style: .plain, target: nil, action: nil)]
+        bar.withButtonMorphTransition(morphTransition()) {
+            bar.item = destination
+            bar.previousItem = .item(NavigationBarItem())
+            layout(bar, height: 138, transition: .immediate)
+        }
+
+        let groups = bar.debugButtonLayer.descendants(ofType: GlassControlGroup.self)
+            .filter { !$0.items.isEmpty }
+        XCTAssertEqual(groups.count, 2, "The new back button and changed right button must both be installed")
+        XCTAssertTrue(groups.contains { group in
+            group.items.contains { item in
+                if case .text("Share") = item.content { return true }
+                return false
+            }
+        })
+        for group in groups {
+            XCTAssertNotNil(group.sizeMorphPulseAnimationForTesting)
+            let item = try XCTUnwrap(group.items.first)
+            let button = try XCTUnwrap(group.itemButton(id: item.id))
+            XCTAssertTrue(
+                AetherContentMaterialization.isAnimating(view: button)
+                    || button.layer.animation(forKey: GlassControlGroup.contentMaterializationOpacityKey) != nil,
+                "An explicit navigation morph must retain the glyph's blur/fade"
+            )
+        }
     }
 
     func testNavigationButtonGlassStrokeIsHostedByNativeEffectView() {

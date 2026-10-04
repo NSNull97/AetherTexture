@@ -1,4 +1,5 @@
 import UIKit
+import AsyncDisplayKit
 
 // MARK: - Types
 
@@ -89,10 +90,60 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
     }
     private var pendingViewControllersUpdate: PendingViewControllersUpdate?
     private var isApplyingPendingViewControllersUpdate: Bool = false
+    private var pageBackgroundViews: [ObjectIdentifier: UIView] = [:]
+
+    /// Optional backing for transparent pages in an embedded navigation
+    /// surface. An explicitly opaque page background keeps its own color.
+    public var pageBackgroundColor: UIColor? {
+        didSet {
+            if pageBackgroundColor == nil {
+                pageBackgroundViews.values.forEach { $0.removeFromSuperview() }
+                pageBackgroundViews.removeAll()
+            } else {
+                for controller in _viewControllers where controller.isViewLoaded {
+                    updatePageBackground(for: controller)
+                }
+            }
+        }
+    }
+
+    /// The containing surface determines page rounding during push/pop.
+    public var transitionCornerRadius: CGFloat = 0 {
+        didSet {
+            switch rootContainer {
+            case let .flat(container):
+                container.transitionCornerRadius = transitionCornerRadius
+            case let .split(container):
+                container.masterContainer.transitionCornerRadius = transitionCornerRadius
+                container.detailContainer.transitionCornerRadius = transitionCornerRadius
+            case nil:
+                break
+            }
+        }
+    }
+
+    /// Optional lower-edge radius. `nil` uses `transitionCornerRadius`.
+    /// Sheets touching the bottom edge can supply zero independently.
+    public var transitionBottomCornerRadius: CGFloat? {
+        didSet {
+            switch rootContainer {
+            case let .flat(container):
+                container.transitionBottomCornerRadius = transitionBottomCornerRadius
+            case let .split(container):
+                container.masterContainer.transitionBottomCornerRadius = transitionBottomCornerRadius
+                container.detailContainer.transitionBottomCornerRadius = transitionBottomCornerRadius
+            case nil:
+                break
+            }
+        }
+    }
 
     var bottomBarVisibilityTransitionBegan: ((NavigationTransitionDirection, AetherViewController, AetherViewController, Bool) -> Void)?
     var bottomBarVisibilityTransitionProgress: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     var bottomBarVisibilityTransitionResolutionBegan: ((Bool, ContainedViewLayoutTransition) -> Void)?
+    /// Synchronous settlement: the inactive page has been removed, the bar
+    /// has its final owner, and `isTransitioning` is false. Queued navigation
+    /// begins only after this observer returns.
     var bottomBarVisibilityTransitionEnded: ((Bool) -> Void)?
     var suppressesSelfComputedLayoutDuringBottomBarTransition: Bool = false
     var layoutForController: ((AetherViewController, ContainerViewLayout) -> ContainerViewLayout)? {
@@ -197,6 +248,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
     }
 
     private var _viewControllers: [AetherViewController] = []
+    var topControllerDidChange: ((AetherViewController?) -> Void)?
     public var viewControllerStack: [AetherViewController] {
         _viewControllers
     }
@@ -230,6 +282,17 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             return container.isTransitioning
         case let .split(container):
             return container.masterContainer.isTransitioning || container.detailContainer.isTransitioning
+        case nil:
+            return false
+        }
+    }
+
+    private var isInstallingRootTransition: Bool {
+        switch rootContainer {
+        case let .flat(container):
+            return container.isInstallingTransition
+        case let .split(container):
+            return container.masterContainer.isInstallingTransition || container.detailContainer.isInstallingTransition
         case nil:
             return false
         }
@@ -367,14 +430,10 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
 
     private func updateContainerLayout(transition: ContainedViewLayoutTransition) {
         // When hosted inside a AetherModalController the "status bar"
-        // region is reused for the grabber strip: a navbar built with
-        // statusBarHeight = grabberContainerHeight has its chrome laid
-        // out below the grabber, and its own edge-effect frost covers
-        // the grabber area naturally (no extra work). Outside a modal,
-        // use the real window status bar height.
-        let statusBarHeight: CGFloat? = isHostedInModal
-            ? AetherModalController.grabberContainerHeight
-            : view.window?.windowScene?.statusBarManager?.statusBarFrame.height
+        // region is reused for the grabber strip. A native page/form sheet
+        // already begins below the window status bar, so it has no local
+        // status-bar region. Full-screen navigation uses the window value.
+        let statusBarHeight = navigationStatusBarHeight
 
         let inheritedLayout = hasParentDrivenLayout ? validLayout : nil
         let layout = ContainerViewLayout(
@@ -383,7 +442,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 widthClass: view.traitCollection.horizontalSizeClass == .regular ? .regular : .compact,
                 isTablet: UIDevice.current.userInterfaceIdiom == .pad
             ),
-            safeInsets: inheritedLayout?.safeInsets ?? view.safeAreaInsets,
+            safeInsets: navigationSafeInsets(inheritedLayout?.safeInsets ?? view.safeAreaInsets),
             additionalInsets: inheritedLayout?.additionalInsets ?? .zero,
             statusBarHeight: statusBarHeight,
             inputHeight: validLayout?.inputHeight,
@@ -402,6 +461,25 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             current = vc.parent
         }
         return false
+    }
+
+    private var isPresentedSystemSheet: Bool {
+        (modalPresentationStyle == .pageSheet || modalPresentationStyle == .formSheet)
+            && presentingViewController != nil
+    }
+
+    private var navigationStatusBarHeight: CGFloat? {
+        if isHostedInModal { return AetherModalController.grabberContainerHeight }
+        if isPresentedSystemSheet { return 0 }
+        return view.window?.windowScene?.statusBarManager?.statusBarFrame.height
+    }
+
+    private func navigationSafeInsets(_ insets: UIEdgeInsets) -> UIEdgeInsets {
+        guard isPresentedSystemSheet, let window = view.window else { return insets }
+        var adjusted = insets
+        let sheetTopInWindow = view.convert(.zero, to: window).y
+        adjusted.top = min(insets.top, max(0, window.safeAreaInsets.top - sheetTopInWindow))
+        return adjusted
     }
 
     override public func requestLayout(transition: ContainedViewLayoutTransition) {
@@ -438,9 +516,6 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             deduped.append(controller)
         }
 
-        _viewControllers = deduped
-        wireControllers(deduped)
-
         if interactiveNavigationBarTransition != nil && !isApplyingPendingViewControllersUpdate {
             let shouldKeepAnimatedPendingUpdate: Bool
             if let pending = pendingViewControllersUpdate,
@@ -457,10 +532,14 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             return
         }
 
+        _viewControllers = deduped
+        wireControllers(deduped)
+
         if let layout = currentLayoutForComputation() {
             updateVisibleContainers(layout: layout, transition: transitionForUpdate(animated: animated))
         }
         AetherChromeScrollSourceResolver.notifyDidChange(from: self)
+        topControllerDidChange?(topController)
     }
 
     public func setViewControllers(_ viewControllers: [UIViewController], animated: Bool, completion: @escaping () -> Void = {}) {
@@ -919,6 +998,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             updateVisibleContainers(layout: layout, transition: transitionForUpdate(animated: pending.animated))
         }
         AetherChromeScrollSourceResolver.notifyDidChange(from: self)
+        topControllerDidChange?(topController)
     }
 
     private func updateVisibleContainers(
@@ -1031,6 +1111,24 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 controller.didMove(toParent: self)
             }
         }
+    }
+
+    private func updatePageBackground(for controller: AetherViewController) {
+        guard let color = pageBackgroundColor, let page = controller.viewIfLoaded else { return }
+        let identifier = ObjectIdentifier(controller)
+        let backing = pageBackgroundViews[identifier] ?? UIView()
+        backing.isUserInteractionEnabled = false
+        backing.accessibilityElementsHidden = true
+        backing.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if backing.frame != page.bounds {
+            backing.frame = page.bounds
+        }
+        let pageIsOpaque = (page.backgroundColor?.resolvedColor(with: page.traitCollection).cgColor.alpha ?? 0) >= 1
+        backing.backgroundColor = pageIsOpaque ? .clear : color
+        if backing.superview !== page || page.subviews.first !== backing {
+            page.insertSubview(backing, at: 0)
+        }
+        pageBackgroundViews[identifier] = backing
     }
 
     private func ensureSharedNavigationBar() -> NavigationBarImpl {
@@ -1150,7 +1248,14 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         _ state: NavigationBarInteractiveTransition,
         layout: ContainerViewLayout
     ) {
-        for controller in _viewControllers {
+        // A programmatic pop removes its source from `_viewControllers` before
+        // the outgoing screen has finished moving. Keep its navigation height
+        // until the transition ends so content anchored below the bar does
+        // not jump underneath the title and search accessory.
+        let transitionControllers = _viewControllers
+            + [state.sourceController, state.targetController]
+        var updated = Set<ObjectIdentifier>()
+        for controller in transitionControllers where updated.insert(ObjectIdentifier(controller)).inserted {
             controller.navigationBarIsExternallyHosted = true
             if controller === state.sourceController {
                 controller.externalNavigationBarHeight = state.sourceBaseFrame.height
@@ -1181,6 +1286,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         includeAccessoryContent: Bool = true,
         allowsContainerLayoutRequests: Bool = true
     ) -> AetherViewController.NavigationLayout {
+        updatePageBackground(for: controller)
         let presentationData = navigationBarPresentationData(for: controller)
         if bar.presentationData !== presentationData {
             bar.updatePresentationData(presentationData, transition: transition)
@@ -1196,6 +1302,11 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             bar.withButtonMorphTransition(buttonMorphTransition, updateNavigationItem)
         } else {
             updateNavigationItem()
+        }
+        if bar === sharedNavigationBar {
+            // Moving title bars own the live custom views until the screen
+            // transition finishes, including its interactive settle/cancel.
+            bar.hostsNavigationItemTitleView = interactiveNavigationBarTransition == nil
         }
         bar.backPressed = { [weak self] in
             self?.popViewController(animated: true)
@@ -1256,7 +1367,48 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         } else {
             updateLayout()
         }
+        // Each screen carries its own scroll-edge state. Temporary title bars
+        // are new renderers, so they cannot inherit the shared bar's current
+        // alpha (which may already belong to the other transition endpoint).
+        bar.updateBackgroundAlpha(
+            controller.resolvedNavigationBarScrollEdgeAlpha,
+            transition: transition
+        )
         return navLayout
+    }
+
+    /// Route scroll callbacks to the screen that owns their content while
+    /// both transition endpoints are visible. The persistent bar can change
+    /// button ownership before the moving screens have finished settling.
+    @discardableResult
+    internal func applyNavigationBarScrollEdgeAlpha(
+        _ alpha: CGFloat,
+        for controller: AetherViewController,
+        transition: ContainedViewLayoutTransition
+    ) -> Bool {
+        guard let state = interactiveNavigationBarTransition else {
+            return false
+        }
+
+        let owner: AetherViewController
+        let bar: NavigationBarImpl
+        if AetherChromeScrollSourceResolver.activeControllerPath(from: state.sourceController)
+            .contains(where: { $0 === controller }) {
+            owner = state.sourceController
+            bar = state.sourceBar
+        } else if AetherChromeScrollSourceResolver.activeControllerPath(from: state.targetController)
+            .contains(where: { $0 === controller }) {
+            owner = state.targetController
+            bar = state.targetBar
+        } else {
+            return false
+        }
+
+        bar.updateBackgroundAlpha(alpha, transition: transition)
+        if sharedNavigationBarController === owner {
+            sharedNavigationBar?.updateBackgroundAlpha(alpha, transition: transition)
+        }
+        return true
     }
 
     private func updateSharedNavigationBar(for rootLayout: RootNavigationLayout, layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
@@ -1290,6 +1442,14 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                     controller.navigationBarView = nil
                 }
             }
+            return
+        }
+        // The bottom-bar callback can synchronously request layout while the
+        // screen container is installing a transition, before our chrome
+        // transition state exists. Keep the source buttons until that state
+        // starts their morph; an immediate target layout would consume the
+        // semantic diff and leave both push and back-button pop unanimated.
+        if isInstallingRootTransition, let owner = sharedNavigationBarController, owner !== topController {
             return
         }
         topController.loadViewIfNeeded()
@@ -1410,7 +1570,6 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         let bar = NavigationBarImpl(presentationData: navigationBarPresentationData(for: controller))
         bar.autoresizingMask = [.flexibleWidth]
         bar.requestContainerLayout = nil
-        bar.hostsNavigationItemTitleView = false
         // Transition bars render titles only. Enable that mode before the bar
         // is configured so layout never reparents caller-owned bar-button
         // custom views away from the persistent shared navigation bar.
@@ -1425,7 +1584,19 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             allowsContainerLayoutRequests: false
         )
         bar.setTitleContentHiddenForTransition(false)
+        bar.layoutIfNeeded()
+        ensureTransitionContentIsDisplayed(in: bar)
         return bar
+    }
+
+    private func ensureTransitionContentIsDisplayed(in view: UIView) {
+        if let node = ASViewToDisplayNode(view) {
+            node.layoutIfNeeded()
+            node.recursivelyEnsureDisplaySynchronously(true)
+        }
+        for child in view.subviews {
+            ensureTransitionContentIsDisplayed(in: child)
+        }
     }
 
     private func installTransitionNavigationBars(_ state: NavigationBarInteractiveTransition) {
@@ -1458,6 +1629,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
 
         let layout = validLayout ?? gestureLayout
         let stack = navigationStack(containing: sourceController, pairedWith: targetController)
+        sharedNavigationBar?.hostsNavigationItemTitleView = false
         let sourceBar = makeTransitionNavigationBar(for: sourceController, in: stack, layout: layout)
         let targetBar = makeTransitionNavigationBar(for: targetController, in: stack, layout: layout)
         let state = NavigationBarInteractiveTransition(
@@ -1709,6 +1881,8 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         state.scheduledButtonTransition = nil
         let targetController = completed ? state.targetController : state.sourceController
         let targetStack = completed ? state.targetStack : state.sourceStack
+        state.sourceBar.hostsNavigationItemTitleView = false
+        state.targetBar.hostsNavigationItemTitleView = false
         interactiveNavigationBarTransition = nil
 
         let bar = ensureSharedNavigationBar()
@@ -1753,6 +1927,10 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
 
     private func cleanupRemovedChildren() {
         var activeIdentifiers = Set(_viewControllers.map { ObjectIdentifier($0) })
+        if let transition = interactiveNavigationBarTransition {
+            activeIdentifiers.insert(ObjectIdentifier(transition.sourceController))
+            activeIdentifiers.insert(ObjectIdentifier(transition.targetController))
+        }
         for overlayContainer in overlayContainers where !overlayContainer.isRemoved {
             activeIdentifiers.insert(ObjectIdentifier(overlayContainer.controller))
         }
@@ -1767,6 +1945,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 continue
             }
             controller.topBarAccessoryTransitionDidChange = nil
+            pageBackgroundViews.removeValue(forKey: ObjectIdentifier(controller))?.removeFromSuperview()
             controller.navigationBarIsExternallyHosted = false
             controller.externalNavigationBarHeight = nil
             if controller.navigationBarView === sharedNavigationBar {
@@ -1884,6 +2063,8 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
     }
 
     private func wireNavigationBarTransitionCallbacks(to container: NavigationContainer) {
+        container.transitionCornerRadius = transitionCornerRadius
+        container.transitionBottomCornerRadius = transitionBottomCornerRadius
         container.navigationBarTransitionBegan = { [weak self] direction, sourceController, targetController, layout, isInteractive in
             self?.beginInteractiveNavigationBarTransition(
                 direction: direction,
@@ -1904,7 +2085,6 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 return
             }
             self.finishInteractiveNavigationBarTransition(transition, completed: completed)
-            self.applyPendingViewControllersUpdateIfPossible()
         }
 
         container.bottomBarTransitionBegan = { [weak self] direction, sourceController, targetController, _, isInteractive in
@@ -1918,6 +2098,10 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         }
         container.bottomBarTransitionEnded = { [weak self] completed in
             self?.bottomBarVisibilityTransitionEnded?(completed)
+        }
+        container.transitionDidSettle = { [weak self] in
+            self?.cleanupRemovedChildren()
+            self?.applyPendingViewControllersUpdateIfPossible()
         }
     }
 
@@ -1958,9 +2142,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
             return nil
         }
 
-        let statusBarHeight: CGFloat? = isHostedInModal
-            ? AetherModalController.grabberContainerHeight
-            : view.window?.windowScene?.statusBarManager?.statusBarFrame.height
+        let statusBarHeight = navigationStatusBarHeight
 
         return ContainerViewLayout(
             size: view.bounds.size,
@@ -1968,7 +2150,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 widthClass: view.traitCollection.horizontalSizeClass == .regular ? .regular : .compact,
                 isTablet: UIDevice.current.userInterfaceIdiom == .pad
             ),
-            safeInsets: view.safeAreaInsets,
+            safeInsets: navigationSafeInsets(view.safeAreaInsets),
             additionalInsets: .zero,
             statusBarHeight: statusBarHeight,
             inputHeight: nil,

@@ -4,6 +4,30 @@ import UIKit
 
 final class AetherSearchControllerTests: XCTestCase {
     @MainActor
+    func testModalScreenCanKeepSearchInNavigationBarWithoutTabBar() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let owner = AetherViewController()
+        let modal = AetherModalNavigationController(rootViewController: owner)
+        window.rootViewController = modal
+        window.makeKeyAndVisible()
+        modal.loadViewIfNeeded()
+
+        let search = AetherSearchController()
+        search.prefersNavigationBarPlacement = true
+        owner.searchController = search
+        defer {
+            owner.searchController = nil
+            window.isHidden = true
+        }
+
+        if case .navBar = search.placement {
+        } else {
+            XCTFail("Modal navigation search must stay in the navigation bar")
+        }
+        XCTAssertNil(search.bottomPillForTesting)
+    }
+
+    @MainActor
     func testLocalLegacyNavSearchSeedsPillBeforeFirstRendererAllocation() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let owner = LocalLegacyBottomSearchController()

@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import AsyncDisplayKit
 @testable import AetherUI
 
 final class AetherTabBarControllerTests: XCTestCase {
@@ -420,7 +421,7 @@ final class AetherTabBarControllerTests: XCTestCase {
 
     #if DEBUG
     @MainActor
-    func testLegacySearchItemUsesAnEqualWidthTabSlot() throws {
+    func testLegacySeparateSearchItemUsesAnEqualWidthTabSlot() throws {
         let fixture = makeTabBarFixture()
         defer { fixture.window.isHidden = true }
         fixture.tabs.updateAppearance(AetherAppearance(style: .legacy))
@@ -1811,7 +1812,7 @@ final class AetherTabBarControllerTests: XCTestCase {
         }
     }
 
-    func testExpandedSearchUsesTheFinalMateriallessSlotInsideTheFullWidthPill() {
+    func testExpandedSearchUsesTheFinalRegularSlotInsideTheFullWidthPill() throws {
         let cases: [(count: Int, itemWidth: CGFloat, searchX: CGFloat)] = [
             (1, 181.0, 216.0),
             (2, 120.666_667, 276.333_333),
@@ -1824,7 +1825,7 @@ final class AetherTabBarControllerTests: XCTestCase {
                 makeController(title: "Tab \($0 + 1)", image: "circle")
             }
             let fixture = makeTabBarFixture(
-                controllers: regularControllers + [makeSearchController()],
+                controllers: regularControllers + [makeSearchController(style: .inside)],
                 size: CGSize(width: 432.0, height: 844.0)
             )
 
@@ -1837,13 +1838,7 @@ final class AetherTabBarControllerTests: XCTestCase {
             XCTAssertEqual(pillFrame.width, 382.0, accuracy: 0.01)
             XCTAssertEqual(pillFrame.height, 60.0, accuracy: 0.01)
 
-            guard let expandedSearchSlot = fixture.tabs.view.firstDescendant(
-                identifier: "aether.tabbar.search.expandedVisual"
-            ) else {
-                XCTFail("Expected expanded Search slot for \(testCase.count) tabs")
-                fixture.window.isHidden = true
-                continue
-            }
+            let expandedSearchSlot = try insideSearchTabView(in: fixture.tabs, at: testCase.count)
             let searchFrame = expandedSearchSlot.convert(
                 expandedSearchSlot.bounds,
                 to: fixture.tabs.view
@@ -1853,8 +1848,17 @@ final class AetherTabBarControllerTests: XCTestCase {
             XCTAssertEqual(searchFrame.width, testCase.itemWidth, accuracy: 0.01)
             XCTAssertEqual(searchFrame.height, 60.0, accuracy: 0.01)
             XCTAssertEqual(expandedSearchSlot.alpha, 1.0, accuracy: 0.001)
-            XCTAssertFalse(expandedSearchSlot.isUserInteractionEnabled)
-            XCTAssertTrue(expandedSearchSlot.accessibilityElementsHidden)
+            XCTAssertFalse(expandedSearchSlot.isHidden)
+            XCTAssertTrue(expandedSearchSlot.isUserInteractionEnabled)
+            XCTAssertFalse(expandedSearchSlot.accessibilityElementsHidden)
+            XCTAssertNil(fixture.tabs.view.firstDescendant(identifier: "aether.tabbar.search.expandedVisual"))
+            let tabBarView = try XCTUnwrap(expandedSearchSlot.firstAncestor(of: TabBarView.self))
+            // frameForControllerTab returns coordinates in TabBarView, while
+            // the visible geometry above is measured in the controller view.
+            assertFrame(
+                try XCTUnwrap(fixture.tabs.frameForControllerTab(controller: fixture.tabs.controllers[testCase.count])),
+                equals: expandedSearchSlot.convert(expandedSearchSlot.bounds, to: tabBarView)
+            )
 
             guard let minimizedSearchMaterial = fixture.tabs.view.firstDescendant(
                 identifier: "aether.tabbar.search.moving"
@@ -1874,16 +1878,16 @@ final class AetherTabBarControllerTests: XCTestCase {
             )
             XCTAssertEqual(
                 minimizedSearchMaterial.chromeMorphMaterialAlpha,
-                searchGlassContainer?.isUsingNativeContainerEffect == true ? 1.0 : 0.0,
+                0.0,
                 accuracy: 0.001
             )
             XCTAssertEqual(
                 minimizedSearchMaterial.chromeMorphContentAlpha,
-                1.0,
+                0.0,
                 accuracy: 0.001
             )
-            XCTAssertTrue(minimizedSearchMaterial.isUserInteractionEnabled)
-            XCTAssertFalse(minimizedSearchMaterial.accessibilityElementsHidden)
+            XCTAssertFalse(minimizedSearchMaterial.isUserInteractionEnabled)
+            XCTAssertTrue(minimizedSearchMaterial.accessibilityElementsHidden)
 
             guard let firstTabFrame = fixture.tabs.frameForControllerTab(controller: regularControllers[0]) else {
                 XCTFail("Expected first tab frame for \(testCase.count) tabs with search")
@@ -1964,6 +1968,8 @@ final class AetherTabBarControllerTests: XCTestCase {
         XCTAssertEqual(searchButton.glassStyle, lens.glassStyle)
         XCTAssertEqual(accessoryGlass.isDarkOverride, lens.isDarkAppearance)
         XCTAssertEqual(searchButton.isDarkAppearance, lens.isDarkAppearance)
+        XCTAssertEqual(accessoryGlass.glassTintColor, lens.glassTintColor)
+        XCTAssertEqual(searchTint, lens.glassTintColor)
 
         guard case let .custom(lensStyle, lensColor) = lens.glassTintColor.kind,
               case let .custom(accessoryStyle, accessoryColor) = accessoryGlass.glassTintColor.kind,
@@ -2652,7 +2658,7 @@ final class AetherTabBarControllerTests: XCTestCase {
     }
 
     func testDefaultAccessoryUsesExactExpandedAndMinimizedEndpoints() throws {
-        let fixture = makeTabBarFixture()
+        let fixture = makeTabBarFixture(searchStyle: .inside)
         defer { fixture.window.isHidden = true }
         let tabs = fixture.tabs
         let accessory = TabBarAccessoryView()
@@ -2660,11 +2666,7 @@ final class AetherTabBarControllerTests: XCTestCase {
         tabs.view.layoutIfNeeded()
 
         let wrapper = try XCTUnwrap(tabs.view.directGlassSubviews.first)
-        let expandedSearchSlot = try XCTUnwrap(
-            tabs.view.firstDescendant(
-                identifier: "aether.tabbar.search.expandedVisual"
-            )
-        )
+        let expandedSearchSlot = try insideSearchTabView(in: tabs, at: 2)
         let minimizedSearchMaterial = try XCTUnwrap(
             tabs.view.firstDescendant(
                 identifier: "aether.tabbar.search.moving"
@@ -2702,15 +2704,16 @@ final class AetherTabBarControllerTests: XCTestCase {
             accuracy: 0.01
         )
         XCTAssertEqual(expandedSearchSlot.alpha, 1.0, accuracy: 0.001)
-        XCTAssertFalse(expandedSearchSlot.isUserInteractionEnabled)
+        XCTAssertTrue(expandedSearchSlot.isUserInteractionEnabled)
         XCTAssertEqual(minimizedSearchMaterial.alpha, 1.0, accuracy: 0.001)
         XCTAssertEqual(
             minimizedSearchMaterial.chromeMorphMaterialAlpha,
-            searchGlassContainer.isUsingNativeContainerEffect ? 1.0 : 0.0,
+            0.0,
             accuracy: 0.001
         )
-        XCTAssertEqual(minimizedSearchMaterial.chromeMorphContentAlpha, 1.0, accuracy: 0.001)
-        XCTAssertTrue(minimizedSearchMaterial.isUserInteractionEnabled)
+        XCTAssertEqual(minimizedSearchMaterial.chromeMorphContentAlpha, 0.0, accuracy: 0.001)
+        XCTAssertFalse(minimizedSearchMaterial.isUserInteractionEnabled)
+        XCTAssertTrue(minimizedSearchMaterial.accessibilityElementsHidden)
 
         tabs.setTabBarMinimized(true, transition: .immediate)
         tabs.view.layoutIfNeeded()
@@ -2749,19 +2752,15 @@ final class AetherTabBarControllerTests: XCTestCase {
         XCTAssertEqual(minimizedSearchMaterial.alpha, 1.0, accuracy: 0.001)
         XCTAssertEqual(minimizedSearchMaterial.chromeMorphMaterialAlpha, 1.0, accuracy: 0.001)
         XCTAssertEqual(minimizedSearchMaterial.chromeMorphContentAlpha, 1.0, accuracy: 0.001)
-        XCTAssertFalse(expandedSearchSlot.isUserInteractionEnabled)
         XCTAssertTrue(minimizedSearchMaterial.isUserInteractionEnabled)
+        XCTAssertFalse(minimizedSearchMaterial.accessibilityElementsHidden)
     }
 
     func testAnimatedMinimizeHandsSearchToTheMovingGlassWithoutATransparentGap() throws {
-        let fixture = makeTabBarFixture()
+        let fixture = makeTabBarFixture(searchStyle: .inside)
         defer { fixture.window.isHidden = true }
         let tabs = fixture.tabs
-        let expandedSearchSlot = try XCTUnwrap(
-            tabs.view.firstDescendant(
-                identifier: "aether.tabbar.search.expandedVisual"
-            )
-        )
+        let expandedSearchSlot = try insideSearchTabView(in: tabs, at: 2)
         let movingSearch = try XCTUnwrap(
             tabs.view.firstDescendant(
                 identifier: "aether.tabbar.search.moving"
@@ -2782,7 +2781,7 @@ final class AetherTabBarControllerTests: XCTestCase {
             transition: .animated(duration: 0.12, curve: .linear)
         )
 
-        // Search has one moving icon/interaction owner from sample zero. On
+        // Search hands its ordinary tab icon to the moving owner immediately. On
         // native glass its material stays fully alive inside the common group;
         // only fallback rendering fades the material as geometry separates.
         XCTAssertEqual(expandedSearchSlot.alpha, 0.0, accuracy: 0.001)
@@ -2793,20 +2792,20 @@ final class AetherTabBarControllerTests: XCTestCase {
             XCTAssertGreaterThan(movingSearch.chromeMorphMaterialAlpha, 0.0)
         }
         XCTAssertEqual(movingSearch.chromeMorphContentAlpha, 1.0, accuracy: 0.001)
+        XCTAssertTrue(movingSearch.isUserInteractionEnabled)
 
         RunLoop.main.run(until: Date().addingTimeInterval(0.20))
     }
 
     @MainActor
     func testSearchGlyphOwnershipNeverLeavesBothRepresentationsInvisibleDuringCompactMorph() throws {
-        let fixture = makeTabBarFixture()
+        let fixture = makeTabBarFixture(searchStyle: .inside)
         defer { fixture.window.isHidden = true }
         let tabs = fixture.tabs
-        let expandedSearch = try XCTUnwrap(
-            tabs.view.firstDescendant(
-                identifier: "aether.tabbar.search.expandedVisual"
-            )
-        )
+        let expandedSearch = try insideSearchTabView(in: tabs, at: 2)
+        let expandedGlyph = try XCTUnwrap(expandedSearch.subviews.first {
+            ASViewToDisplayNode($0) is ASImageNode
+        })
         let movingSearch = try XCTUnwrap(
             tabs.view.firstDescendant(
                 identifier: "aether.tabbar.search.moving"
@@ -2833,12 +2832,16 @@ final class AetherTabBarControllerTests: XCTestCase {
                 expandedSearch.layer.presentation()?.opacity
                     ?? Float(expandedSearch.alpha)
             )
+            let expandedGlyphAlpha = CGFloat(
+                expandedGlyph.layer.presentation()?.opacity
+                    ?? Float(expandedGlyph.alpha)
+            )
             let movingHostAlpha = CGFloat(
                 movingSearch.layer.presentation()?.opacity
                     ?? Float(movingSearch.alpha)
             )
             samples.append((
-                expanded: expandedAlpha,
+                expanded: expandedAlpha * expandedGlyphAlpha,
                 moving: movingHostAlpha * movingSearch.chromeMorphContentAlpha,
                 content: movingSearch.chromeMorphContentAlpha,
                 material: movingSearch.chromeMorphMaterialAlpha
@@ -2865,22 +2868,30 @@ final class AetherTabBarControllerTests: XCTestCase {
         XCTAssertGreaterThan(samples.count, 6)
         for sample in samples {
             XCTAssertGreaterThan(
-                sample.moving,
+                sample.expanded + sample.moving,
                 0.50,
-                "The stable moving Search icon became invisible: \(sample)"
+                "Both Search glyph owners became invisible: \(sample)"
             )
-            XCTAssertEqual(sample.content, 1.0, accuracy: 0.001)
-            if searchGlassContainer.isUsingNativeContainerEffect {
-                XCTAssertEqual(sample.material, 1.0, accuracy: 0.001)
+            if sample.content > 0.5 {
+                XCTAssertEqual(sample.content, 1.0, accuracy: 0.001)
+                if searchGlassContainer.isUsingNativeContainerEffect {
+                    XCTAssertEqual(sample.material, 1.0, accuracy: 0.001)
+                }
             }
         }
+        XCTAssertTrue(samples.contains { $0.expanded > 0.99 && $0.moving < 0.01 })
+        XCTAssertTrue(samples.contains { $0.moving > 0.99 && $0.expanded < 0.01 })
         XCTAssertEqual(expandedSearch.alpha, 1.0, accuracy: 0.001)
-        XCTAssertEqual(movingSearch.chromeMorphContentAlpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(expandedGlyph.alpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(movingSearch.chromeMorphContentAlpha, 0.0, accuracy: 0.001)
+        XCTAssertEqual(movingSearch.chromeMorphMaterialAlpha, 0.0, accuracy: 0.001)
+        XCTAssertFalse(movingSearch.isUserInteractionEnabled)
+        XCTAssertTrue(movingSearch.accessibilityElementsHidden)
     }
 
     @MainActor
     func testSearchGlassMergeAndSeparationPreserveSurfaceAndMaterialContinuity() throws {
-        let fixture = makeTabBarFixture()
+        let fixture = makeTabBarFixture(searchStyle: .inside)
         defer { fixture.window.isHidden = true }
         let tabs = fixture.tabs
         let movingSearch = try XCTUnwrap(
@@ -2972,10 +2983,12 @@ final class AetherTabBarControllerTests: XCTestCase {
         XCTAssertEqual(searchGlass.isDarkOverride, initialDarkOverride)
         XCTAssertEqual(
             movingSearch.chromeMorphMaterialAlpha,
-            searchGlassContainer.isUsingNativeContainerEffect ? 1.0 : 0.0,
+            0.0,
             accuracy: 0.001
         )
-        XCTAssertEqual(movingSearch.chromeMorphContentAlpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(movingSearch.chromeMorphContentAlpha, 0.0, accuracy: 0.001)
+        XCTAssertFalse(movingSearch.isUserInteractionEnabled)
+        XCTAssertTrue(movingSearch.accessibilityElementsHidden)
     }
 
     @MainActor
@@ -5210,8 +5223,8 @@ final class AetherTabBarControllerTests: XCTestCase {
         fixture.window.isHidden = true
     }
 
-    func testSearchTabItemOnNavigationRootRendersAsFinalExpandedSlot() {
-        let searchTab = makeNavigationSearchController()
+    func testSearchTabItemOnNavigationRootRendersAsFinalExpandedSlot() throws {
+        let searchTab = makeNavigationSearchController(style: .inside)
         let fixture = makeTabBarFixture(controllers: [
             makeController(title: "One", image: "house"),
             makeController(title: "Two", image: "person"),
@@ -5219,11 +5232,10 @@ final class AetherTabBarControllerTests: XCTestCase {
         ])
         let tabs = fixture.tabs
 
-        XCTAssertEqual(tabs.controllers.count, 2)
-        XCTAssertFalse(tabs.controllers.contains { $0 === searchTab })
-        let expandedSlot = tabs.view.firstDescendant(
-            identifier: "aether.tabbar.search.expandedVisual"
-        )
+        XCTAssertEqual(tabs.controllers.count, 3)
+        XCTAssertTrue(tabs.controllers[2] === searchTab)
+        XCTAssertNotNil(tabs.frameForControllerTab(controller: searchTab))
+        let expandedSlot = try insideSearchTabView(in: tabs, at: 2)
         let minimizedMaterial = tabs.view.firstDescendant(
             identifier: "aether.tabbar.search.moving"
         ) as? GlassBarButtonView
@@ -5231,22 +5243,24 @@ final class AetherTabBarControllerTests: XCTestCase {
         let searchGlassContainer = minimizedMaterial?.firstAncestor(
             of: GlassBackgroundContainerView.self
         )
-        XCTAssertNotNil(expandedSlot)
-        XCTAssertEqual(expandedSlot?.alpha ?? -1.0, 1.0, accuracy: 0.001)
-        XCTAssertTrue(expandedSlot?.isUserInteractionEnabled == false)
+        XCTAssertEqual(expandedSlot.alpha, 1.0, accuracy: 0.001)
+        XCTAssertFalse(expandedSlot.isHidden)
+        XCTAssertTrue(expandedSlot.isUserInteractionEnabled)
+        XCTAssertFalse(expandedSlot.accessibilityElementsHidden)
         XCTAssertNotNil(minimizedMaterial)
         XCTAssertEqual(minimizedMaterial?.alpha ?? -1.0, 1.0, accuracy: 0.001)
         XCTAssertEqual(
             minimizedMaterial?.chromeMorphMaterialAlpha ?? -1.0,
-            searchGlassContainer?.isUsingNativeContainerEffect == true ? 1.0 : 0.0,
+            0.0,
             accuracy: 0.001
         )
         XCTAssertEqual(
             minimizedMaterial?.chromeMorphContentAlpha ?? -1.0,
-            1.0,
+            0.0,
             accuracy: 0.001
         )
-        XCTAssertTrue(minimizedMaterial?.isUserInteractionEnabled == true)
+        XCTAssertTrue(minimizedMaterial?.isUserInteractionEnabled == false)
+        XCTAssertTrue(minimizedMaterial?.accessibilityElementsHidden == true)
         XCTAssertNotNil(searchGlassContainer)
         XCTAssertTrue(
             searchGlassContainer === lens?.firstAncestor(
@@ -5380,7 +5394,7 @@ final class AetherTabBarControllerTests: XCTestCase {
         tabs.view.layoutIfNeeded()
 
         XCTAssertEqual(tabs.controllers.count, 2)
-        XCTAssertNotNil(
+        XCTAssertNil(
             tabs.view.firstDescendant(
                 identifier: "aether.tabbar.search.expandedVisual"
             )
@@ -5543,16 +5557,22 @@ final class AetherTabBarControllerTests: XCTestCase {
     }
     #endif
 
+    private func insideSearchTabView(in tabs: AetherTabBarController, at index: Int) throws -> UIView {
+        let lens = try XCTUnwrap(tabs.view.firstDescendant(of: LiquidLensView.self))
+        return try XCTUnwrap(lens.contentView.subviews.first { $0.tag == index })
+    }
+
     private func makeTabBarFixture(
         controllers: [UIViewController]? = nil,
-        size: CGSize = CGSize(width: 390.0, height: 844.0)
+        size: CGSize = CGSize(width: 390.0, height: 844.0),
+        searchStyle: SearchTabItem.Style = .separate
     ) -> (window: UIWindow, tabs: AetherTabBarController) {
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
         let tabs = AetherTabBarController()
         tabs.setControllers(controllers ?? [
             makeController(title: "One", image: "house"),
             makeController(title: "Two", image: "person"),
-            makeSearchController()
+            makeSearchController(style: searchStyle)
         ], selectedIndex: 0)
 
         window.rootViewController = tabs
@@ -6015,15 +6035,15 @@ final class AetherTabBarControllerTests: XCTestCase {
         return controller
     }
 
-    private func makeSearchController() -> UIViewController {
+    private func makeSearchController(style: SearchTabItem.Style = .separate) -> UIViewController {
         let controller = UIViewController()
-        controller.tabBarItem = SearchTabItem(image: UIImage(systemName: "magnifyingglass"))
+        controller.tabBarItem = SearchTabItem(style: style, image: UIImage(systemName: "magnifyingglass"))
         return controller
     }
 
-    private func makeNavigationSearchController() -> AetherNavigationController {
+    private func makeNavigationSearchController(style: SearchTabItem.Style = .separate) -> AetherNavigationController {
         let root = AetherViewController()
-        root.tabBarItem = SearchTabItem(image: UIImage(systemName: "magnifyingglass"))
+        root.tabBarItem = SearchTabItem(style: style, image: UIImage(systemName: "magnifyingglass"))
         let navigationController = AetherNavigationController(mode: .single)
         navigationController.setViewControllers([root], animated: false)
         return navigationController

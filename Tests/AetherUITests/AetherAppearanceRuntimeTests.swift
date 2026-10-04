@@ -345,7 +345,7 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
         XCTAssertFalse(liquidGlassV2.overallDarkAppearance)
         XCTAssertEqual(liquidGlassV2.edgeEffectAlpha, 0.82)
         XCTAssertEqual(liquidGlassV2.edgeEffectBlurRadiusAtEdge, 5.0)
-        XCTAssertEqual(liquidGlassV2.edgeEffectBlurRadiusAtFade, 5.0)
+        XCTAssertEqual(liquidGlassV2.edgeEffectBlurRadiusAtFade, 1.0)
         XCTAssertEqual(liquidGlassV2.edgeEffectStyle, .strong)
     }
 
@@ -401,8 +401,8 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
 
         let theme = navigationController.navigationBar.presentationData.theme
         XCTAssertEqual(theme.edgeEffectBlurRadiusAtEdge, 5.0)
-        XCTAssertEqual(theme.edgeEffectBlurRadiusAtFade, 5.0)
-        XCTAssertTrue(theme.edgeEffectSolidBlur)
+        XCTAssertEqual(theme.edgeEffectBlurRadiusAtFade, 1.0)
+        XCTAssertFalse(theme.edgeEffectSolidBlur)
         XCTAssertEqual(theme.edgeEffectStyle, .strong)
         XCTAssertEqual(theme.glassStyle, .strong)
     }
@@ -414,8 +414,8 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
 
         let theme = navigationController.navigationBar.presentationData.theme
         XCTAssertEqual(theme.edgeEffectBlurRadiusAtEdge, 5.0)
-        XCTAssertEqual(theme.edgeEffectBlurRadiusAtFade, 5.0)
-        XCTAssertTrue(theme.edgeEffectSolidBlur)
+        XCTAssertEqual(theme.edgeEffectBlurRadiusAtFade, 1.0)
+        XCTAssertFalse(theme.edgeEffectSolidBlur)
         XCTAssertEqual(theme.edgeEffectStyle, .strong)
         XCTAssertEqual(theme.glassStyle, .strong)
     }
@@ -426,8 +426,8 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
         }
 
         XCTAssertEqual(presentationData.theme.edgeEffectBlurRadiusAtEdge, 5.0)
-        XCTAssertEqual(presentationData.theme.edgeEffectBlurRadiusAtFade, 5.0)
-        XCTAssertTrue(presentationData.theme.edgeEffectSolidBlur)
+        XCTAssertEqual(presentationData.theme.edgeEffectBlurRadiusAtFade, 1.0)
+        XCTAssertFalse(presentationData.theme.edgeEffectSolidBlur)
         XCTAssertEqual(presentationData.theme.edgeEffectStyle, .strong)
         XCTAssertEqual(presentationData.theme.glassStyle, .strong)
         XCTAssertEqual(presentationData.theme.accentButtonColor, .red)
@@ -440,7 +440,7 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
 
         XCTAssertEqual(presentationData.theme.edgeEffectStyle, .strong)
         XCTAssertEqual(presentationData.theme.glassStyle, .strong)
-        XCTAssertTrue(presentationData.theme.edgeEffectSolidBlur)
+        XCTAssertFalse(presentationData.theme.edgeEffectSolidBlur)
         XCTAssertEqual(
             presentationData.theme.edgeEffectAlpha,
             AetherAppearance.liquidGlassV2.edgeEffectAlpha
@@ -550,6 +550,44 @@ final class AetherAppearanceRuntimeTests: XCTestCase {
         XCTAssertEqual(edgeEffectView.debugLastPrefersStaticVariableBlurMask, true)
         XCTAssertNotEqual(edgeEffectView.debugLastContentRGBA, 0)
         XCTAssertEqual(edgeEffectView.debugLastFadeCurveExponent ?? -1.0, 2.0, accuracy: 0.001)
+    }
+
+    func testLiquidGlassV2NavigationUsesGentleBlurGradientWithDenseTint() throws {
+        let presentationData = AetherAppearance.withRuntimeCurrent(.liquidGlassV2) {
+            NavigationBarPresentationData.aetherAppearance()
+        }
+        let bar = NavigationBarImpl(presentationData: presentationData)
+        let size = CGSize(width: 320.0, height: 144.0)
+
+        bar.updateLayout(
+            size: size,
+            defaultHeight: 60.0,
+            additionalTopHeight: 0.0,
+            additionalContentHeight: 0.0,
+            additionalBackgroundHeight: 0.0,
+            leftInset: 0.0,
+            rightInset: 0.0,
+            appearsHidden: false,
+            isLandscape: false,
+            transition: .immediate
+        )
+        bar.updateBackgroundAlpha(1.0, transition: .immediate)
+
+        let edgeEffectView = try XCTUnwrap(bar.debugEdgeEffectView)
+        XCTAssertEqual(edgeEffectView.frame.maxY, size.height, accuracy: 0.1)
+        XCTAssertEqual(edgeEffectView.debugLastEdgeSize ?? -1.0, edgeEffectView.bounds.height, accuracy: 0.1)
+        XCTAssertEqual(edgeEffectView.debugLastSolidBlur, false)
+        XCTAssertEqual(edgeEffectView.debugLastBlurRadiusAtEdge ?? -1.0, 5.0, accuracy: 0.001)
+        XCTAssertEqual(edgeEffectView.debugLastBlurRadiusAtFade ?? -1.0, 1.0, accuracy: 0.001)
+        XCTAssertEqual(edgeEffectView.debugLastMinimumFadeAlpha ?? -1.0, 0.2, accuracy: 0.001)
+        XCTAssertEqual(edgeEffectView.debugLastMinimumTintAlpha ?? -1.0, 0.65, accuracy: 0.001)
+        XCTAssertEqual(edgeEffectView.debugLastPrefersStaticVariableBlurMask, true)
+        XCTAssertNotEqual(edgeEffectView.debugLastContentRGBA, 0)
+        #if !APPSTORE_SAFE
+        XCTAssertTrue(edgeEffectView.subviews.contains { $0 is VariableBlurView })
+        #else
+        XCTAssertTrue(edgeEffectView.subviews.contains { $0 is UIVisualEffectView })
+        #endif
     }
 
     func testTabBarControllerConsumesRuntimeAppearanceWithoutThemeInit() {

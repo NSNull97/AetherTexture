@@ -39,6 +39,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
         let solidBlur: Bool
         let fadeCurveExponent: CGFloat
         let minimumFadeAlpha: CGFloat
+        let minimumTintAlpha: CGFloat
         let prefersStaticVariableBlurMask: Bool
     }
     private var lastUpdateSignature: UpdateSignature?
@@ -54,6 +55,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
         let solidBlur: Bool
         let fadeCurveExponent: CGFloat
         let minimumFadeAlpha: CGFloat
+        let minimumTintAlpha: CGFloat?
         let prefersStaticVariableBlurMask: Bool
     }
     private var lastUpdateRequest: UpdateRequest?
@@ -87,6 +89,14 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
 
     internal var debugLastFadeCurveExponent: CGFloat? {
         lastUpdateSignature?.fadeCurveExponent
+    }
+
+    internal var debugLastMinimumTintAlpha: CGFloat? {
+        lastUpdateSignature?.minimumTintAlpha
+    }
+
+    internal var debugLastMinimumFadeAlpha: CGFloat? {
+        lastUpdateSignature?.minimumFadeAlpha
     }
 
     internal var debugLastPrefersStaticVariableBlurMask: Bool? {
@@ -132,6 +142,8 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
     /// `blurRadiusAtFade` is the radius at the transparent (content-facing)
     /// side. When the two differ, the view uses a private masked blur to
     /// ramp the radius spatially.
+    /// `minimumTintAlpha` optionally keeps the color mask denser than the blur
+    /// mask, so attached chrome can vary its blur without losing its tint.
     public func update(
         content: UIColor?,
         blur: Bool = false,
@@ -145,6 +157,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
         fadeCurveExponent: CGFloat = 1.0,
         minimumFadeAlpha: CGFloat = 0.04,
         prefersStaticVariableBlurMask: Bool = false,
+        minimumTintAlpha: CGFloat? = nil,
         transition: ContainedViewLayoutTransition
     ) {
         lastUpdateRequest = UpdateRequest(
@@ -159,6 +172,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
             solidBlur: solidBlur,
             fadeCurveExponent: fadeCurveExponent,
             minimumFadeAlpha: minimumFadeAlpha,
+            minimumTintAlpha: minimumTintAlpha,
             prefersStaticVariableBlurMask: prefersStaticVariableBlurMask
         )
         let resolvedStyle = appearanceStyleOverride ?? AetherAppearance.runtimeCurrent.style
@@ -181,6 +195,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
                 solidBlur: solidBlur,
                 fadeCurveExponent: fadeCurveExponent,
                 minimumFadeAlpha: minimumFadeAlpha,
+                minimumTintAlpha: minimumTintAlpha ?? minimumFadeAlpha,
                 prefersStaticVariableBlurMask: prefersStaticVariableBlurMask
             )
             if signature == lastUpdateSignature {
@@ -214,16 +229,15 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
         transition.setFrame(view: contentView, frame: bounds)
         transition.setFrame(view: contentMaskView, frame: bounds)
 
-        // Use the SAME tapered-gradient helper as the blur path for
-        // progressive blur so tint and blur terminate at the exact same
-        // alpha. Solid blur intentionally has no transition/mask.
+        // Tint follows the blur fade unless the caller keeps a denser tint
+        // mask (V2 attached chrome). Solid blur has no fade mask.
         if edgeSize > 0.0, useFill, !solidBlur {
             contentMaskView.image = EdgeEffectView.generateTaperedGradient(
                 totalHeight: bounds.height,
                 fadeHeight: min(edgeSize, bounds.height),
                 edge: edge,
                 curveExponent: fadeCurveExponent,
-                minimumAlpha: minimumFadeAlpha
+                minimumAlpha: minimumTintAlpha ?? minimumFadeAlpha
             )
         } else {
             contentMaskView.image = nil
@@ -445,6 +459,7 @@ public final class EdgeEffectView: UIView, AetherAppearanceConsumer {
             fadeCurveExponent: request.fadeCurveExponent,
             minimumFadeAlpha: request.minimumFadeAlpha,
             prefersStaticVariableBlurMask: request.prefersStaticVariableBlurMask,
+            minimumTintAlpha: request.minimumTintAlpha,
             transition: .immediate
         )
     }

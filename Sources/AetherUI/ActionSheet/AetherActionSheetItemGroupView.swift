@@ -1,36 +1,18 @@
 import UIKit
 
-/// Visual container for a single `AetherActionSheetItemGroup`. Stacks
-/// item views vertically, clips to a continuous-corner rounded rect, and
-/// toggles row separators so the last row has no hairline. Card surface
-/// is painted by the shared appearance-aware surface host.
+/// A transparent stack of independently rounded rows. The controller owns
+/// the one shared glass surface, as in `AetherAlertRootView`.
 final class AetherActionSheetItemGroupView: UIView {
-    var theme: AetherActionSheetTheme {
-        didSet {
-            updateTheme()
-        }
-    }
+    var theme: AetherActionSheetTheme
 
     private(set) var itemViews: [AetherActionSheetItemView] = []
     private var overlayView: UIView?
-
-    private let blurView: GlassBackgroundView
+    private static let itemSpacing: CGFloat = 8.0
 
     init(theme: AetherActionSheetTheme) {
         self.theme = theme
-        self.blurView = GlassBackgroundView(style: .regular)
         super.init(frame: .zero)
-
-        applyCornerRadius(14.0)
-        blurView.surfaceRole = .popup
-        blurView.glassCornerRadius = 14.0
-        blurView.glassIsInteractive = false
-        blurView.isDarkOverride = theme.backgroundType == .dark
-        blurView.legacySurfaceColorOverride = theme.itemBackgroundColor
-        blurView.frame = bounds
-        blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(blurView)
-        updateTheme()
+        backgroundColor = .clear
     }
 
     required init?(coder: NSCoder) {
@@ -38,21 +20,25 @@ final class AetherActionSheetItemGroupView: UIView {
     }
 
     func setItems(_ items: [AetherActionSheetItem]) {
-        // Rebuild the subview list from scratch — the controller only calls
-        // this once per group lifecycle, so reuse isn't worth the bookkeeping.
         itemViews.forEach { $0.removeFromSuperview() }
         itemViews = items.map { item in
             let view = item.makeView(theme: theme)
+            view.hasSeparator = false
             addSubview(view)
             return view
         }
-        updateSeparators()
+        if let overlayView { bringSubviewToFront(overlayView) }
         setNeedsLayout()
     }
 
     func updateItem(at index: Int, with item: AetherActionSheetItem) {
         guard itemViews.indices.contains(index) else { return }
-        item.updateView(itemViews[index])
+        let existing = itemViews[index]
+        let replacement = item.makeView(theme: theme)
+        replacement.hasSeparator = false
+        insertSubview(replacement, belowSubview: existing)
+        existing.removeFromSuperview()
+        itemViews[index] = replacement
         setNeedsLayout()
     }
 
@@ -60,38 +46,25 @@ final class AetherActionSheetItemGroupView: UIView {
         guard overlayView !== view else { return }
         overlayView?.removeFromSuperview()
         overlayView = view
-        if let view {
-            addSubview(view)
-        }
+        if let view { addSubview(view) }
         setNeedsLayout()
     }
 
-    private func updateSeparators() {
-        guard let last = itemViews.last else { return }
-        for view in itemViews {
-            view.hasSeparator = view !== last
-        }
-    }
-
-    private func updateTheme() {
-        backgroundColor = .clear
-        blurView.isDarkOverride = theme.backgroundType == .dark
-        blurView.legacySurfaceColorOverride = theme.itemBackgroundColor
-    }
-
-    /// Layout: stack bottom-to-top with `preferredHeight(constrainedWidth:)`
-    /// per row. Called by the controller after sizing each group.
     func preferredHeight(constrainedWidth: CGFloat) -> CGFloat {
-        return itemViews.reduce(0) { $0 + $1.preferredHeight(constrainedWidth: constrainedWidth) }
+        let rowsHeight = itemViews.reduce(CGFloat.zero) {
+            $0 + $1.preferredHeight(constrainedWidth: constrainedWidth)
+        }
+        return rowsHeight + CGFloat(max(0, itemViews.count - 1)) * Self.itemSpacing
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         var y: CGFloat = 0
-        for view in itemViews {
-            let h = view.preferredHeight(constrainedWidth: bounds.width)
-            view.frame = CGRect(x: 0, y: y, width: bounds.width, height: h)
-            y += h
+        for (index, view) in itemViews.enumerated() {
+            let height = view.preferredHeight(constrainedWidth: bounds.width)
+            view.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
+            y += height
+            if index < itemViews.count - 1 { y += Self.itemSpacing }
         }
         overlayView?.frame = bounds
     }

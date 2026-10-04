@@ -71,6 +71,10 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
         AetherNavigationScrollSourceState
     >(keyOptions: .weakMemory, valueOptions: .strongMemory)
     private var standaloneNavigationScrollState: AetherNavigationScrollSourceState?
+    private let navigationScrollEdgeAlphas = NSMapTable<AnyObject, NSNumber>(
+        keyOptions: .weakMemory,
+        valueOptions: .strongMemory
+    )
     public var currentlyAppliedLayout: ContainerViewLayout? {
         return self.validLayout
     }
@@ -827,10 +831,14 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
         let addedChromeBottom: CGFloat = addedInputBarBottom + addedToolbarBottom
 
         let topInset = max(0.0, navLayout.navigationFrame.maxY - inheritedContentInsets.top)
+        // Container reservations (for example a per-page modal footer) must
+        // reach ordinary UIKit scroll views as well as Texture list nodes.
+        // Subtract the inherited UIKit value to avoid counting parent chrome twice.
+        let containerBottomInset = max(0.0, inheritedContentInsets.bottom - baseUIKitSafeAreaInsets.bottom)
         let updatedInsets = UIEdgeInsets(
             top: topInset,
             left: 0.0,
-            bottom: addedChromeBottom,
+            bottom: containerBottomInset + addedChromeBottom,
             right: 0.0
         )
         let resolvedContentSafeAreaInsets = UIEdgeInsets(
@@ -1047,10 +1055,41 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
         _ alpha: CGFloat,
         transition: ContainedViewLayoutTransition
     ) {
+        let alpha = min(1.0, max(0.0, alpha))
+        let sourceOwner = AetherChromeScrollSourceResolver.activeSourceOwner(from: self)
+        navigationScrollEdgeAlphas.setObject(NSNumber(value: Double(alpha)), forKey: sourceOwner)
+        if let bar = navigationBarView, !navigationBarIsExternallyHosted {
+            bar.updateBackgroundAlpha(alpha, transition: transition)
+            return
+        }
+        if aetherNavigationController?.applyNavigationBarScrollEdgeAlpha(
+            alpha,
+            for: self,
+            transition: transition
+        ) == true {
+            return
+        }
         scrollEdgeNavigationBar()?.updateBackgroundAlpha(
-            min(1.0, max(0.0, alpha)),
+            alpha,
             transition: transition
         )
+    }
+
+    /// A transition bar starts with the active content's own scroll state,
+    /// even before the shared bar's observer has switched to that screen.
+    internal var resolvedNavigationBarScrollEdgeAlpha: CGFloat {
+        let source = AetherChromeScrollSourceResolver.resolve(from: self)
+        if let scrollView = source?.scrollView {
+            let visibleOffset = scrollView.contentOffset.y
+                + scrollView.adjustedContentInset.top
+            return min(1.0, max(0.0, visibleOffset / 16.0))
+        }
+        let driver = source?.controllerPath.reversed().compactMap {
+            $0 as? AetherViewController
+        }.first ?? self
+        let sourceOwner = source?.owner ?? self
+        return driver.navigationScrollEdgeAlphas.object(forKey: sourceOwner)
+            .map { CGFloat($0.doubleValue) } ?? 0.0
     }
 
     internal var navigationScrollEdgeAppearanceStyle: AetherAppearanceStyle? {
@@ -1204,7 +1243,12 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
                viewController.displayNavigationBar,
                let bar = viewController.navigationBarView,
                viewController.shouldUseNavigationBarForScrollEdgeOffset(bar) {
-                return bar
+                // Pagers retain neighbouring pages in the hierarchy. Their
+                // delegate callbacks must not overwrite the active page's
+                // shared chrome while they are still attached offscreen.
+                let activePath = AetherChromeScrollSourceResolver
+                    .activeControllerPath(from: viewController)
+                return activePath.contains(where: { $0 === self }) ? bar : nil
             }
             ancestor = current.parent
         }

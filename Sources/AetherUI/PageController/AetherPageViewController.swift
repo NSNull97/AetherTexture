@@ -226,6 +226,13 @@ open class AetherPageViewController: AetherViewController {
 
     public private(set) var selectedIndex: Int
 
+    // Programmatic selection is public immediately, but shared chrome keeps
+    // following the outgoing page until the horizontal transition settles.
+    private var chromeSourceIndex: Int
+    var chromeSourceViewController: UIViewController? {
+        viewController(at: chromeSourceIndex)
+    }
+
     public var selectedIndexChanged: (Int) -> Void = { _ in }
     public var selectedIndexShouldChange: (Int, @escaping (Bool) -> Void) -> Void = { _, commit in
         commit(true)
@@ -262,6 +269,7 @@ open class AetherPageViewController: AetherViewController {
         self.pages = pages
         let clampedSelectedIndex = Self.clampedIndex(selectedIndex, pageCount: pages.count)
         self.selectedIndex = clampedSelectedIndex
+        self.chromeSourceIndex = clampedSelectedIndex
         self.scrollNode = ASScrollNode()
         self.viewPager = PagerView(
             items: Self.segmentedItems(for: pages),
@@ -290,6 +298,7 @@ open class AetherPageViewController: AetherViewController {
         self.pages = pages
         let clampedSelectedIndex = Self.clampedIndex(selectedIndex.rawValue, pageCount: pages.count)
         self.selectedIndex = clampedSelectedIndex
+        self.chromeSourceIndex = clampedSelectedIndex
         self.scrollNode = ASScrollNode()
         self.viewPager = PagerView(
             items: Self.segmentedItems(for: pages),
@@ -455,30 +464,60 @@ open class AetherPageViewController: AetherViewController {
         updatePageLayout(layout: layout, transition: transition)
     }
 
+    open override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isApplyingProgrammaticScroll else { return }
+        // UIKit can discard an offscreen scroll animation without delivering
+        // scrollViewDidEndScrollingAnimation. Settle only after disappearing.
+        scrollToPage(at: selectedIndex, animated: false)
+        viewPager.setSelectionProgress(CGFloat(selectedIndex), animated: false)
+        commitChromeSourceSelection()
+    }
+
     open func setSelectedIndex(_ index: Int, animated: Bool) {
         let clampedIndex = Self.clampedIndex(index, pageCount: pages.count)
         guard pages.indices.contains(clampedIndex) else {
             return
         }
+        let drivesPagerFromScroll = animated && isViewLoaded
+            && backingScrollView.bounds.width > 0.0
+            && backingScrollView.window != nil
+            && UIView.areAnimationsEnabled
         guard clampedIndex != selectedIndex else {
+            if !drivesPagerFromScroll, isApplyingProgrammaticScroll || chromeSourceIndex != selectedIndex {
+                pendingValidatedScrollIndex = nil
+                scrollToPage(at: selectedIndex, animated: false)
+                viewPager.setSelectionProgress(CGFloat(selectedIndex), animated: false)
+                commitChromeSourceSelection()
+            }
             return
         }
 
+        pendingValidatedScrollIndex = nil
+        // Set this before attaching/layouting the destination: its layout can
+        // re-enter our layout and must not snap the scroll to selectedIndex.
+        isApplyingProgrammaticScroll = drivesPagerFromScroll
         selectedIndex = clampedIndex
         if isViewLoaded {
-            updateAttachedPages(around: CGFloat(clampedIndex))
+            let width = backingScrollView.bounds.width
+            let progress = width > 0.0
+                ? backingScrollView.contentOffset.x / width
+                : CGFloat(clampedIndex)
+            updateAttachedPages(around: progress)
         }
-        let drivesPagerFromScroll = animated && isViewLoaded && backingScrollView.bounds.width > 0.0
         viewPager.setSelectedIndex(
             clampedIndex,
             animated: animated && !drivesPagerFromScroll,
             updatesSelectionProgress: !drivesPagerFromScroll
         )
-        scrollToPage(at: clampedIndex, animated: animated)
+        scrollToPage(at: clampedIndex, animated: drivesPagerFromScroll)
         updatePageItemSelectionState()
         selectedIndexChanged(clampedIndex)
         pageIndexDidChange(clampedIndex)
-        AetherChromeScrollSourceResolver.notifyDidChange(from: self)
+        if !isApplyingProgrammaticScroll {
+            viewPager.setSelectionProgress(CGFloat(selectedIndex), animated: false)
+            commitChromeSourceSelection()
+        }
     }
 
     open func setSelectedIndex<Index: RawRepresentable>(_ index: Index, animated: Bool) where Index.RawValue == Int {
@@ -534,9 +573,15 @@ open class AetherPageViewController: AetherViewController {
     }
 
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard isApplyingProgrammaticScroll,
+              !scrollView.isTracking, !scrollView.isDragging, !scrollView.isDecelerating,
+              abs(scrollView.contentOffset.x - scrollView.bounds.width * CGFloat(selectedIndex)) < 0.5 else {
+            return
+        }
         isApplyingProgrammaticScroll = false
         alignScrollOffsetToSelectedPageIfNeeded()
         viewPager.setSelectionProgress(CGFloat(selectedIndex), animated: false)
+        commitChromeSourceSelection()
     }
 
     // MARK: - Private
@@ -550,6 +595,7 @@ open class AetherPageViewController: AetherViewController {
 
     private func updatePageLayout(layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         let size = layout.size
+        let previousWidth = backingScrollView.bounds.width
         transition.updateFrame(node: scrollNode, frame: CGRect(origin: .zero, size: size))
 
         let pageCount = pages.count
@@ -585,7 +631,14 @@ open class AetherPageViewController: AetherViewController {
             }
         }
 
-        alignScrollOffsetToSelectedPageIfNeeded()
+        if isApplyingProgrammaticScroll, previousWidth != size.width {
+            // A running scroll targets an offset in the old coordinate space.
+            scrollToPage(at: selectedIndex, animated: false)
+            viewPager.setSelectionProgress(CGFloat(selectedIndex), animated: false)
+            commitChromeSourceSelection()
+        } else {
+            alignScrollOffsetToSelectedPageIfNeeded()
+        }
     }
 
     private func updateAttachedPages(around progress: CGFloat) {
@@ -598,6 +651,7 @@ open class AetherPageViewController: AetherViewController {
                 desired.insert(index)
             }
         }
+        desired.insert(chromeSourceIndex)
 
         for index in desired.subtracting(attachedPageIndices).sorted() {
             let controller = pages[index].viewController
@@ -645,15 +699,20 @@ open class AetherPageViewController: AetherViewController {
     }
 
     private func scrollToPage(at index: Int, animated: Bool) {
+        guard isViewLoaded else {
+            isApplyingProgrammaticScroll = false
+            return
+        }
         let scrollView = backingScrollView
-        guard isViewLoaded, scrollView.bounds.width > 0.0 else {
+        guard scrollView.bounds.width > 0.0 else {
+            isApplyingProgrammaticScroll = false
             return
         }
         let offset = CGPoint(x: scrollView.bounds.width * CGFloat(index), y: 0.0)
         if scrollView.contentOffset == offset {
-            if !animated {
-                isApplyingProgrammaticScroll = false
-            }
+            // This can cancel an earlier animation before its first frame.
+            isApplyingProgrammaticScroll = false
+            scrollView.setContentOffset(offset, animated: false)
             return
         }
 
@@ -666,7 +725,7 @@ open class AetherPageViewController: AetherViewController {
 
     private func alignScrollOffsetToSelectedPageIfNeeded() {
         let scrollView = backingScrollView
-        guard isViewLoaded, !scrollView.isTracking, !scrollView.isDragging, !scrollView.isDecelerating, scrollView.bounds.width > 0.0 else {
+        guard isViewLoaded, !isApplyingProgrammaticScroll, !scrollView.isTracking, !scrollView.isDragging, !scrollView.isDecelerating, scrollView.bounds.width > 0.0 else {
             return
         }
         let offset = CGPoint(x: scrollView.bounds.width * CGFloat(selectedIndex), y: 0.0)
@@ -686,6 +745,7 @@ open class AetherPageViewController: AetherViewController {
             pageCount: pages.count
         )
         guard targetIndex != selectedIndex else {
+            commitChromeSourceSelection()
             return
         }
 
@@ -706,12 +766,22 @@ open class AetherPageViewController: AetherViewController {
                 self.updatePageItemSelectionState()
                 self.selectedIndexChanged(targetIndex)
                 self.pageIndexDidChange(targetIndex)
-                AetherChromeScrollSourceResolver.notifyDidChange(from: self)
+                self.commitChromeSourceSelection()
             } else {
                 self.viewPager.setSelectedIndex(self.selectedIndex, animated: false)
                 self.scrollToPage(at: self.selectedIndex, animated: false)
+                self.commitChromeSourceSelection()
             }
         }
+    }
+
+    private func commitChromeSourceSelection() {
+        guard chromeSourceIndex != selectedIndex else { return }
+        chromeSourceIndex = selectedIndex
+        if isViewLoaded {
+            updateAttachedPages(around: CGFloat(selectedIndex))
+        }
+        AetherChromeScrollSourceResolver.notifyDidChange(from: self)
     }
 
     private func scrollToTopSelectedPage() {

@@ -166,7 +166,7 @@ public struct AetherAppearance {
                 edgeEffectColor: .systemBackground,
                 edgeEffectAlpha: 0.82,
                 edgeEffectBlurRadiusAtEdge: 5.0,
-                edgeEffectBlurRadiusAtFade: 5.0,
+                edgeEffectBlurRadiusAtFade: 1.0,
                 edgeEffectStyle: .strong,
                 separatorColor: .separator
             )
@@ -307,7 +307,7 @@ public struct AetherEdgeEffectAppearance {
             alpha: appearance.edgeEffectAlpha,
             blurRadiusAtEdge: appearance.edgeEffectBlurRadiusAtEdge,
             blurRadiusAtFade: appearance.edgeEffectBlurRadiusAtFade,
-            solidBlur: appearance.style == .liquidGlassV2,
+            solidBlur: false,
             style: appearance.edgeEffectStyle,
             edgeSize: edgeSize
         )

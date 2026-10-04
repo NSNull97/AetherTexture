@@ -59,6 +59,8 @@ final class AetherActionSheetTextItemNode: AetherActionSheetItemNode {
 
     override init(theme: AetherActionSheetTheme) {
         super.init(theme: theme)
+        backgroundNode.backgroundColor = .clear
+        hasSeparator = false
         titleNode.maximumNumberOfLines = 0
         titleNode.isUserInteractionEnabled = false
         addSubnode(titleNode)
@@ -67,21 +69,21 @@ final class AetherActionSheetTextItemNode: AetherActionSheetItemNode {
     func setItem(_ item: AetherActionSheetTextItem) {
         let fontSize: CGFloat
         switch item.font {
-        case .default: fontSize = 13.0
-        case .large:   fontSize = 15.0
+        case .default: fontSize = 19.0
+        case .large:   fontSize = 21.0
         }
         let font = UIFont.aetherScaledSystemFont(ofSize: floor(theme.baseFontSize * fontSize / 17.0))
         if item.parseMarkdown {
             titleNode.attributedText = Self.markdownAttributedString(
                 item.title,
                 font: font,
-                color: theme.secondaryTextColor
+                color: theme.primaryTextColor
             )
         } else {
             titleNode.attributedText = Self.attributedString(
                 item.title,
                 font: font,
-                color: theme.secondaryTextColor
+                color: theme.primaryTextColor
             )
         }
         setNeedsLayout()
@@ -90,7 +92,7 @@ final class AetherActionSheetTextItemNode: AetherActionSheetItemNode {
     override func preferredHeight(constrainedWidth: CGFloat) -> CGFloat {
         let labelBox = CGSize(width: max(1.0, constrainedWidth - 20.0), height: .greatestFiniteMagnitude)
         let height = titleNode.layoutThatFits(ASSizeRange(min: .zero, max: labelBox)).size.height
-        return max(Self.defaultItemHeight, height + 32.0)
+        return max(44.0, height + 20.0)
     }
 
     override func layout() {

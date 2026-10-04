@@ -1486,7 +1486,12 @@ private func contextMenuClosingGlassmorphicGeometrySample(
     let bridgeSafeRadius = max(neckRadius, neckBulbRadius)
     let bridgeSafeBounds = outerFrame.insetBy(dx: bridgeSafeRadius, dy: bridgeSafeRadius)
     func clampBridgePoint(_ point: CGPoint) -> CGPoint {
-        guard bridgeSafeBounds.width >= 0.0, bridgeSafeBounds.height >= 0.0 else {
+        // A compact menu can shrink below the bridge diameter on its way
+        // back to the source. CGRect.insetBy then becomes .null (infinite
+        // origin), which must not be passed into a glass layer's position.
+        guard !bridgeSafeBounds.isNull, !bridgeSafeBounds.isInfinite,
+              bridgeSafeBounds.minX.isFinite, bridgeSafeBounds.minY.isFinite,
+              bridgeSafeBounds.maxX.isFinite, bridgeSafeBounds.maxY.isFinite else {
             return CGPoint(x: outerFrame.midX, y: outerFrame.midY)
         }
         return CGPoint(
@@ -1913,7 +1918,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         sourceCornerRadius: CGFloat,
         sourceMode: ContextMenuSourceVisualMode,
         isDark: Bool,
-        appearanceStyle: AetherAppearanceStyle? = nil
+        appearanceStyle: AetherAppearanceStyle? = nil,
+        surfaceRole: AetherSurfaceRole = .popup,
+        legacySurfaceColorOverride: UIColor? = nil
     ) {
         self.sourceFrameInOverlay = sourceFrameInOverlay
         self.targetMenuFrameInOverlay = targetMenuFrameInOverlay
@@ -1928,19 +1935,27 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         )
         self.sourceSeedGlassSurfaceView = MenuGlassSurfaceView(
             isDark: isDark,
-            appearanceStyle: appearanceStyle
+            appearanceStyle: appearanceStyle,
+            surfaceRole: surfaceRole,
+            legacySurfaceColorOverride: legacySurfaceColorOverride
         )
         self.bridgeGlassSurfaceView = MenuGlassSurfaceView(
             isDark: isDark,
-            appearanceStyle: appearanceStyle
+            appearanceStyle: appearanceStyle,
+            surfaceRole: surfaceRole,
+            legacySurfaceColorOverride: legacySurfaceColorOverride
         )
         self.bridgeContinuationGlassSurfaceView = MenuGlassSurfaceView(
             isDark: isDark,
-            appearanceStyle: appearanceStyle
+            appearanceStyle: appearanceStyle,
+            surfaceRole: surfaceRole,
+            legacySurfaceColorOverride: legacySurfaceColorOverride
         )
         self.finalMenuGlassSurfaceView = MenuGlassSurfaceView(
             isDark: isDark,
-            appearanceStyle: appearanceStyle
+            appearanceStyle: appearanceStyle,
+            surfaceRole: surfaceRole,
+            legacySurfaceColorOverride: legacySurfaceColorOverride
         )
 
         super.init(frame: .zero)

@@ -185,8 +185,9 @@ final class NavigationContainerLayoutProviderTests: XCTestCase {
             XCTAssertNotNil(pulsingGroup)
             let buttons = activeGroups.flatMap { Self.descendants(of: UIButton.self, in: $0) }
             let materializingButton = buttons.first {
-                $0.layer.opacity >= 0.49
-                    && $0.layer.animation(forKey: GlassControlGroup.contentMaterializationOpacityKey) != nil
+                AetherContentMaterialization.isAnimating(view: $0)
+                    || ($0.layer.opacity >= 0.49
+                        && $0.layer.animation(forKey: GlassControlGroup.contentMaterializationOpacityKey) != nil)
             }
             XCTAssertNotNil(
                 materializingButton,
@@ -215,8 +216,9 @@ final class NavigationContainerLayoutProviderTests: XCTestCase {
             XCTAssertNotNil(pulsingGroup)
             let buttons = activeGroups.flatMap { Self.descendants(of: UIButton.self, in: $0) }
             let materializingButton = buttons.first {
-                $0.layer.opacity >= 0.49
-                    && $0.layer.animation(forKey: GlassControlGroup.contentMaterializationOpacityKey) != nil
+                AetherContentMaterialization.isAnimating(view: $0)
+                    || ($0.layer.opacity >= 0.49
+                        && $0.layer.animation(forKey: GlassControlGroup.contentMaterializationOpacityKey) != nil)
             }
             XCTAssertNotNil(
                 materializingButton,

@@ -92,8 +92,22 @@ open class AetherTabBarController: AetherViewController {
     private var compatibilityTabBarTheme: TabBarView.Theme?
     private var resolvedAppearanceStyle: AetherAppearanceStyle
     private var _controllers: [UIViewController] = []
+    private var providedControllers: [UIViewController] = []
+    private weak var lastOrdinaryTabController: UIViewController?
     private var searchItem: SearchTabItem?
     private var searchItemSourceController: UIViewController?
+    private final class InsideSearchInstallation {
+        weak var owner: AetherViewController?
+        weak var search: AetherSearchController?
+        let createdByTabBar: Bool
+
+        init(owner: AetherViewController, search: AetherSearchController, createdByTabBar: Bool) {
+            self.owner = owner
+            self.search = search
+            self.createdByTabBar = createdByTabBar
+        }
+    }
+    private var insideSearchInstallations: [InsideSearchInstallation] = []
     private weak var presentedSearchController: UIViewController?
     private var searchTransitionGeneration: Int = 0
     private var isDeliveringSearchDeactivationLifecycle = false
@@ -144,6 +158,7 @@ open class AetherTabBarController: AetherViewController {
             detachScrollObserver()
             let previousIndex = _selectedIndex
             _selectedIndex = newValue
+            synchronizeMinimizedPrimaryTab()
             tabBarView.selectedIndex = newValue
             transitionToController(at: newValue, from: previousIndex, animated: true)
             invalidateAppearance()
@@ -4007,6 +4022,10 @@ open class AetherTabBarController: AetherViewController {
     override open func viewDidLoad() {
         super.viewDidLoad()
 
+        tabBarView.onSearchRequested = { [weak self] in
+            self?.activateSearch()
+        }
+
         tabBarView.tabSelected = { [weak self] index in
             guard let self = self else { return }
             if index == self._selectedIndex {
@@ -4164,30 +4183,49 @@ open class AetherTabBarController: AetherViewController {
                 if detectedSearchItem == nil {
                     detectedSearchItem = item
                 }
-                continue
+                if item.item.style == .separate {
+                    continue
+                }
             }
             regularControllers.append(controller)
         }
 
-        if detectedSearchItem == nil, shouldPreserveCurrentSearchItem(for: controllers) {
+        let preservesExtractedSearch = detectedSearchItem == nil
+            && shouldPreserveCurrentSearchItem(for: controllers)
+        if preservesExtractedSearch {
             if let item = searchItem, let sourceController = searchItemSourceController {
                 detectedSearchItem = ResolvedSearchItem(item: item, sourceController: sourceController)
             }
         }
 
-        if detectedSearchItem?.item.action == nil {
-            detectedSearchItem?.item.action = { [weak self] in
-                self?.activateSearch()
-            }
+        let preservesInsideInstallation = detectedSearchItem?.item === searchItem
+            && detectedSearchItem?.item.style == .inside
+            && detectedSearchItem?.sourceController === searchItemSourceController
+        if !preservesInsideInstallation {
+            clearInsideSearchInstallations()
         }
 
+        if !preservesExtractedSearch {
+            providedControllers = controllers
+        }
+        if let detectedSearchItem,
+           !providedControllers.contains(where: { $0 === detectedSearchItem.sourceController }) {
+            providedControllers.append(detectedSearchItem.sourceController)
+        }
+        searchItem?.styleDidChange = nil
         self._controllers = regularControllers
         self.searchItem = detectedSearchItem?.item
         self.searchItemSourceController = detectedSearchItem?.sourceController
+        searchItem?.styleDidChange = { [weak self] in
+            self?.searchItemStyleDidChange()
+        }
         let requestedSelectedIndex = selectedIndex ?? _selectedIndex
         self._selectedIndex = max(0, min(requestedSelectedIndex, max(0, regularControllers.count - 1)))
         regularControllers.forEach(installBottomBarVisibilityCallbacks(on:))
-        tabBarView.setSearchItem(detectedSearchItem?.item)
+        let insideIndex = detectedSearchItem?.item.style == .inside
+            ? regularControllers.firstIndex(where: { $0 === detectedSearchItem?.sourceController })
+            : nil
+        tabBarView.setSearchItem(detectedSearchItem?.item, insideIndex: insideIndex)
 
         reloadTabBarItems()
 
@@ -4261,16 +4299,37 @@ open class AetherTabBarController: AetherViewController {
     /// Reloads titles, icons and badges without detaching or reattaching tab controllers.
     public func reloadTabBarItems() {
         tabBarView.items = _controllers.map { controller in
-            let tabItem = controller.tabBarItem
+            let resolvedSearch = resolvedSearchItem(for: controller)
+            let tabItem: UITabBarItem? = resolvedSearch?.item.style == .inside
+                ? resolvedSearch?.item
+                : controller.tabBarItem
             return AetherTabBarItem(
-                title: tabItem?.title ?? "",
+                title: tabItem?.title ?? (resolvedSearch?.item.style == .inside ? "Search" : ""),
                 image: tabItem?.image,
                 selectedImage: tabItem?.selectedImage,
                 badgeValue: tabItem?.badgeValue,
                 isEnabled: true
             )
         }
+        synchronizeMinimizedPrimaryTab()
         tabBarView.selectedIndex = _selectedIndex
+        tabBarView.reloadSearchItem()
+    }
+
+    private func synchronizeMinimizedPrimaryTab() {
+        if let previous = lastOrdinaryTabController,
+           !_controllers.contains(where: { $0 === previous && resolvedSearchItem(for: $0) == nil }) {
+            lastOrdinaryTabController = nil
+        }
+        if let current = currentController, resolvedSearchItem(for: current) == nil {
+            lastOrdinaryTabController = current
+        }
+        // Keep identity rather than an index so reordering cannot turn the
+        // compact primary button into Search or a different ordinary tab.
+        // Without a prior ordinary selection the view resolves its fallback.
+        tabBarView.minimizedPrimaryIndex = lastOrdinaryTabController.flatMap { previous in
+            _controllers.firstIndex(where: { $0 === previous })
+        }
     }
 
     public func setScreenNodes(_ nodes: [AetherScreenNode], selectedIndex: Int?) {
@@ -4295,11 +4354,89 @@ open class AetherTabBarController: AetherViewController {
     }
 
     private func shouldPreserveCurrentSearchItem(for controllers: [UIViewController]) -> Bool {
-        guard searchItem != nil, !controllers.isEmpty, controllers.count == _controllers.count else {
+        guard searchItem?.style == .separate, !controllers.isEmpty, controllers.count == _controllers.count else {
             return false
         }
         return zip(controllers, _controllers).allSatisfy { incoming, current in
             incoming === current
+        }
+    }
+
+    private func searchItemStyleDidChange() {
+        let selectedController = currentController
+        let regularControllers = providedControllers.filter {
+            resolvedSearchItem(for: $0)?.item.style != .separate
+        }
+        let selectedIndex = regularControllers.firstIndex(where: { $0 === selectedController })
+            ?? min(_selectedIndex, max(0, regularControllers.count - 1))
+        setControllers(providedControllers, selectedIndex: selectedIndex)
+    }
+
+    private func ensureInsideSearchInstalled(on controller: UIViewController) {
+        guard searchItem?.style == .inside,
+              controller === searchItemSourceController,
+              let owner = insideSearchOwner(for: controller) else { return }
+        let search: AetherSearchController
+        let createdByTabBar: Bool
+        if let existing = owner.searchController {
+            search = existing
+            createdByTabBar = false
+        } else {
+            search = AetherSearchController()
+            createdByTabBar = true
+        }
+
+        if !insideSearchInstallations.contains(where: { $0.owner === owner && $0.search === search }) {
+            insideSearchInstallations.append(InsideSearchInstallation(
+                owner: owner,
+                search: search,
+                createdByTabBar: createdByTabBar
+            ))
+        }
+        search.setTabItemPlacementOverride(.navBar)
+        search.tabItemTextChanged = { [weak self, weak owner, weak search] text in
+            guard let self, let owner, let search,
+                  self.searchItem?.style == .inside,
+                  let current = self.currentController,
+                  current === self.searchItemSourceController,
+                  self.insideSearchOwner(for: current) === owner,
+                  owner.searchController === search else { return }
+            self.tabBarView.onSearchTextChanged?(text)
+        }
+        if createdByTabBar {
+            owner.searchController = search
+        }
+    }
+
+    private func insideSearchOwner(for controller: UIViewController) -> AetherViewController? {
+        if let navigationController = controller as? AetherNavigationController {
+            return navigationController.viewControllerStack.first(where: { $0.tabBarItem === searchItem })
+                ?? navigationController.viewControllerStack.first
+        }
+        if let navigationController = controller as? UINavigationController {
+            return (navigationController.viewControllers.first(where: { $0.tabBarItem === searchItem })
+                ?? navigationController.viewControllers.first) as? AetherViewController
+        }
+        return controller as? AetherViewController
+    }
+
+    private func clearInsideSearchInstallations() {
+        let installations = insideSearchInstallations
+        insideSearchInstallations.removeAll()
+        for installation in installations {
+            guard let search = installation.search else { continue }
+            search.tabItemTextChanged = nil
+            if let owner = installation.owner,
+               owner.searchController === search {
+                if installation.createdByTabBar {
+                    owner.searchController = nil
+                } else {
+                    // Leaving the inside tab ends its input session even if
+                    // the caller's normal placement is also the navigation bar.
+                    search.deactivate()
+                }
+            }
+            search.setTabItemPlacementOverride(nil)
         }
     }
 
@@ -4826,9 +4963,19 @@ open class AetherTabBarController: AetherViewController {
         return pillTopInTargetView.y
     }
 
-    /// Activate tab bar search: expands the search button into a search field.
-    /// Does NOT affect the navigation bar — that's a separate action.
+    /// Selects an inside Search tab without focusing its navigation search field,
+    /// or expands a separate Search item into the bottom field and search overlay.
     public func activateSearch() {
+        if searchItem?.style == .inside {
+            guard expandedAccessoryViewController == nil,
+                  let source = searchItemSourceController,
+                  let index = _controllers.firstIndex(where: { $0 === source }) else { return }
+            if _selectedIndex != index {
+                selectedIndex = index
+            }
+            ensureInsideSearchInstalled(on: source)
+            return
+        }
         guard expandedAccessoryViewController == nil,
               !tabBarView.isSearchActive,
               presentedSearchController == nil,
@@ -5313,6 +5460,8 @@ open class AetherTabBarController: AetherViewController {
             showController(newController, animated: false)
         }
 
+        ensureInsideSearchInstalled(on: newController)
+
         // Tab swap → bind the scroll observer to the new tab's content
         // so the next scroll-down minimize fires off this tab's data.
         attachScrollObserverIfPossible()
@@ -5342,6 +5491,7 @@ open class AetherTabBarController: AetherViewController {
         if let layout = currentlyAppliedLayout {
             containerLayoutUpdated(layout, transition: .immediate)
         }
+        ensureInsideSearchInstalled(on: controller)
     }
 
     @discardableResult

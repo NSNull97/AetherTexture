@@ -202,8 +202,7 @@ public final class AetherModalSourceTransition: AetherModalTransitionAnimation,
         modalController: AetherModalController?
     ) -> CGFloat {
         let topRadius = targetCornerRadius(for: frame, modalController: modalController)
-        let deviceRadius = modalController?.deviceCornerRadius() ?? 0.0
-        let value = deviceRadius > 0.0 ? deviceRadius : topRadius
+        let value = modalController?.resolvedCornerRadii(for: frame.size).bottom ?? topRadius
         return Self.clampedRadius(value, in: frame)
     }
 

@@ -69,7 +69,7 @@ final class AetherActionSheetButtonItemNode: AetherActionSheetItemNode {
 
     override init(theme: AetherActionSheetTheme) {
         super.init(theme: theme)
-        titleNode.maximumNumberOfLines = 1
+        titleNode.maximumNumberOfLines = 2
         titleNode.truncationMode = .byTruncatingTail
         titleNode.isUserInteractionEnabled = false
         addSubnode(titleNode)
@@ -78,11 +78,11 @@ final class AetherActionSheetButtonItemNode: AetherActionSheetItemNode {
     func setItem(_ item: AetherActionSheetButtonItem) {
         self.item = item
 
-        let fontSize = floor(theme.baseFontSize * 20.0 / 17.0)
+        let fontSize = floor(theme.baseFontSize)
         let font: UIFont
         switch item.font {
-        case .default: font = .aetherScaledSystemFont(ofSize: fontSize)
-        case .bold:    font = .aetherScaledSystemFont(ofSize: fontSize, weight: .medium)
+        case .default: font = .aetherScaledSystemFont(ofSize: fontSize, weight: .medium)
+        case .bold:    font = .aetherScaledSystemFont(ofSize: fontSize, weight: .semibold)
         }
 
         let color: UIColor
@@ -116,14 +116,14 @@ final class AetherActionSheetButtonItemNode: AetherActionSheetItemNode {
     }
 
     override func preferredHeight(constrainedWidth: CGFloat) -> CGFloat {
-        let maxSize = CGSize(width: max(1.0, constrainedWidth - 16.0), height: .greatestFiniteMagnitude)
+        let maxSize = CGSize(width: max(1.0, constrainedWidth - 32.0), height: .greatestFiniteMagnitude)
         let titleHeight = titleNode.layoutThatFits(ASSizeRange(min: .zero, max: maxSize)).size.height
-        return max(Self.defaultItemHeight, titleHeight + 24.0)
+        return max(Self.defaultItemHeight, titleHeight + 18.0)
     }
 
     override func layout() {
         super.layout()
-        let maxSize = CGSize(width: max(1.0, bounds.width - 16.0), height: bounds.height)
+        let maxSize = CGSize(width: max(1.0, bounds.width - 32.0), height: bounds.height)
         let titleSize = titleNode.layoutThatFits(ASSizeRange(min: .zero, max: maxSize)).size
         titleNode.frame = CGRect(
             x: floor((bounds.width - titleSize.width) / 2.0),

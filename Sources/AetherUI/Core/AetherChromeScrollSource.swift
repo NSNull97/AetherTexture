@@ -61,6 +61,11 @@ enum AetherChromeScrollSourceResolver {
         return path
     }
 
+    static func activeSourceOwner(from rootController: UIViewController) -> AnyObject {
+        let activeController = activeControllerPath(from: rootController).last ?? rootController
+        return activeNodeContent(for: activeController) ?? activeController
+    }
+
     static func primaryVerticalScrollView(in rootView: UIView) -> UIScrollView? {
         struct Candidate {
             let scrollView: UIScrollView
@@ -140,7 +145,7 @@ enum AetherChromeScrollSourceResolver {
             return tabs.selectedViewController
         }
         if let pages = controller as? AetherPageViewController {
-            return pages.selectedPage?.viewController
+            return pages.chromeSourceViewController
         }
         if let pages = controller as? UIPageViewController {
             return mostVisibleController(
