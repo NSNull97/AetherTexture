@@ -423,12 +423,17 @@ func contextMenuBloomGeometrySample(
             ]
             let contraction = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 0.72, 0.59, 0.37, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                // Keep a broad shoulder while the height drains. The old
+                // width profile reached the source width by 110 ms and left
+                // a tall, narrow stem for the rest of the close; the next
+                // frames then widened it back into the button. The reference
+                // keeps one continuous asymmetric lobe all the way through.
+                values: [1.0, 0.74, 0.62, 0.46, 0.32, 0.20, 0.11, 0.05, 0.015, 0.0, 0.0],
                 at: elapsed
             )
             let sourceCompression = contextMenuBloomSample(
                 times: times,
-                values: [0.0, 0.0, 0.0, 0.0, 0.06, 0.25, 0.28, 0.14, 0.06, 0.0, 0.0],
+                values: [0.0, 0.0, 0.0, 0.02, 0.10, 0.20, 0.24, 0.16, 0.08, 0.0, 0.0],
                 at: elapsed
             )
             let widthDifference = target.width - source.width
@@ -439,7 +444,7 @@ func contextMenuBloomGeometrySample(
                 : contraction
             let shortHeightT = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 0.90, 0.765, 0.72, 0.585, 0.36, 0.215, 0.08, 0.02, 0.0, 0.0],
+                values: [1.0, 0.90, 0.77, 0.66, 0.52, 0.36, 0.22, 0.11, 0.035, 0.0, 0.0],
                 at: elapsed
             )
             let tallness = contextMenuClosingTallness(target: target)
@@ -2149,8 +2154,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     func prepareMenuContentSnapshots(from view: UIView) {
-        view.layoutIfNeeded()
+        Self.layoutRecursively(in: view)
         Self.ensureTextureContentIsDisplayed(in: view)
+        // Texture nodes can finish their display pass by updating a nested
+        // UIKit wrapper. Resolve that layout once more before capturing the
+        // menu image so header labels do not disappear from the snapshot.
+        Self.layoutRecursively(in: view)
         let image = Self.renderImage(from: view)
         sharpMenuSnapshotView.image = image
         blurredMenuSnapshotView.image = Self.blurredImage(from: image, radius: 18.0) ?? image
@@ -3437,6 +3446,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
         return renderer.image { _ in
             view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+    }
+
+    private static func layoutRecursively(in view: UIView) {
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        for subview in view.subviews {
+            layoutRecursively(in: subview)
         }
     }
 

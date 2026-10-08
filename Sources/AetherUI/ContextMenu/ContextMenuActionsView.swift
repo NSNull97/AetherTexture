@@ -702,6 +702,14 @@ final class ContextMenuActionsView: UIView {
                         .horizontalInset
                     make.leading.equalToSuperview().offset(inset)
                     make.trailing.lessThanOrEqualToSuperview().offset(-inset)
+                    // Texture text nodes do not expose a reliable intrinsic
+                    // height until their async layout has completed.  The
+                    // header container is already given its fixed row frame
+                    // by `layoutSubviews`, so an unconstrained label can end
+                    // up with a zero-height view: the row remains reserved,
+                    // but the title is missing from both the live menu and
+                    // its transition snapshot.
+                    make.height.equalTo(16.0)
                     make.bottom.equalToSuperview().offset(-6.0)
                 }
                 contentContainer.addSubview(container)
@@ -845,6 +853,7 @@ final class ContextMenuActionsView: UIView {
             make.trailing.lessThanOrEqualToSuperview().offset(
                 -ContextMenuActionItemView.Metrics.resolve(for: appearanceStyle).horizontalInset
             )
+            make.height.equalTo(22.0)
             make.centerY.equalToSuperview()
         }
         return container
