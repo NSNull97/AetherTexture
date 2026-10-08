@@ -73,6 +73,11 @@ final class ContextMenuActionsView: UIView {
     /// touch logic, but it does not refract or distort menu content.
     private let highlightView = UIView()
     private var rowViews: [RowEntry] = []
+    // `ASTextNode.view` and `ASImageNode.view` do not own their node. Keep
+    // header nodes alive for the lifetime of the actions view; otherwise a
+    // header still reserves its 32/44pt row but its label and chevron vanish
+    // as soon as `buildRowViews()` returns.
+    private var retainedHeaderNodes: [ASDisplayNode] = []
 
     // MARK: - State
 
@@ -700,6 +705,7 @@ final class ContextMenuActionsView: UIView {
                     make.bottom.equalToSuperview().offset(-6.0)
                 }
                 contentContainer.addSubview(container)
+                retainedHeaderNodes.append(label)
                 rowViews.append(RowEntry(view: container, actionItem: nil))
             case let .action(action):
                 let row = ContextMenuActionItemView(
@@ -824,6 +830,7 @@ final class ContextMenuActionsView: UIView {
         label.truncationMode = .byTruncatingTail
         label.view.isUserInteractionEnabled = false
         container.addSubview(label.view)
+        retainedHeaderNodes.append(contentsOf: [chevron, label])
 
         chevron.view.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(

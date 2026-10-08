@@ -279,11 +279,28 @@ extension ContextMenuSourceDescriptor {
             scaleX: frame.width / visualView.bounds.width,
             y: frame.height / visualView.bounds.height
         )
-        self.sourceContentRegions = ((visualView as? GlassControlGroup)?.contextMenuPresentationContentRegions ?? [])
-            .map { ContextMenuSourceContentRegion(frame: $0.frame.applying(regionScale)) }
-        let contentOnlyProxySource = (visualView as? GlassControlGroup)?.contextMenuPresentationContentView
-            ?? (visualView as? GlassBarButtonView)?.contextMenuPresentationContentView
-            ?? (visualView as? GlassButton)?.contextMenuPresentationContentView
+        let contentOwner = Self.singleGlassContentOwner(in: visualView)
+        let regionsInVisualView: [CGRect]
+        if let group = contentOwner as? GlassControlGroup {
+            regionsInVisualView = group.contextMenuPresentationContentRegions.map {
+                group.convert($0.frame, to: visualView)
+            }
+        } else {
+            regionsInVisualView = []
+        }
+        self.sourceContentRegions = regionsInVisualView.map {
+            ContextMenuSourceContentRegion(frame: $0.applying(regionScale))
+        }
+        // Keep the outer visual owner as the source geometry (a wrapper can
+        // carry the caller's hit target, corner radius, and placement), but
+        // capture only the descendant's content plane when that wrapper hosts
+        // one of our glass controls.  Capturing the nested material-bearing
+        // control bakes a second glass shell into the source proxy; the
+        // transition then has to morph that shell and the menu surface at the
+        // same time, which produces the upright blank capsule seen for menus
+        // attached to ordinary buttons/views. Navigation bar sources already
+        // expose this plane directly through their GlassControlGroup.
+        let contentOnlyProxySource = Self.contentPlaneSource(owner: contentOwner)
         self.makeProxyView = { [weak visualView] in
             guard let visualView else { return UIView(frame: CGRect(origin: .zero, size: frame.size)) }
             if let contentOnlyProxySource {
@@ -303,6 +320,45 @@ extension ContextMenuSourceDescriptor {
             if let hitView, let visualView, hitView !== visualView {
                 hitView.isUserInteractionEnabled = enabled
             }
+        }
+    }
+
+    /// Finds the content plane belonging to exactly one glass control hosted
+    /// inside a caller-owned wrapper.  If there are multiple controls, keep
+    /// the conservative full-source capture: without a selected descendant
+    /// it would be incorrect to drop the other controls from the proxy.
+    private static func contentPlaneSource(owner: UIView?) -> UIView? {
+        if let group = owner as? GlassControlGroup {
+            return group.contextMenuPresentationContentView
+        }
+        if let button = owner as? GlassBarButtonView {
+            return button.contextMenuPresentationContentView
+        }
+        if let button = owner as? GlassButton {
+            return button.contextMenuPresentationContentView
+        }
+        return nil
+    }
+
+    private static func singleGlassContentOwner(in visualView: UIView) -> UIView? {
+        if visualView is GlassControlGroup || visualView is GlassBarButtonView || visualView is GlassButton {
+            return visualView
+        }
+        var candidates: [UIView] = []
+        collectGlassContentOwners(from: visualView, into: &candidates)
+        guard candidates.count == 1 else { return nil }
+        return candidates.first
+    }
+
+    private static func collectGlassContentOwners(from view: UIView, into candidates: inout [UIView]) {
+        for child in view.subviews where !child.isHidden && child.alpha > 0.0 {
+            if child is GlassControlGroup || child is GlassBarButtonView || child is GlassButton {
+                candidates.append(child)
+                // A glass control owns its own content plane. Do not recurse
+                // into it and accidentally count implementation subviews.
+                continue
+            }
+            collectGlassContentOwners(from: child, into: &candidates)
         }
     }
 }

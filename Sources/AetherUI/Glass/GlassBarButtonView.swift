@@ -53,13 +53,15 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
     /// `ContextMenuController` anchored at the button.
     public var contextMenuItemsProvider: (() -> [ContextMenuItem])?
     /// Haptic + presentation flavour: `.longPress` uses UILongPressGestureRecognizer,
-    /// `.tap` overrides `action` and presents on tap-up.
+    /// `.tap` presents as soon as the finger lands, matching navigation-bar
+    /// context menus instead of waiting for touch-up.
     public enum ContextMenuTrigger { case longPress, tap }
     public var contextMenuTrigger: ContextMenuTrigger = .longPress
     /// Optional lifted source content shown above the menu.
     public var contextMenuPreview: ContextMenuController.Preview?
     private weak var currentContextController: ContextMenuController?
     private var longPressRecognizer: UILongPressGestureRecognizer?
+    private var contextMenuTouchDownRecognizer: UIGestureRecognizer?
 
     public var contentTintColor: UIColor = .white {
         didSet {
@@ -210,6 +212,18 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
         addGestureRecognizer(tap)
         self.tapRecognizer = tap
 
+        // The navigation bar installs its menu action on `.touchDown`.
+        // Ordinary glass buttons need the same clock; a plain tap recognizer
+        // fires on touch-up and leaves the source in a dead pressed state
+        // before the liquid lens can start. This recognizer observes the
+        // initial touch without cancelling the button's normal recognizers.
+        let touchDown = GlassBarButtonTouchDownGestureRecognizer(
+            target: self,
+            action: #selector(handleContextMenuTouchDown(_:))
+        )
+        addGestureRecognizer(touchDown)
+        contextMenuTouchDownRecognizer = touchDown
+
         let classicPress = AetherClassicPressGestureRecognizer(
             target: self,
             action: #selector(handleClassicPress(_:))
@@ -218,7 +232,7 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
         classicPressRecognizer = classicPress
 
         let long = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        long.minimumPressDuration = 0.2
+        long.minimumPressDuration = 0.12
         long.cancelsTouchesInView = false
         addGestureRecognizer(long)
         self.longPressRecognizer = long
@@ -363,6 +377,26 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
         action?(self)
     }
 
+    @objc private func handleContextMenuTouchDown(_ recognizer: UIGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            guard contextMenuTrigger == .tap,
+                  currentContextController == nil,
+                  let items = contextMenuItemsProvider?(),
+                  !items.isEmpty else { return }
+            // Prevent the touch-up recognizer from dispatching the regular
+            // action after the menu has already taken over the touch.
+            tapRecognizer?.isEnabled = false
+            presentContextMenu(items: items)
+        case .ended, .cancelled, .failed:
+            if tapRecognizer?.isEnabled == false {
+                tapRecognizer?.isEnabled = true
+            }
+        default:
+            break
+        }
+    }
+
     @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
         guard contextMenuTrigger == .longPress, recognizer.state == .began else { return }
         if let longPressAction {
@@ -379,6 +413,7 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
     }
 
     private func presentContextMenu(items: [ContextMenuItem]) {
+        guard currentContextController == nil else { return }
         let controller = ContextMenuController.present(
             source: self,
             cornerRadius: bounds.height / 2.0,
@@ -387,6 +422,7 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
             appearanceStyle: appearanceStyleOverride ?? AetherAppearance.runtimeCurrent.style,
             onDismiss: { [weak self] in
                 self?.currentContextController = nil
+                self?.tapRecognizer?.isEnabled = true
             }
         )
         currentContextController = controller
@@ -488,4 +524,33 @@ public final class GlassBarButtonView: UIView, AetherAppearanceConsumer {
         style.lineBreakMode = .byTruncatingTail
         return style
     }()
+}
+
+/// Begins on the first touch while leaving the underlying tap and press
+/// recognizers independent. It is intentionally equivalent to the private
+/// recognizer used by `GlassButton`, but is local to this view so the public
+/// control does not expose another interaction primitive.
+private final class GlassBarButtonTouchDownGestureRecognizer: UIGestureRecognizer {
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        requiresExclusiveTouchType = false
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = touches.count == 1 ? .began : .failed
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = .cancelled
+    }
 }

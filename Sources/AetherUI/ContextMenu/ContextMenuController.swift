@@ -357,10 +357,15 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                 ContextMenuController.presentedControllers.remove(retainBox)
                 return
             }
-            let mode = descriptor.sourceMode
+            // A source menu has already acquired a lease above, including
+            // ordinary wrappers whose caller requested `hidesDuringPresentation:
+            // false`. Keep the transition on the leased geometry so that the
+            // proxy and the lease share one source frame; the descriptor mode
+            // remains available to callers that build a transition directly.
             let transitionMode: ContextMenuSourceVisualMode = .leasedGlassSource
             #if DEBUG
-            print("ContextMenu source mode:", mode, "hit:", descriptor.hitView, "visual:", descriptor.visualView)
+            print("ContextMenu source mode:", descriptor.sourceMode,
+                  "hit:", descriptor.hitView, "visual:", descriptor.visualView)
             #endif
             sourceVisualMode = transitionMode
             sourceCornerRadius = descriptor.sourceCornerRadius
@@ -417,7 +422,20 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         #endif
         self.menuFrameInHost = menuFrame
 
-        let isDark = self.isDark ?? (source.traitCollection.userInterfaceStyle == .dark)
+        let inheritedStyle: UIUserInterfaceStyle = {
+            if source.overrideUserInterfaceStyle != .unspecified {
+                return source.traitCollection.userInterfaceStyle
+            }
+            if window.traitCollection.userInterfaceStyle != .unspecified {
+                return window.traitCollection.userInterfaceStyle
+            }
+            return host.traitCollection.userInterfaceStyle
+        }()
+        let isDark = self.isDark ?? (inheritedStyle == .dark)
+        // Action rows resolve `.label` while their snapshots are prepared.
+        // Pin the same effective style used by the source so a wrapped
+        // control on a dark window cannot produce black rows in the glass.
+        actionsView.overrideUserInterfaceStyle = isDark ? .dark : .light
         if let previewLayout {
             let snapshot = makeSourceSnapshot(source: source)
             self.snapshotView = snapshot
@@ -1496,6 +1514,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             headerStyle: .disclosure(title: item.title),
             appearanceStyle: resolvedAppearanceStyle
         )
+        submenuActions.overrideUserInterfaceStyle = isDark ? .dark : .light
         let cardWidth = surfaceView.bounds.width
         let cardSize = submenuActions.preferredSize(maxWidth: cardWidth)
         submenuActions.frame = CGRect(origin: .zero, size: cardSize)
