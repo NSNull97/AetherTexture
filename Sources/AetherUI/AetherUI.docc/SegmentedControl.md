@@ -17,13 +17,13 @@ iOS-style segmented control с настраиваемой темой, async-vali
 
 ```swift
 let segmented = AetherSegmentedControl(
+    theme: AetherSegmentedControl.Theme(),
     items: [
         .init(title: "All"),
         .init(title: "Photos"),
         .init(title: "Videos")
     ],
-    selectedIndex: 0,
-    theme: AetherSegmentedControl.Theme()
+    selectedIndex: 0
 )
 segmented.selectedIndexChanged = { index in
     print("Selected: \(index)")
@@ -37,16 +37,32 @@ view.addSubview(segmented)
 public struct Item: Equatable {
     public let title: String
     public let image: UIImage?
-    // ...
+    public let badgeValue: String?
 }
+```
+
+Изображение располагается перед подписью с отступом 5 pt. Template images
+окрашиваются в `textColor` / `selectedTextColor` соответствующего слоя.
+При RTL изображение располагается справа от подписи.
+
+```swift
+let symbol = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+let segmented = AetherSegmentedControl(items: [
+    .init(title: "Light", image: UIImage(systemName: "sun.max.fill", withConfiguration: symbol)),
+    .init(title: "Dark", image: UIImage(systemName: "moon.fill", withConfiguration: symbol)),
+    .init(title: "System", image: UIImage(systemName: "circle.lefthalf.filled", withConfiguration: symbol))
+])
+segmented.titleFont = .systemFont(ofSize: 13, weight: .semibold)
+segmented.selectedTitleFont = .systemFont(ofSize: 13, weight: .semibold)
+segmented.itemHorizontalPadding = 8
 ```
 
 ## Theme
 
 ```swift
 public final class Theme: Equatable {
-    // backgroundColor, thumbColor, textColor, selectedTextColor,
-    // disabledTextColor, font, selectedFont, ...
+    public let textColor: UIColor
+    public let selectedTextColor: UIColor
 }
 ```
 
@@ -78,6 +94,9 @@ segmented.selectedIndexShouldChange = { newIndex, commit in
 | `cornerRadius` | `CGFloat?` | `nil` | `nil` — capsule (height/2). |
 | `thumbInset` | `CGFloat` | `2.0` | Inset thumb'а от border'ов. |
 | `preferredHeight` | `CGFloat` | `36.0` | Preferred высота (используется в `intrinsicContentSize`). |
+| `itemHorizontalPadding` | `CGFloat` | `16.0` | Минимальные отступы с каждой стороны содержимого item. |
+| `titleFont` | `UIFont?` | `nil` | Кастомный шрифт; `nil` — 14 pt regular с Dynamic Type. |
+| `selectedTitleFont` | `UIFont?` | `nil` | Кастомный шрифт; `nil` — 14 pt semibold с Dynamic Type. |
 
 ## Программное управление
 
@@ -95,7 +114,7 @@ segmented.updateTheme(newTheme)                     // динамическая 
 
 | Свойство / метод | Назначение |
 |---|---|
-| `init(items:selectedIndex:theme:)` | Создание. |
+| `init(theme:items:selectedIndex:cornerRadius:appearanceStyle:)` | Создание. |
 | `items` | Items (read-write). |
 | `selectedIndex` | Selected index (read-write). |
 | `setSelectedIndex(_:animated:)` | Animated переключение. |

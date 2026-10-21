@@ -57,6 +57,8 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     }
 
     public struct Config: Equatable {
+        /// Horizontal sheet margin at stage1, or at both detents when
+        /// `sizesToContent` is enabled.
         public var sideInset: CGFloat
         /// Distance from the sheet's bottom edge to the screen bottom at
         /// stage1. Default 8pt — the sheet floats above the home indicator.
@@ -73,6 +75,10 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         public var bottomCornerRadiusStage1: CGFloat?
         /// Nil uses zero at the screen edge, or the top radius when floating.
         public var bottomCornerRadiusStage2: CGFloat?
+        /// On iOS 26+, derives the bottom outline from the containing window
+        /// and the sheet's inset. Configured bottom radii remain the minimum
+        /// and the fallback on earlier systems.
+        public var bottomCornersFollowContainer: Bool
         /// Dim alpha applied over the presenting view at stage1.
         public var dimAlphaStage1: CGFloat
         /// Dim alpha applied over the presenting view at stage2.
@@ -86,6 +92,19 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         /// Detent the sheet opens at. Must be contained in `detents`.
         /// Nil → pick the first allowed detent (stage1 preferred).
         public var initialDetent: Detent?
+        /// Optional intrinsic-sized presentation. When set, the modal is
+        /// centered in the safe area at this size instead of using the
+        /// sheet's half-height/full-height detent geometry.
+        public var fixedSize: CGSize?
+        /// Uses `contentHeight(forWidth:safeAreaInsets:)` for a sheet that
+        /// fits its content within `sideInset` and the current detent's bottom
+        /// margin. Content supplies the total height, including the portion
+        /// of the bottom safe area that overlaps the sheet.
+        /// Takes precedence over `fixedSize` when both are configured.
+        public var sizesToContent: Bool
+        /// Whether the sheet grabber is visible. Compact card modals can
+        /// hide it when their content already defines the surface chrome.
+        public var showsGrabber: Bool
 
         public init(
             sideInset: CGFloat = 8.0,
@@ -96,11 +115,15 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             topCornerRadius: CGFloat = 34.0,
             bottomCornerRadiusStage1: CGFloat? = nil,
             bottomCornerRadiusStage2: CGFloat? = nil,
+            bottomCornersFollowContainer: Bool = false,
             dimAlphaStage1: CGFloat = 0.25,
             dimAlphaStage2: CGFloat = 0.4,
             dimTintColor: UIColor = .systemBackground,
             detents: Set<Detent> = [.stage1, .stage2],
-            initialDetent: Detent? = nil
+            initialDetent: Detent? = nil,
+            fixedSize: CGSize? = nil,
+            sizesToContent: Bool = false,
+            showsGrabber: Bool = true
         ) {
             self.sideInset = sideInset
             self.bottomInsetStage1 = bottomInsetStage1
@@ -110,11 +133,15 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             self.topCornerRadius = topCornerRadius
             self.bottomCornerRadiusStage1 = bottomCornerRadiusStage1
             self.bottomCornerRadiusStage2 = bottomCornerRadiusStage2
+            self.bottomCornersFollowContainer = bottomCornersFollowContainer
             self.dimAlphaStage1 = dimAlphaStage1
             self.dimAlphaStage2 = dimAlphaStage2
             self.dimTintColor = dimTintColor
             self.detents = detents.isEmpty ? [.stage1, .stage2] : detents
             self.initialDetent = initialDetent
+            self.fixedSize = fixedSize
+            self.sizesToContent = sizesToContent
+            self.showsGrabber = showsGrabber
         }
 
         /// Resolved opening detent — `initialDetent` if allowed,
@@ -523,6 +550,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         super.loadView()
         guard let root = view as? RootView else { return }
         root.backgroundColor = .clear
+        root.grabberSafeAreaHeight = config.showsGrabber ? Self.grabberContainerHeight : 0
 
         // Resolve before allocation. In particular, do not construct a
         // default-runtime Liquid surface and switch it to a local Legacy
@@ -556,6 +584,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         grabberView.layer.cornerCurve = .continuous
         grabberView.isUserInteractionEnabled = false
         grabberContainer.isUserInteractionEnabled = false
+        grabberContainer.isHidden = !config.showsGrabber
         grabberContainer.addSubview(grabberView)
 
     }
@@ -574,6 +603,30 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         super.viewDidLayoutSubviews()
         layoutChrome()
         updateCornerShape()
+    }
+
+    /// Total height for `Config.sizesToContent` at the current container
+    /// width after subtracting side margins. Override to measure your content,
+    /// including grabber space and bottom safe-area padding. The supplied
+    /// bottom inset is already reduced by the sheet's bottom margin, so it
+    /// must not be subtracted again. The sheet stays within the safe-area top.
+    ///
+    /// The default uses `preferredContentSize.height` when supplied;
+    /// otherwise it fits the content host's Auto Layout constraints and adds
+    /// the grabber and bottom safe-area padding.
+    open func contentHeight(forWidth width: CGFloat, safeAreaInsets: UIEdgeInsets) -> CGFloat {
+        if preferredContentSize.height > 0 {
+            return preferredContentSize.height
+        }
+        loadViewIfNeeded()
+        let contentSize = contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        return contentSize.height
+            + (config.showsGrabber ? Self.grabberContainerHeight : 0)
+            + max(0, safeAreaInsets.bottom)
     }
 
     public func setDetent(_ detent: Detent, animated: Bool) {
@@ -865,12 +918,13 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     private struct CornerSignature: Equatable {
         let topRadius: CGFloat
         let bottomRadius: CGFloat
+        let bottomCornersFollowContainer: Bool
         let clipsRoot: Bool
     }
     private var lastCornerSignature: CornerSignature?
 
-    /// Shared by the live sheet and the optional source morph. The host
-    /// supplies its intended shape instead of consulting private device APIs.
+    /// Numeric radii for the legacy sheet and optional source morph. On
+    /// iOS 26+, container-following bottom corners use this as their minimum.
     func resolvedCornerRadii(for size: CGSize? = nil) -> (top: CGFloat, bottom: CGFloat) {
         let boundsSize = size ?? view.bounds.size
         let limit = max(0, min(boundsSize.width, boundsSize.height) / 2)
@@ -896,6 +950,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
         let signature = CornerSignature(
             topRadius: topRadius,
             bottomRadius: bottomRadius,
+            bottomCornersFollowContainer: config.bottomCornersFollowContainer,
             clipsRoot: clipRoot
         )
         if signature == lastCornerSignature { return }
@@ -903,7 +958,9 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
 
         let configuration = UICornerConfiguration.uniformEdges(
             topRadius: .fixed(topRadius),
-            bottomRadius: .fixed(bottomRadius)
+            bottomRadius: config.bottomCornersFollowContainer
+                ? .containerConcentric(minimum: bottomRadius)
+                : .fixed(bottomRadius)
         )
         // Disable implicit CALayer animations on the property writes —
         // `cornerConfiguration` setters can otherwise kick off a default
@@ -984,6 +1041,8 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
     /// window so content anchored to `view.safeAreaLayoutGuide.topAnchor`
     /// doesn't get a phantom status-bar-sized gap at the top.
     private final class RootView: UIView {
+        var grabberSafeAreaHeight: CGFloat = AetherModalController.grabberContainerHeight
+
         override var safeAreaInsets: UIEdgeInsets {
             let inherited = super.safeAreaInsets
             let topInWindow = convert(CGPoint.zero, to: nil).y
@@ -998,7 +1057,7 @@ open class AetherModalController: ASDKViewController<ASDisplayNode> {
             // grow without bound because this override discards the
             // additional-derived top that the formula tries to subtract.
             return UIEdgeInsets(
-                top: overlap + AetherModalController.grabberContainerHeight,
+                top: overlap + grabberSafeAreaHeight,
                 left: inherited.left,
                 bottom: inherited.bottom,
                 right: inherited.right

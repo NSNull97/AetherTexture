@@ -433,18 +433,26 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         // region is reused for the grabber strip. A native page/form sheet
         // already begins below the window status bar, so it has no local
         // status-bar region. Full-screen navigation uses the window value.
-        let statusBarHeight = navigationStatusBarHeight
-
         let inheritedLayout = hasParentDrivenLayout ? validLayout : nil
+        let isBelowWindowSafeArea = view.window.map { window in
+            let frameInWindow = view.convert(view.bounds, to: window)
+            return frameInWindow.minY >= window.safeAreaInsets.top - 0.5
+        } ?? false
+        var resolvedSafeInsets = navigationSafeInsets(inheritedLayout?.safeInsets ?? view.safeAreaInsets)
+        var resolvedStatusBarHeight = inheritedLayout?.statusBarHeight ?? navigationStatusBarHeight
+        if isBelowWindowSafeArea {
+            resolvedSafeInsets.top = 0
+            resolvedStatusBarHeight = 0
+        }
         let layout = ContainerViewLayout(
             size: view.bounds.size,
             metrics: LayoutMetrics(
                 widthClass: view.traitCollection.horizontalSizeClass == .regular ? .regular : .compact,
                 isTablet: UIDevice.current.userInterfaceIdiom == .pad
             ),
-            safeInsets: navigationSafeInsets(inheritedLayout?.safeInsets ?? view.safeAreaInsets),
+            safeInsets: resolvedSafeInsets,
             additionalInsets: inheritedLayout?.additionalInsets ?? .zero,
-            statusBarHeight: statusBarHeight,
+            statusBarHeight: resolvedStatusBarHeight,
             inputHeight: validLayout?.inputHeight,
             inputHeightIsInteractivellyChanging: validLayout?.inputHeightIsInteractivellyChanging ?? false,
             inVoiceOver: UIAccessibility.isVoiceOverRunning

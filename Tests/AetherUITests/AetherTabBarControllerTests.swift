@@ -5047,6 +5047,54 @@ final class AetherTabBarControllerTests: XCTestCase {
         fixture.window.isHidden = true
     }
 
+    func testRemovingAccessoryDuringExpansionDetachesControllerSynchronously() {
+        let fixture = makeTabBarFixture()
+        defer { fixture.window.isHidden = true }
+        let tabs = fixture.tabs
+        let accessory = FixedBottomAccessoryView(height: 56.0)
+        let expanded = UIViewController()
+        tabs.bottomBarAccessory = accessory
+        tabs.view.layoutIfNeeded()
+
+        tabs.presentExpandedAccessory(expanded, animated: true)
+        XCTAssertTrue(expanded.parent === tabs)
+        XCTAssertTrue(tabs.expandedAccessoryViewController === expanded)
+
+        // A call may end on the first animation sample. Removing the slot
+        // must synchronously relinquish ownership of that live controller.
+        tabs.setBottomBarAccessory(nil, animated: false)
+
+        XCTAssertNil(expanded.parent)
+        XCTAssertNil(expanded.view.superview)
+        XCTAssertNil(tabs.expandedAccessoryViewController)
+        XCTAssertEqual(tabs.bottomBarAccessoryPresentationState, .collapsed)
+        XCTAssertTrue(tabs.view.directGlassSubviews.isEmpty)
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNil(expanded.parent)
+        XCTAssertNil(expanded.view.superview)
+    }
+
+    func testRemovingAccessoryDuringCollapseDetachesControllerSynchronously() {
+        let fixture = makeTabBarFixture()
+        defer { fixture.window.isHidden = true }
+        let tabs = fixture.tabs
+        let accessory = FixedBottomAccessoryView(height: 56.0)
+        let expanded = UIViewController()
+        tabs.bottomBarAccessory = accessory
+        tabs.view.layoutIfNeeded()
+        tabs.presentExpandedAccessory(expanded, animated: false)
+
+        XCTAssertTrue(tabs.dismissExpandedAccessory(animated: true))
+        tabs.setBottomBarAccessory(nil, animated: false)
+
+        XCTAssertNil(expanded.parent)
+        XCTAssertNil(expanded.view.superview)
+        XCTAssertNil(tabs.expandedAccessoryViewController)
+        XCTAssertEqual(tabs.bottomBarAccessoryPresentationState, .collapsed)
+        XCTAssertTrue(tabs.view.directGlassSubviews.isEmpty)
+    }
+
     func testReplacingAccessoryWhileExpandedReusesGlassAndCleansExpandedController() throws {
         let fixture = makeTabBarFixture()
         let tabs = fixture.tabs

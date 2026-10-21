@@ -154,6 +154,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     private let hasHapticFeedback: Bool
     private let blurred: Bool
     private let isDark: Bool?
+    private let actionTextColor: UIColor?
     private let skipCoordinateConversion: Bool
 
     private weak var hostView: UIView?
@@ -246,6 +247,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         hasHapticFeedback: Bool = true,
         blurred: Bool = true,
         isDark: Bool? = nil,
+        actionTextColor: UIColor? = nil,
         skipCoordinateConversion: Bool = false,
         onWillRemoveOverlay: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
@@ -258,6 +260,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         self.hasHapticFeedback = hasHapticFeedback
         self.blurred = blurred
         self.isDark = isDark
+        self.actionTextColor = actionTextColor
         self.skipCoordinateConversion = skipCoordinateConversion
         self.onWillRemoveOverlay = onWillRemoveOverlay
         self.onDismiss = onDismiss
@@ -338,7 +341,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let menuMetrics = resolvedMenuMetrics
         let actionsView = ContextMenuActionsView(
             items: items,
-            appearanceStyle: resolvedAppearanceStyle
+            appearanceStyle: resolvedAppearanceStyle,
+            actionTextColor: actionTextColor
         )
         let maxWidth = min(max(1.0, host.bounds.width - 24.0), menuMetrics.preferredWidth)
         let menuSize = actionsView.preferredSize(
@@ -1512,7 +1516,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let submenuActions = ContextMenuActionsView(
             items: submenu,
             headerStyle: .disclosure(title: item.title),
-            appearanceStyle: resolvedAppearanceStyle
+            appearanceStyle: resolvedAppearanceStyle,
+            actionTextColor: actionTextColor
         )
         submenuActions.overrideUserInterfaceStyle = isDark ? .dark : .light
         let cardWidth = surfaceView.bounds.width
@@ -1754,6 +1759,7 @@ public extension ContextMenuController {
         hasHapticFeedback: Bool = true,
         blurred: Bool = true,
         isDark: Bool? = nil,
+        actionTextColor: UIColor? = nil,
         skipCoordinateConversion: Bool = false,
         onWillRemoveOverlay: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
@@ -1767,6 +1773,7 @@ public extension ContextMenuController {
             hasHapticFeedback: hasHapticFeedback,
             blurred: blurred,
             isDark: isDark,
+            actionTextColor: actionTextColor,
             skipCoordinateConversion: skipCoordinateConversion,
             onWillRemoveOverlay: onWillRemoveOverlay,
             onDismiss: onDismiss

@@ -10,6 +10,7 @@ final class AetherModalPresentationController: UIPresentationController, UIGestu
     private var isPresenting = false
     private var isDismissing = false
     private var lastContainerBounds: CGRect = .zero
+    private var lastContainerSafeAreaInsets: UIEdgeInsets = .zero
     private var pendingDetent: (detent: AetherModalController.Detent, animated: Bool)?
 
     private var settleLink: CADisplayLink?
@@ -49,6 +50,7 @@ final class AetherModalPresentationController: UIPresentationController, UIGestu
         guard let container = containerView else { return }
         isPresenting = true
         lastContainerBounds = container.bounds
+        lastContainerSafeAreaInsets = container.safeAreaInsets
         detent = modalController?.config.resolvedInitialDetent ?? .stage1
         dimView.backgroundColor = .black
         dimView.alpha = 0
@@ -117,8 +119,10 @@ final class AetherModalPresentationController: UIPresentationController, UIGestu
         super.containerViewWillLayoutSubviews()
         guard let container = containerView else { return }
         dimView.frame = container.bounds
-        if lastContainerBounds != container.bounds {
+        if lastContainerBounds != container.bounds
+            || lastContainerSafeAreaInsets != container.safeAreaInsets {
             lastContainerBounds = container.bounds
+            lastContainerSafeAreaInsets = container.safeAreaInsets
             // Rotation/scene resizing invalidates the old endpoints. Finish
             // at the selected detent in the new geometry rather than allowing
             // a display link to write its obsolete frame back on the next tick.
@@ -188,6 +192,21 @@ final class AetherModalPresentationController: UIPresentationController, UIGestu
     private func frame(for detent: AetherModalController.Detent, in bounds: CGRect) -> CGRect {
         let cfg = modalController?.config ?? .init()
         let safeArea = containerView?.safeAreaInsets ?? presentingViewController.view.safeAreaInsets
+        if let contentFrame = contentSizedFrame(for: detent, in: bounds, safeAreaInsets: safeArea) {
+            return contentFrame
+        }
+        if let fixedSize = cfg.fixedSize {
+            let availableWidth = max(0.0, bounds.width - safeArea.left - safeArea.right)
+            let availableHeight = max(0.0, bounds.height - safeArea.top - safeArea.bottom)
+            let width = min(max(0.0, fixedSize.width), availableWidth)
+            let height = min(max(0.0, fixedSize.height), availableHeight)
+            return CGRect(
+                x: safeArea.left + floor((availableWidth - width) / 2.0),
+                y: safeArea.top + floor((availableHeight - height) / 2.0),
+                width: width,
+                height: height
+            )
+        }
         switch detent {
         case .stage1:
             let sideInset = min(max(0.0, cfg.sideInset), bounds.width / 2.0)
@@ -212,6 +231,43 @@ final class AetherModalPresentationController: UIPresentationController, UIGestu
                 width: bounds.width,
                 height: max(0.0, bottom - top)
             )
+        }
+    }
+
+    /// Shared by presentation and layout so a content-sized sheet is measured
+    /// against the current scene, including changes to its bottom safe area.
+    func contentSizedFrame(
+        for detent: AetherModalController.Detent = .stage1,
+        in bounds: CGRect,
+        safeAreaInsets: UIEdgeInsets
+    ) -> CGRect? {
+        guard let modal = modalController, modal.config.sizesToContent else { return nil }
+        let cfg = modal.config
+        let sideInset = min(max(0, cfg.sideInset), max(0, bounds.width) / 2)
+        let width = max(0, bounds.width - sideInset * 2)
+        let safeTop = min(max(0, safeAreaInsets.top), max(0, bounds.height))
+        let configuredBottomInset = detent == .stage1 ? cfg.bottomInsetStage1 : cfg.bottomInsetStage2
+        let bottomInset = min(max(0, configuredBottomInset), max(0, bounds.height - safeTop))
+        let bottom = bounds.maxY - bottomInset
+        let availableHeight = max(0, bounds.height - safeTop - bottomInset)
+        var contentSafeArea = safeAreaInsets
+        contentSafeArea.bottom = max(0, safeAreaInsets.bottom - bottomInset)
+        contentSafeArea.left = max(0, safeAreaInsets.left - sideInset)
+        contentSafeArea.right = max(0, safeAreaInsets.right - sideInset)
+        let requestedHeight = modal.contentHeight(forWidth: width, safeAreaInsets: contentSafeArea)
+        let height = requestedHeight.isFinite ? min(max(0, requestedHeight), availableHeight) : availableHeight
+        return CGRect(
+            x: bounds.minX + sideInset,
+            y: bottom - height,
+            width: width,
+            height: height
+        )
+    }
+
+    override func preferredContentSizeDidChange(forChildContentContainer container: UIContentContainer) {
+        super.preferredContentSizeDidChange(forChildContentContainer: container)
+        if modalController?.config.sizesToContent == true {
+            containerView?.setNeedsLayout()
         }
     }
 

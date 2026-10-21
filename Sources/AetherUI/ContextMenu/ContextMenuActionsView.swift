@@ -97,6 +97,7 @@ final class ContextMenuActionsView: UIView {
     private let items: [ContextMenuItem]
     private let headerStyle: HeaderStyle
     private let appearanceStyle: AetherAppearanceStyle
+    private let actionTextColor: UIColor?
     private let metrics: Metrics
     private let reservesLeadingSlotForActionRows: Bool
     var onActionSelected: ((ContextMenuActionItem) -> Void)?
@@ -150,11 +151,13 @@ final class ContextMenuActionsView: UIView {
     init(
         items: [ContextMenuItem],
         headerStyle: HeaderStyle = .none,
-        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style
+        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style,
+        actionTextColor: UIColor? = nil
     ) {
         self.items = items
         self.headerStyle = headerStyle
         self.appearanceStyle = appearanceStyle
+        self.actionTextColor = actionTextColor
         self.metrics = Metrics.resolve(for: appearanceStyle)
         self.reservesLeadingSlotForActionRows = Self.itemsNeedLeadingSlot(items)
 
@@ -687,7 +690,7 @@ final class ContextMenuActionsView: UIView {
                     string: title,
                     attributes: [
                         .font: UIFont.aetherScaledSystemFont(ofSize: 13.0, weight: .regular),
-                        .foregroundColor: UIColor.tertiaryLabel
+                        .foregroundColor: actionTextColor ?? UIColor.tertiaryLabel
                     ]
                 )
                 label.maximumNumberOfLines = 1
@@ -718,7 +721,8 @@ final class ContextMenuActionsView: UIView {
             case let .action(action):
                 let row = ContextMenuActionItemView(
                     item: action,
-                    appearanceStyle: appearanceStyle
+                    appearanceStyle: appearanceStyle,
+                    actionTextColor: actionTextColor
                 )
                 row.reservesLeadingSlot = reservesLeadingSlotForActionRows
                 if metrics.automaticallySeparatesActionRows,
@@ -754,7 +758,10 @@ final class ContextMenuActionsView: UIView {
                 // touch target with its own frame. layoutSubviews
                 // positions them in a horizontal strip.
                 for cellItem in cells {
-                    let cellView = ContextMenuActionRowCellView(item: cellItem)
+                    let cellView = ContextMenuActionRowCellView(
+                        item: cellItem,
+                        actionTextColor: actionTextColor
+                    )
                     contentContainer.addSubview(cellView)
                     rowViews.append(RowEntry(
                         view: cellView,
@@ -817,7 +824,7 @@ final class ContextMenuActionsView: UIView {
 
         let chevron = ASImageNode()
         chevron.contentMode = .center
-        chevron.tintColor = .label
+        chevron.tintColor = actionTextColor ?? .label
         if #available(iOS 13.0, *) {
             let config = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
             chevron.image = UIImage(systemName: chevronSymbol, withConfiguration: config)?
@@ -831,7 +838,7 @@ final class ContextMenuActionsView: UIView {
             string: title,
             attributes: [
                 .font: UIFont.aetherScaledSystemFont(ofSize: 17.0, weight: .semibold),
-                .foregroundColor: UIColor.label
+                .foregroundColor: actionTextColor ?? UIColor.label
             ]
         )
         label.maximumNumberOfLines = 1

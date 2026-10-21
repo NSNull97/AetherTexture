@@ -89,6 +89,7 @@ final class ContextMenuActionItemView: UIView {
 
     private(set) var item: ContextMenuActionItem
     private let metrics: Metrics
+    private let actionTextColor: UIColor?
     var showsRowSeparator = false {
         didSet {
             guard showsRowSeparator != oldValue else { return }
@@ -107,10 +108,12 @@ final class ContextMenuActionItemView: UIView {
 
     init(
         item: ContextMenuActionItem,
-        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style
+        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style,
+        actionTextColor: UIColor? = nil
     ) {
         self.item = item
         self.metrics = Metrics.resolve(for: appearanceStyle)
+        self.actionTextColor = actionTextColor
         super.init(frame: .zero)
 
         isUserInteractionEnabled = false
@@ -119,14 +122,14 @@ final class ContextMenuActionItemView: UIView {
 
         for node in [checkmarkNode, leadingIconNode, trailingIconNode, submenuIndicatorNode] {
             node.contentMode = .scaleAspectFit
-            node.tintColor = .label
+            node.tintColor = primaryTint(for: item)
             node.isUserInteractionEnabled = false
             addSubview(node.view)
         }
         checkmarkNode.image = ContextMenuActionItemView.checkmarkImage()
         submenuIndicatorNode.image = ContextMenuActionItemView.chevronImage()
         submenuIndicatorNode.contentMode = .center
-        submenuIndicatorNode.tintColor = item.textColor == .destructive ? .systemRed : .label
+        submenuIndicatorNode.tintColor = primaryTint(for: item)
 
         titleNode.maximumNumberOfLines = 1
         titleNode.truncationMode = .byTruncatingTail
@@ -153,10 +156,13 @@ final class ContextMenuActionItemView: UIView {
     func apply(item: ContextMenuActionItem) {
         self.item = item
 
-        let tint: UIColor
+        let tint = primaryTint(for: item)
+        let subtitleTint: UIColor
         switch item.textColor {
-        case .primary: tint = .label
-        case .destructive: tint = .systemRed
+        case .primary:
+            subtitleTint = actionTextColor ?? .secondaryLabel
+        case .destructive:
+            subtitleTint = UIColor.systemRed.withAlphaComponent(0.7)
         }
         titleNode.attributedText = NSAttributedString(
             string: item.title,
@@ -169,9 +175,7 @@ final class ContextMenuActionItemView: UIView {
             string: item.subtitle ?? "",
             attributes: [
                 .font: UIFont.aetherScaledSystemFont(ofSize: 13.0, weight: .regular),
-                .foregroundColor: item.textColor == .destructive
-                    ? UIColor.systemRed.withAlphaComponent(0.7)
-                    : .secondaryLabel
+                .foregroundColor: subtitleTint
             ]
         )
         subtitleNode.isHidden = (item.subtitle ?? "").isEmpty
@@ -204,6 +208,13 @@ final class ContextMenuActionItemView: UIView {
         if item.isSelected { accessibilityTraits.insert(.selected) }
 
         setNeedsLayout()
+    }
+
+    private func primaryTint(for item: ContextMenuActionItem) -> UIColor {
+        switch item.textColor {
+        case .primary: return actionTextColor ?? .label
+        case .destructive: return .systemRed
+        }
     }
 
     // MARK: - Layout

@@ -113,6 +113,47 @@ public struct ContainerViewLayout: Equatable {
     }
 }
 
+/// Geometry for a persistent accessory that occupies the top of a root
+/// surface (for example an active-call strip). Aether keeps that accessory
+/// outside the child content frame so navigation and tab chrome cannot render
+/// underneath it.
+public struct AetherTopAccessoryLayout: Equatable {
+    public let accessoryFrame: CGRect
+    public let contentFrame: CGRect
+    public let contentLayout: ContainerViewLayout
+
+    public init(layout: ContainerViewLayout, height: CGFloat) {
+        let resolvedHeight = min(max(0, height), max(0, layout.size.height))
+        let contentHeight = max(0, layout.size.height - resolvedHeight)
+        var safeInsets = layout.safeInsets
+        safeInsets.top = 0
+        self.accessoryFrame = CGRect(
+            x: 0,
+            y: 0,
+            width: layout.size.width,
+            height: resolvedHeight
+        )
+        self.contentFrame = CGRect(
+            x: 0,
+            y: resolvedHeight,
+            width: layout.size.width,
+            height: contentHeight
+        )
+        self.contentLayout = resolvedHeight == 0
+            ? layout
+            : ContainerViewLayout(
+                size: CGSize(width: layout.size.width, height: contentHeight),
+                metrics: layout.metrics,
+                safeInsets: safeInsets,
+                additionalInsets: layout.additionalInsets,
+                statusBarHeight: 0,
+                inputHeight: layout.inputHeight,
+                inputHeightIsInteractivellyChanging: layout.inputHeightIsInteractivellyChanging,
+                inVoiceOver: layout.inVoiceOver
+            )
+    }
+}
+
 public struct ContainerViewLayoutInsetOptions: OptionSet {
     public let rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
