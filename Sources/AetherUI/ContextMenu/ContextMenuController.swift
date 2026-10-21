@@ -154,6 +154,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     private let hasHapticFeedback: Bool
     private let blurred: Bool
     private let isDark: Bool?
+    private let actionTextColor: UIColor?
     private let skipCoordinateConversion: Bool
 
     private weak var hostView: UIView?
@@ -246,6 +247,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         hasHapticFeedback: Bool = true,
         blurred: Bool = true,
         isDark: Bool? = nil,
+        actionTextColor: UIColor? = nil,
         skipCoordinateConversion: Bool = false,
         onWillRemoveOverlay: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
@@ -258,6 +260,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         self.hasHapticFeedback = hasHapticFeedback
         self.blurred = blurred
         self.isDark = isDark
+        self.actionTextColor = actionTextColor
         self.skipCoordinateConversion = skipCoordinateConversion
         self.onWillRemoveOverlay = onWillRemoveOverlay
         self.onDismiss = onDismiss
@@ -338,7 +341,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let menuMetrics = resolvedMenuMetrics
         let actionsView = ContextMenuActionsView(
             items: items,
-            appearanceStyle: resolvedAppearanceStyle
+            appearanceStyle: resolvedAppearanceStyle,
+            actionTextColor: actionTextColor
         )
         let maxWidth = min(max(1.0, host.bounds.width - 24.0), menuMetrics.preferredWidth)
         let menuSize = actionsView.preferredSize(
@@ -357,10 +361,15 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                 ContextMenuController.presentedControllers.remove(retainBox)
                 return
             }
-            let mode = descriptor.sourceMode
+            // A source menu has already acquired a lease above, including
+            // ordinary wrappers whose caller requested `hidesDuringPresentation:
+            // false`. Keep the transition on the leased geometry so that the
+            // proxy and the lease share one source frame; the descriptor mode
+            // remains available to callers that build a transition directly.
             let transitionMode: ContextMenuSourceVisualMode = .leasedGlassSource
             #if DEBUG
-            print("ContextMenu source mode:", mode, "hit:", descriptor.hitView, "visual:", descriptor.visualView)
+            print("ContextMenu source mode:", descriptor.sourceMode,
+                  "hit:", descriptor.hitView, "visual:", descriptor.visualView)
             #endif
             sourceVisualMode = transitionMode
             sourceCornerRadius = descriptor.sourceCornerRadius
@@ -417,7 +426,20 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         #endif
         self.menuFrameInHost = menuFrame
 
-        let isDark = self.isDark ?? (source.traitCollection.userInterfaceStyle == .dark)
+        let inheritedStyle: UIUserInterfaceStyle = {
+            if source.overrideUserInterfaceStyle != .unspecified {
+                return source.traitCollection.userInterfaceStyle
+            }
+            if window.traitCollection.userInterfaceStyle != .unspecified {
+                return window.traitCollection.userInterfaceStyle
+            }
+            return host.traitCollection.userInterfaceStyle
+        }()
+        let isDark = self.isDark ?? (inheritedStyle == .dark)
+        // Action rows resolve `.label` while their snapshots are prepared.
+        // Pin the same effective style used by the source so a wrapped
+        // control on a dark window cannot produce black rows in the glass.
+        actionsView.overrideUserInterfaceStyle = isDark ? .dark : .light
         if let previewLayout {
             let snapshot = makeSourceSnapshot(source: source)
             self.snapshotView = snapshot
@@ -1494,8 +1516,10 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         let submenuActions = ContextMenuActionsView(
             items: submenu,
             headerStyle: .disclosure(title: item.title),
-            appearanceStyle: resolvedAppearanceStyle
+            appearanceStyle: resolvedAppearanceStyle,
+            actionTextColor: actionTextColor
         )
+        submenuActions.overrideUserInterfaceStyle = isDark ? .dark : .light
         let cardWidth = surfaceView.bounds.width
         let cardSize = submenuActions.preferredSize(maxWidth: cardWidth)
         submenuActions.frame = CGRect(origin: .zero, size: cardSize)
@@ -1735,6 +1759,7 @@ public extension ContextMenuController {
         hasHapticFeedback: Bool = true,
         blurred: Bool = true,
         isDark: Bool? = nil,
+        actionTextColor: UIColor? = nil,
         skipCoordinateConversion: Bool = false,
         onWillRemoveOverlay: (() -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
@@ -1748,6 +1773,7 @@ public extension ContextMenuController {
             hasHapticFeedback: hasHapticFeedback,
             blurred: blurred,
             isDark: isDark,
+            actionTextColor: actionTextColor,
             skipCoordinateConversion: skipCoordinateConversion,
             onWillRemoveOverlay: onWillRemoveOverlay,
             onDismiss: onDismiss

@@ -22,6 +22,8 @@ arbitration, keyboard handling, embedded navigation stack.
   или полностью свой `UIViewControllerAnimatedTransitioning`.
 - ``AetherModalNavigationController`` — wrapper с встроенным
   ``AetherNavigationController`` для модалок со стеком.
+- ``AetherThemePickerModalController`` — нижняя модальная карточка для
+  анимированного переключателя темы с высотой по содержимому.
 
 ## Базовый шаблон
 
@@ -73,7 +75,7 @@ let config = AetherModalController.Config(
 
 | Свойство | Тип | По умолчанию | Назначение |
 |---|---|---|---|
-| `sideInset` | `CGFloat` | `8.0` | Боковой inset sheet'а в `.stage1`. |
+| `sideInset` | `CGFloat` | `8.0` | Боковой inset sheet'а в `.stage1`; при `sizesToContent` — в обоих detent'ах. |
 | `bottomInsetStage1` | `CGFloat` | `8.0` | Расстояние от bottom edge до screen bottom в `.stage1`. |
 | `bottomInsetStage2` | `CGFloat` | `0.0` | То же в `.stage2` (sheet flush с bottom). |
 | `topInsetStage1` | `CGFloat` | `-1` (automatic) | Расстояние от safe-area top; отрицательное значение пересчитывается как половина текущего контейнера. |
@@ -81,11 +83,15 @@ let config = AetherModalController.Config(
 | `topCornerRadius` | `CGFloat` | `34.0` | Top corner radius. |
 | `bottomCornerRadiusStage1` | `CGFloat?` | `nil` | Нижний радиус compact sheet. `nil` → `topCornerRadius`. |
 | `bottomCornerRadiusStage2` | `CGFloat?` | `nil` | Нижний радиус expanded sheet. `nil` → `0` при `bottomInsetStage2 == 0`, иначе `topCornerRadius`. |
+| `bottomCornersFollowContainer` | `Bool` | `false` | На iOS 26+ нижние углы концентричны контейнеру с учётом отступов. Заданные радиусы — минимальные; на более ранних системах используются как фиксированные. |
 | `dimAlphaStage1` | `CGFloat` | `0.25` | Dim alpha над presenter в `.stage1`. |
 | `dimAlphaStage2` | `CGFloat` | `0.4` | То же в `.stage2`. |
 | `dimTintColor` | `UIColor` | `.systemBackground` | Tint поверхности sheet и фон встроенной навигации. |
 | `detents` | `Set<Detent>` | `[.stage1, .stage2]` | Допустимые detent'ы. |
 | `initialDetent` | `Detent?` | `nil` | Detent при открытии. `nil` → первый из allowed. |
+| `fixedSize` | `CGSize?` | `nil` | Центрированная intrinsic-sized поверхность вместо геометрии detent'ов. |
+| `sizesToContent` | `Bool` | `false` | Нижняя шторка с высотой из `contentHeight(forWidth:safeAreaInsets:)`, с учётом бокового и нижнего inset. Приоритетнее `fixedSize`. |
+| `showsGrabber` | `Bool` | `true` | Показывать верхний grabber sheet'а. |
 
 ```swift
 let config = AetherModalController.Config(
@@ -97,6 +103,56 @@ let config = AetherModalController.Config(
     initialDetent: .stage2
 )
 let modal = AetherModalController(config: config)
+```
+
+### Theme picker bottom sheet
+
+``AetherThemePickerModalController`` открывается снизу с внешними отступами
+8 pt слева, справа и снизу. Верхние углы имеют радиус 26 pt, нижние на iOS 26+
+подстраиваются под скругление окна и отступ карточки. На более ранних
+системах используется радиус 26 pt. Высота точно
+рассчитывается по сцене, переключателю и подписи при текущей доступной
+ширине. Под подписью остаётся 12 pt плюс та часть нижней safe area, которая
+перекрывает карточку: при safe area 34 pt и внешнем отступе 8 pt это 26 pt.
+
+```swift
+let modal = AetherThemePickerModalController(theme: .system)
+modal.themeChanged = { [weak window] theme in
+    switch theme {
+    case .light: window?.overrideUserInterfaceStyle = .light
+    case .dark: window?.overrideUserInterfaceStyle = .dark
+    case .system: window?.overrideUserInterfaceStyle = .unspecified
+    }
+}
+modal.present(from: hostViewController)
+```
+
+При повороте и изменении размера окна модалка заново измеряет picker.
+Grabber скрыт, дополнительного пустого блока под подписью нет.
+Параметры `themeChanged`, `dismissAfterSelection` и `appearanceStyle`
+доступны на controller'е.
+Днём облако плавно дрейфует по замкнутой траектории, ночью иногда пролетают
+падающие звёзды. Фоновое движение останавливается при закрытии карточки,
+уходе приложения в фон и включённом Reduce Motion.
+
+Для собственного контента включите `Config.sizesToContent` и переопределите
+`contentHeight(forWidth:safeAreaInsets:)`, вернув полную высоту с учётом
+нижней safe area и grabber, если он включён. Метод получает ширину за вычетом
+`sideInset`, а нижняя safe area уже уменьшена на `bottomInsetStage1` или
+`bottomInsetStage2`: повторно вычитать отступ не нужно. Ширину экрана через
+`UIScreen.main` определять не требуется. Для поверхности на всю ширину до
+самого нижнего края задайте `sideInset: 0`, оба нижних inset по 0 и оба
+нижних corner radius по 0.
+
+### Intrinsic-sized card
+
+Для центрированной карточки остаётся `Config.fixedSize`. Такой режим
+ограничивает размер доступной safe area и сохраняет прежнее поведение:
+
+```swift
+let modal = AetherModalController(
+    config: .init(fixedSize: CGSize(width: 320, height: 278), showsGrabber: false)
+)
 ```
 
 ## Embed content
@@ -390,6 +446,7 @@ modal.primaryScrollView = rootScrollView
 | `init(config:)` | Создание. |
 | `config` | Конфигурация (read-only после init). |
 | `contentView` | Host для контента. |
+| `contentHeight(forWidth:safeAreaInsets:)` | Измерение полной высоты нижней шторки при `sizesToContent == true`. |
 | `embedContent(_:)` | Embed UIViewController. |
 | `footerView` | Sticky footer. |
 | `footerHeight` | Высота footer'а (обязательно при использовании). |

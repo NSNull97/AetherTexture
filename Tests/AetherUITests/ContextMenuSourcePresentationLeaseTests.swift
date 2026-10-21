@@ -120,6 +120,48 @@ final class ContextMenuSourcePresentationLeaseTests: XCTestCase {
         )
     }
 
+    func testWrapperAroundGlassButtonKeepsWrapperGeometryButProxiesDescendantContent() throws {
+        let rootView = UIView(frame: CGRect(x: 0.0, y: 0.0, width: 390.0, height: 844.0))
+        let overlayView = UIView(frame: rootView.bounds)
+        let wrapper = UIView(frame: CGRect(x: 24.0, y: 64.0, width: 180.0, height: 44.0))
+        let button = GlassButton(title: "Call", image: UIImage(systemName: "phone"))
+        button.frame = wrapper.bounds
+        wrapper.addSubview(button)
+        rootView.addSubview(wrapper)
+        rootView.addSubview(overlayView)
+        rootView.layoutIfNeeded()
+        wrapper.layoutIfNeeded()
+        button.layoutIfNeeded()
+
+        let descriptor = try XCTUnwrap(ContextMenuSourceDescriptor(
+            sourceID: "wrapped-button",
+            hitView: wrapper,
+            visualView: wrapper,
+            overlayView: overlayView,
+            sourceCornerRadius: 22.0,
+            sourceMode: .leasedGlassSource
+        ))
+        XCTAssertTrue(descriptor.visualView === wrapper)
+        assertEqual(
+            descriptor.sourceFrameInOverlay,
+            wrapper.convert(wrapper.bounds, to: overlayView),
+            accuracy: 0.001
+        )
+
+        let proxy = descriptor.makeProxyView()
+        XCTAssertEqual(proxy.bounds.size, wrapper.bounds.size)
+        let contentSnapshot = try XCTUnwrap(proxy.subviews.first)
+        XCTAssertEqual(proxy.subviews.count, 1)
+        assertEqual(
+            contentSnapshot.frame,
+            button.contextMenuPresentationContentView.convert(
+                button.contextMenuPresentationContentView.bounds,
+                to: wrapper
+            ),
+            accuracy: 0.001
+        )
+    }
+
     func testMultiItemGlassGroupKeepsPerItemVisualSourceBehavior() throws {
         let group = GlassControlGroup()
         let firstImage = try XCTUnwrap(UIImage(systemName: "camera"))

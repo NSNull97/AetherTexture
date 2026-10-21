@@ -47,10 +47,13 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     public struct Item: Equatable {
         public let title: String
         public let badgeValue: String?
+        /// Optional leading image. Template images use the item's title colour.
+        public let image: UIImage?
 
-        public init(title: String, badgeValue: String? = nil) {
+        public init(title: String, badgeValue: String? = nil, image: UIImage? = nil) {
             self.title = title
             self.badgeValue = badgeValue
+            self.image = image
         }
     }
 
@@ -71,6 +74,24 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     /// (used by `intrinsicContentSize`).
     public var preferredHeight: CGFloat = 36.0 {
         didSet { invalidateIntrinsicContentSize() }
+    }
+
+    /// Minimum horizontal padding on each side of an item's content.
+    public var itemHorizontalPadding: CGFloat = 16.0 {
+        didSet {
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
+    /// Custom unselected title font. `nil` keeps the default scaled 14pt regular font.
+    public var titleFont: UIFont? {
+        didSet { updateTitleFonts() }
+    }
+
+    /// Custom selected title font. `nil` keeps the default scaled 14pt semibold font.
+    public var selectedTitleFont: UIFont? {
+        didSet { updateTitleFonts() }
     }
 
     public var items: [Item] {
@@ -183,6 +204,8 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
 
     private var normalBadgeViews: [NavigationBarBadgeView] = []
     private var selectedBadgeViews: [NavigationBarBadgeView] = []
+    private var normalImageViews: [UIImageView] = []
+    private var selectedImageViews: [UIImageView] = []
 
     /// Hit-test buttons sized + positioned to match each item slot. Sit
     /// ABOVE the lens so taps on text register, not on the lens glass.
@@ -198,8 +221,8 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     private var currentItemFrames: [CGRect] = []
 
     private enum Metrics {
-        static let minimumSegmentHorizontalPadding: CGFloat = 16.0
         static let badgeSpacing: CGFloat = 4.0
+        static let imageSpacing: CGFloat = 5.0
     }
 
     internal var debugSelectionFrame: CGRect? {
@@ -326,14 +349,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else {
             return
         }
-        for (titleNode, item) in zip(normalTitleNodes, _items) {
-            titleNode.attributedText = makeNormalAttributed(item.title)
-        }
-        for (titleNode, item) in zip(selectedTitleNodes, _items) {
-            titleNode.attributedText = makeSelectedAttributed(item.title)
-        }
-        invalidateIntrinsicContentSize()
-        setNeedsLayout()
+        updateTitleFonts()
     }
 
     // MARK: - Gesture gating
@@ -355,14 +371,20 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     public func updateTheme(_ newTheme: Theme) {
         guard newTheme != theme else { return }
         theme = newTheme
+        updateTitleFonts()
+        normalImageViews.forEach { $0.tintColor = theme.textColor }
+        selectedImageViews.forEach { $0.tintColor = theme.selectedTextColor }
+    }
+
+    private func updateTitleFonts() {
         for (titleNode, item) in zip(normalTitleNodes, _items) {
             titleNode.attributedText = makeNormalAttributed(item.title)
-            _ = item
         }
         for (titleNode, item) in zip(selectedTitleNodes, _items) {
             titleNode.attributedText = makeSelectedAttributed(item.title)
-            _ = item
         }
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
     }
 
     func aetherApplyAppearance(_ appearance: AetherAppearance, animated: Bool) {
@@ -423,11 +445,17 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
             return []
         }
         return selectedTitleNodes.indices.map { index in
-            let size = itemContentSize(
+            let selectedSize = itemContentSize(
                 titleNode: selectedTitleNodes[index],
-                badgeView: selectedBadgeViews[index]
+                badgeView: selectedBadgeViews[index],
+                imageView: selectedImageViews[index]
             )
-            return ceil(size.width + Metrics.minimumSegmentHorizontalPadding * 2.0)
+            let normalSize = itemContentSize(
+                titleNode: normalTitleNodes[index],
+                badgeView: normalBadgeViews[index],
+                imageView: normalImageViews[index]
+            )
+            return ceil(max(selectedSize.width, normalSize.width) + max(0.0, itemHorizontalPadding) * 2.0)
         }
     }
 
@@ -435,29 +463,37 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         itemWidths.reduce(0.0, +)
     }
 
-    private func itemContentSize(titleNode: ASTextNode, badgeView: NavigationBarBadgeView) -> CGSize {
+    private func itemContentSize(
+        titleNode: ASTextNode,
+        badgeView: NavigationBarBadgeView,
+        imageView: UIImageView
+    ) -> CGSize {
         let labelSize = titleSize(for: titleNode)
-        guard !badgeView.isHidden else {
-            return labelSize
+        var size = labelSize
+        if let image = imageView.image {
+            size.width += image.size.width + (labelSize.width > 0.0 ? Metrics.imageSpacing : 0.0)
+            size.height = max(size.height, image.size.height)
         }
-        let badgeSize = badgeView.sizeThatFits(CGSize(width: 80.0, height: 18.0))
-        return CGSize(
-            width: labelSize.width + Metrics.badgeSpacing + badgeSize.width,
-            height: max(labelSize.height, badgeSize.height)
-        )
+        if !badgeView.isHidden {
+            let badgeSize = badgeView.sizeThatFits(CGSize(width: 80.0, height: 18.0))
+            size.width += (size.width > 0.0 ? Metrics.badgeSpacing : 0.0) + badgeSize.width
+            size.height = max(size.height, badgeSize.height)
+        }
+        return size
     }
 
     private func layoutItemContent(
         titleNode: ASTextNode,
         badgeView: NavigationBarBadgeView,
+        imageView: UIImageView,
         in frame: CGRect,
         transition: ContainedViewLayoutTransition
     ) {
         let labelSize = titleSize(for: titleNode)
-        let horizontalPadding = Metrics.minimumSegmentHorizontalPadding
+        let horizontalPadding = max(0.0, itemHorizontalPadding)
         let contentFrame = frame.insetBy(dx: min(horizontalPadding, frame.width * 0.5), dy: 0.0)
         let labelY = frame.minY + floor((frame.height - labelSize.height) / 2.0)
-        if badgeView.isHidden {
+        if badgeView.isHidden && imageView.image == nil {
             transition.updateFrame(
                 node: titleNode,
                 frame: CGRect(
@@ -468,27 +504,43 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
                 )
             )
             transition.updateFrame(view: badgeView, frame: CGRect(x: frame.midX, y: frame.midY, width: 0.0, height: 0.0))
+            transition.updateFrame(view: imageView, frame: CGRect(x: frame.midX, y: frame.midY, width: 0.0, height: 0.0))
             return
         }
 
-        let badgeSize = badgeView.sizeThatFits(CGSize(width: 80.0, height: 18.0))
-        let totalWidth = min(contentFrame.width, labelSize.width + Metrics.badgeSpacing + badgeSize.width)
-        let labelWidth = max(0.0, min(labelSize.width, totalWidth - Metrics.badgeSpacing - badgeSize.width))
+        let imageSize = imageView.image?.size ?? .zero
+        let badgeSize = badgeView.isHidden ? .zero : badgeView.sizeThatFits(CGSize(width: 80.0, height: 18.0))
+        let imageSpacing = imageSize.width > 0.0 && labelSize.width > 0.0 ? Metrics.imageSpacing : 0.0
+        let badgeSpacing = badgeSize.width > 0.0 && (labelSize.width > 0.0 || imageSize.width > 0.0) ? Metrics.badgeSpacing : 0.0
+        let totalWidth = min(contentFrame.width, imageSize.width + imageSpacing + labelSize.width + badgeSpacing + badgeSize.width)
+        let labelWidth = max(0.0, min(labelSize.width, totalWidth - imageSize.width - imageSpacing - badgeSpacing - badgeSize.width))
         let startX = contentFrame.minX + floor((contentFrame.width - totalWidth) / 2.0)
+        let isRightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let imageX = isRightToLeft ? startX + totalWidth - imageSize.width : startX
+        let labelX = isRightToLeft ? startX + badgeSize.width + badgeSpacing : startX + imageSize.width + imageSpacing
         let labelFrame = CGRect(
-            x: startX,
+            x: labelX,
             y: labelY,
             width: labelWidth,
             height: labelSize.height
         )
         let badgeFrame = CGRect(
-            x: labelFrame.maxX + Metrics.badgeSpacing,
+            x: isRightToLeft ? startX : labelFrame.maxX + badgeSpacing,
             y: frame.minY + floor((frame.height - badgeSize.height) / 2.0),
             width: badgeSize.width,
             height: badgeSize.height
         )
         transition.updateFrame(node: titleNode, frame: labelFrame)
         transition.updateFrame(view: badgeView, frame: badgeFrame)
+        transition.updateFrame(
+            view: imageView,
+            frame: CGRect(
+                x: imageX,
+                y: frame.minY + floor((frame.height - imageSize.height) / 2.0),
+                width: imageSize.width,
+                height: imageSize.height
+            )
+        )
     }
 
     private func selectionFrame(for progress: CGFloat, itemFrames: [CGRect]) -> CGRect {
@@ -522,7 +574,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
 
         let visibleMinX = scrollView.contentOffset.x
         let visibleMaxX = visibleMinX + scrollView.bounds.width
-        let targetFrame = selectionFrame.insetBy(dx: -Metrics.minimumSegmentHorizontalPadding, dy: 0.0)
+        let targetFrame = selectionFrame.insetBy(dx: -max(0.0, itemHorizontalPadding), dy: 0.0)
         var targetOffsetX = visibleMinX
         if targetFrame.minX < visibleMinX {
             targetOffsetX = targetFrame.minX
@@ -616,12 +668,14 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
             layoutItemContent(
                 titleNode: normalTitleNodes[i],
                 badgeView: normalBadgeViews[i],
+                imageView: normalImageViews[i],
                 in: visualFrame,
                 transition: transition
             )
             layoutItemContent(
                 titleNode: selectedTitleNodes[i],
                 badgeView: selectedBadgeViews[i],
+                imageView: selectedImageViews[i],
                 in: visualFrame,
                 transition: transition
             )
@@ -669,14 +723,18 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         selectedTitleNodes.forEach { $0.removeFromSupernode() }
         normalBadgeViews.forEach { $0.removeFromSuperview() }
         selectedBadgeViews.forEach { $0.removeFromSuperview() }
+        normalImageViews.forEach { $0.removeFromSuperview() }
+        selectedImageViews.forEach { $0.removeFromSuperview() }
         itemButtons.forEach { $0.removeFromSupernode() }
         normalTitleNodes = []
         selectedTitleNodes = []
         normalBadgeViews = []
         selectedBadgeViews = []
+        normalImageViews = []
+        selectedImageViews = []
         itemButtons = []
 
-        for item in _items {
+        for (index, item) in _items.enumerated() {
             let normal = makeTitleNode(attributedText: makeNormalAttributed(item.title), accessibilityLabel: item.title)
             normalContentNode.addSubnode(normal)
             normalTitleNodes.append(normal)
@@ -685,6 +743,11 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
             normalContentNode.view.addSubview(normalBadge)
             normalBadgeViews.append(normalBadge)
 
+            let normalImage = makeImageView(image: item.image, tintColor: theme.textColor)
+            normalImage.accessibilityIdentifier = "aether.segment.icon.\(index).normal"
+            normalContentNode.view.addSubview(normalImage)
+            normalImageViews.append(normalImage)
+
             let selected = makeTitleNode(attributedText: makeSelectedAttributed(item.title), accessibilityLabel: item.title)
             selectedContentHostNode.addSubnode(selected)
             selectedTitleNodes.append(selected)
@@ -692,6 +755,11 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
             let selectedBadge = makeBadgeView(value: item.badgeValue)
             selectedContentHostNode.view.addSubview(selectedBadge)
             selectedBadgeViews.append(selectedBadge)
+
+            let selectedImage = makeImageView(image: item.image, tintColor: theme.selectedTextColor)
+            selectedImage.accessibilityIdentifier = "aether.segment.icon.\(index).selected"
+            selectedContentHostNode.view.addSubview(selectedImage)
+            selectedImageViews.append(selectedImage)
 
             let button = SegmentedItemControlNode()
             if let badgeValue = item.badgeValue, !badgeValue.isEmpty {
@@ -733,6 +801,15 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         return badgeView
     }
 
+    private func makeImageView(image: UIImage?, tintColor: UIColor) -> UIImageView {
+        let imageView = UIImageView(image: image)
+        imageView.tintColor = tintColor
+        imageView.contentMode = .center
+        imageView.isUserInteractionEnabled = false
+        imageView.isAccessibilityElement = false
+        return imageView
+    }
+
     private func makeTitleNode(attributedText: NSAttributedString, accessibilityLabel: String) -> ASTextNode {
         let node = ASTextNode()
         node.attributedText = attributedText
@@ -757,7 +834,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
 
     private func makeNormalAttributed(_ title: String) -> NSAttributedString {
         return NSAttributedString(string: title, attributes: [
-            .font: UIFont.aetherScaledSystemFont(ofSize: 14, weight: .regular),
+            .font: titleFont ?? UIFont.aetherScaledSystemFont(ofSize: 14, weight: .regular),
             .foregroundColor: theme.textColor,
             .paragraphStyle: Self.centeredParagraphStyle
         ])
@@ -765,7 +842,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
 
     private func makeSelectedAttributed(_ title: String) -> NSAttributedString {
         return NSAttributedString(string: title, attributes: [
-            .font: UIFont.aetherScaledSystemFont(ofSize: 14, weight: .semibold),
+            .font: selectedTitleFont ?? UIFont.aetherScaledSystemFont(ofSize: 14, weight: .semibold),
             .foregroundColor: theme.selectedTextColor,
             .paragraphStyle: Self.centeredParagraphStyle
         ])

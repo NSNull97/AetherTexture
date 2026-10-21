@@ -3,6 +3,7 @@ import AsyncDisplayKit
 
 private final class LiquidLensRestingBackgroundView: UIVisualEffectView {
     private var isDarkValue: Bool?
+    private var blurRadiusValue: CGFloat = 0
 
     // The resting selection darkens the sampled material in both themes
     // while keeping the backdrop's colors visible through the lens.
@@ -50,11 +51,13 @@ private final class LiquidLensRestingBackgroundView: UIVisualEffectView {
         update(isDark: traitCollection.userInterfaceStyle == .dark)
     }
 
-    func update(isDark: Bool) {
-        guard isDarkValue != isDark else {
+    func update(isDark: Bool, blurRadius: CGFloat = 0) {
+        let blurRadius = max(0, blurRadius)
+        guard isDarkValue != isDark || blurRadiusValue != blurRadius else {
             return
         }
         isDarkValue = isDark
+        blurRadiusValue = blurRadius
         overrideUserInterfaceStyle = isDark ? .dark : .light
 
         #if APPSTORE_SAFE
@@ -72,12 +75,57 @@ private final class LiquidLensRestingBackgroundView: UIVisualEffectView {
         filter.setValue(matrixValue, forKey: ObfuscatedSymbols.inputColorMatrix)
 
         if let sublayer = layer.sublayers?.first {
-            sublayer.filters = [filter]
+            var filters: [Any] = []
+            if blurRadius > 0, let blur = CALayer.blur() {
+                blur.setValue(blurRadius as NSNumber, forKey: ObfuscatedSymbols.filterRadiusKey)
+                filters.append(blur)
+            }
+            filters.append(filter)
+            sublayer.filters = filters
             sublayer.isOpaque = false
             sublayer.backgroundColor = nil
             sublayer.setValue(1.0, forKey: ObfuscatedSymbols.scale)
         }
         #endif
+    }
+}
+
+/// A small backdrop-only blur that belongs to the selected lens capsule.
+/// The existing selection colour remains owned by the parent view; this view
+/// only samples and softens the pixels behind that capsule.
+private final class LiquidLensSelectionBlurView: UIView {
+    #if !APPSTORE_SAFE
+    private let blurView: BackdropBlurHostView
+    #else
+    private let blurView: UIVisualEffectView
+    #endif
+
+    override init(frame: CGRect) {
+        #if !APPSTORE_SAFE
+        let blurView = BackdropBlurHostView()
+        blurView.blurAmount = 4.0
+        self.blurView = blurView
+        #else
+        // The public fallback has no radius setter. Ultra-thin material keeps
+        // this path visually neutral while still providing the requested
+        // light backdrop blur without changing the lens tint.
+        self.blurView = UIVisualEffectView(
+            effect: UIBlurEffect(style: .systemUltraThinMaterial)
+        )
+        #endif
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        addSubview(blurView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        blurView.frame = bounds
     }
 }
 
@@ -162,6 +210,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
     private var backgroundContainer: GlassBackgroundContainerView?
     private var genericBackgroundContainer: UIView?
     private var backgroundView: GlassBackgroundView?
+    private var selectionBlurView: LiquidLensSelectionBlurView?
     private var lensView: UIView?
     private let liftedContainerView = UIView()
     public let contentView = UIView()
@@ -411,6 +460,8 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         contentView.removeFromSuperview()
         liftedContainerView.removeFromSuperview()
         containerView.removeFromSuperview()
+        selectionBlurView?.removeFromSuperview()
+        selectionBlurView = nil
         contentView.clipsToBounds = false
         liftedContainerView.clipsToBounds = false
         liftedContainerView.transform = .identity
@@ -504,7 +555,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         if let lensView {
             installNativeLensRenderer(lensView)
         } else {
-            installLiquidFallbackRenderer()
+            installLiquidFallbackRenderer(for: style)
         }
     }
 
@@ -523,7 +574,12 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         guard let allocated = viewClass.perform(allocSelector)?.takeUnretainedValue() as AnyObject? else {
             return nil
         }
-        return allocated.perform(initSelector, with: UIView())?.takeUnretainedValue() as? UIView
+        // The private lens uses this view for its unlifted (resting) capsule.
+        // Passing an empty UIView leaves the selected lens sharp even when the
+        // variant spec requests a non-zero unlifted blur radius.
+        let restingBackground = LiquidLensRestingBackgroundView()
+        restingBackgroundView = restingBackground
+        return allocated.perform(initSelector, with: restingBackground)?.takeUnretainedValue() as? UIView
         #endif
     }
 
@@ -542,9 +598,8 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         }
         lensView.layer.zPosition = 10.0
 
-        let restingBackground = LiquidLensRestingBackgroundView()
+        let restingBackground = restingBackgroundView ?? LiquidLensRestingBackgroundView()
         restingBackgroundView = restingBackground
-        liftedContainerView.addSubview(restingBackground)
         containerView.addSubview(liftedContainerView)
         containerView.addSubview(lensView)
         containerView.addSubview(contentView)
@@ -572,6 +627,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         setNativeContainer(on: lensView, selectorName: ObfuscatedSymbols.setOverridePunchoutView, view: contentView)
         setNativeInt(on: lensView, selectorName: ObfuscatedSymbols.setLiftedContentMode, value: 1)
         setNativeInt(on: lensView, selectorName: ObfuscatedSymbols.setStyle, value: 1)
+        applyNativeBlurRadius(to: lensView)
         setNativeBool(on: lensView, selectorName: ObfuscatedSymbols.setWarpsContentBelow, value: true)
         lensView.setValue(UIColor(white: 0.0, alpha: 0.1), forKey: ObfuscatedSymbols.restingBackgroundColor)
         #endif
@@ -580,7 +636,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
     /// Liquid Glass fallback for OS versions where the native lens is not
     /// available. It intentionally retains the existing mask/blob behavior;
     /// true Legacy never calls this method.
-    private func installLiquidFallbackRenderer() {
+    private func installLiquidFallbackRenderer(for style: AetherAppearanceStyle) {
 
         let selectionView = GlassBackgroundView.ContentImageView()
         selectionView.alpha = 0
@@ -589,7 +645,7 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         let thumb: UIView
         if #available(iOS 26.0, *) {
             thumb = UIView()
-        } else if let experimental = ExperimentalGlassLensSurface() {
+        } else if let experimental = ExperimentalGlassLensSurface(appearanceStyle: style) {
             experimentalLensView = experimental
             thumb = experimental
         } else {
@@ -598,6 +654,12 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         thumb.clipsToBounds = true
         thumb.layer.cornerCurve = .continuous
         legacyThumbView = thumb
+        if style == .liquidGlassV2 {
+            let blur = LiquidLensSelectionBlurView()
+            blur.alpha = 0
+            thumb.addSubview(blur)
+            selectionBlurView = blur
+        }
         if let backgroundView {
             backgroundView.contentView.insertSubview(thumb, at: 0)
         } else {
@@ -754,11 +816,18 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
             isLifted: params.isLifted
         )
         updateLens(params: lensParams, transition: transition)
+        if let lensView {
+            // Updating the lens bounds/state can select a fresh private
+            // variant spec, so apply the V2 resting blur after that update.
+            applyNativeBlurRadius(to: lensView)
+        }
         updateLiquidFallbackMasks(params: params, lensParams: lensParams, transition: transition)
 
         if let restingBackgroundView {
-            transition.updateFrame(view: restingBackgroundView, frame: frame)
-            restingBackgroundView.update(isDark: params.isDark)
+            restingBackgroundView.update(
+                isDark: params.isDark,
+                blurRadius: appliedAppearanceStyle == .liquidGlassV2 ? 4.0 : 0.0
+            )
             transition.updateAlpha(
                 view: restingBackgroundView,
                 alpha: (params.isLifted || params.isCollapsed) ? 0.0 : 1.0
@@ -1083,6 +1152,17 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
             } else {
                 legacyThumbView.backgroundColor = Self.liquidSelectionColor(isDark: params.isDark)
             }
+            if let selectionBlurView {
+                transition.updateFrame(
+                    view: selectionBlurView,
+                    frame: CGRect(origin: .zero, size: effectiveLensFrame.size)
+                )
+                transition.updateAlpha(
+                    view: selectionBlurView,
+                    alpha: params.isLifted || params.isCollapsed || UIAccessibility.isReduceTransparencyEnabled
+                        ? 0.0 : 1.0
+                )
+            }
             let cornerRadius = effectiveLensFrame.height * 0.5
             transition.updateCornerRadius(layer: legacyThumbView.layer, cornerRadius: cornerRadius)
         }
@@ -1109,7 +1189,10 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         classicTrackView?.overrideUserInterfaceStyle = interfaceStyle
         classicSelectionView?.overrideUserInterfaceStyle = interfaceStyle
         classicSelectedClipView?.overrideUserInterfaceStyle = interfaceStyle
-        restingBackgroundView?.update(isDark: isDark)
+        restingBackgroundView?.update(
+            isDark: isDark,
+            blurRadius: appliedAppearanceStyle == .liquidGlassV2 ? 4.0 : 0.0
+        )
     }
 
     #if DEBUG
@@ -1222,6 +1305,38 @@ public final class LiquidLensView: UIView, AetherAppearanceConsumer {
         typealias Function = @convention(c) (AnyObject, Selector, Int32) -> Void
         let function = unsafeBitCast(method, to: Function.self)
         function(view, selector, value)
+        #endif
+    }
+
+    private func setNativeDouble(on view: NSObject, selectorName: String, value: Double) {
+        #if !APPSTORE_SAFE
+        let selector = NSSelectorFromString(selectorName)
+        guard let method = view.method(for: selector) else {
+            return
+        }
+        typealias Function = @convention(c) (AnyObject, Selector, Double) -> Void
+        let function = unsafeBitCast(method, to: Function.self)
+        function(view, selector, value)
+        #endif
+    }
+
+    private func applyNativeBlurRadius(to lensView: UIView) {
+        #if !APPSTORE_SAFE
+        guard appliedAppearanceStyle == .liquidGlassV2 else {
+            return
+        }
+        let selector = NSSelectorFromString(ObfuscatedSymbols.spec)
+        guard lensView.responds(to: selector),
+              let spec = lensView.perform(selector)?.takeUnretainedValue() as? NSObject else {
+            return
+        }
+        setNativeDouble(
+            on: spec,
+            selectorName: ObfuscatedSymbols.setUnliftedBlurRadius,
+            value: 4.0
+        )
+        #else
+        _ = lensView
         #endif
     }
 }

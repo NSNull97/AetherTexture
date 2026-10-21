@@ -73,6 +73,11 @@ final class ContextMenuActionsView: UIView {
     /// touch logic, but it does not refract or distort menu content.
     private let highlightView = UIView()
     private var rowViews: [RowEntry] = []
+    // `ASTextNode.view` and `ASImageNode.view` do not own their node. Keep
+    // header nodes alive for the lifetime of the actions view; otherwise a
+    // header still reserves its 32/44pt row but its label and chevron vanish
+    // as soon as `buildRowViews()` returns.
+    private var retainedHeaderNodes: [ASDisplayNode] = []
 
     // MARK: - State
 
@@ -92,6 +97,7 @@ final class ContextMenuActionsView: UIView {
     private let items: [ContextMenuItem]
     private let headerStyle: HeaderStyle
     private let appearanceStyle: AetherAppearanceStyle
+    private let actionTextColor: UIColor?
     private let metrics: Metrics
     private let reservesLeadingSlotForActionRows: Bool
     var onActionSelected: ((ContextMenuActionItem) -> Void)?
@@ -145,11 +151,13 @@ final class ContextMenuActionsView: UIView {
     init(
         items: [ContextMenuItem],
         headerStyle: HeaderStyle = .none,
-        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style
+        appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style,
+        actionTextColor: UIColor? = nil
     ) {
         self.items = items
         self.headerStyle = headerStyle
         self.appearanceStyle = appearanceStyle
+        self.actionTextColor = actionTextColor
         self.metrics = Metrics.resolve(for: appearanceStyle)
         self.reservesLeadingSlotForActionRows = Self.itemsNeedLeadingSlot(items)
 
@@ -682,7 +690,7 @@ final class ContextMenuActionsView: UIView {
                     string: title,
                     attributes: [
                         .font: UIFont.aetherScaledSystemFont(ofSize: 13.0, weight: .regular),
-                        .foregroundColor: UIColor.tertiaryLabel
+                        .foregroundColor: actionTextColor ?? UIColor.tertiaryLabel
                     ]
                 )
                 label.maximumNumberOfLines = 1
@@ -697,14 +705,24 @@ final class ContextMenuActionsView: UIView {
                         .horizontalInset
                     make.leading.equalToSuperview().offset(inset)
                     make.trailing.lessThanOrEqualToSuperview().offset(-inset)
+                    // Texture text nodes do not expose a reliable intrinsic
+                    // height until their async layout has completed.  The
+                    // header container is already given its fixed row frame
+                    // by `layoutSubviews`, so an unconstrained label can end
+                    // up with a zero-height view: the row remains reserved,
+                    // but the title is missing from both the live menu and
+                    // its transition snapshot.
+                    make.height.equalTo(16.0)
                     make.bottom.equalToSuperview().offset(-6.0)
                 }
                 contentContainer.addSubview(container)
+                retainedHeaderNodes.append(label)
                 rowViews.append(RowEntry(view: container, actionItem: nil))
             case let .action(action):
                 let row = ContextMenuActionItemView(
                     item: action,
-                    appearanceStyle: appearanceStyle
+                    appearanceStyle: appearanceStyle,
+                    actionTextColor: actionTextColor
                 )
                 row.reservesLeadingSlot = reservesLeadingSlotForActionRows
                 if metrics.automaticallySeparatesActionRows,
@@ -740,7 +758,10 @@ final class ContextMenuActionsView: UIView {
                 // touch target with its own frame. layoutSubviews
                 // positions them in a horizontal strip.
                 for cellItem in cells {
-                    let cellView = ContextMenuActionRowCellView(item: cellItem)
+                    let cellView = ContextMenuActionRowCellView(
+                        item: cellItem,
+                        actionTextColor: actionTextColor
+                    )
                     contentContainer.addSubview(cellView)
                     rowViews.append(RowEntry(
                         view: cellView,
@@ -803,7 +824,7 @@ final class ContextMenuActionsView: UIView {
 
         let chevron = ASImageNode()
         chevron.contentMode = .center
-        chevron.tintColor = .label
+        chevron.tintColor = actionTextColor ?? .label
         if #available(iOS 13.0, *) {
             let config = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
             chevron.image = UIImage(systemName: chevronSymbol, withConfiguration: config)?
@@ -817,13 +838,14 @@ final class ContextMenuActionsView: UIView {
             string: title,
             attributes: [
                 .font: UIFont.aetherScaledSystemFont(ofSize: 17.0, weight: .semibold),
-                .foregroundColor: UIColor.label
+                .foregroundColor: actionTextColor ?? UIColor.label
             ]
         )
         label.maximumNumberOfLines = 1
         label.truncationMode = .byTruncatingTail
         label.view.isUserInteractionEnabled = false
         container.addSubview(label.view)
+        retainedHeaderNodes.append(contentsOf: [chevron, label])
 
         chevron.view.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(
@@ -838,6 +860,7 @@ final class ContextMenuActionsView: UIView {
             make.trailing.lessThanOrEqualToSuperview().offset(
                 -ContextMenuActionItemView.Metrics.resolve(for: appearanceStyle).horizontalInset
             )
+            make.height.equalTo(22.0)
             make.centerY.equalToSuperview()
         }
         return container

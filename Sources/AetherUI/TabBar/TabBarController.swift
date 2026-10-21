@@ -272,6 +272,13 @@ open class AetherTabBarController: AetherViewController {
     /// animation. `animated = false` matches direct property assignment.
     public func setBottomBarAccessory(_ accessory: TabBarAccessoryView?, animated: Bool) {
         guard accessory !== _bottomBarAccessory else { return }
+        // A completed morph normally clears the expanded controller from the
+        // transition coordinator delegate. If a scene is torn down between
+        // the final coordinator sample and that delegate callback, the child
+        // can survive with no coordinator. Remove that orphan before the
+        // accessory wrapper is replaced so a call screen cannot remain
+        // attached above the tab bar after the call has ended.
+        teardownOrphanedExpandedAccessoryIfNeeded()
         let scrollSnapshot = captureObservedRawScrollOffset()
         // Installation/replacement owns wrapper geometry and crossfade state.
         // Cancel the short arming preview first so the new surface is never
@@ -287,6 +294,44 @@ open class AetherTabBarController: AetherViewController {
         _bottomBarAccessory = accessory
         installBottomBarAccessory(old: old, new: accessory, animated: animated)
         restoreObservedRawScrollOffsetAfterLayout(scrollSnapshot)
+    }
+
+    private func teardownOrphanedExpandedAccessoryIfNeeded() {
+        guard let controller = expandedAccessoryViewController,
+              bottomBarAccessoryTransitionCoordinator == nil else {
+            return
+        }
+
+        let presentationSession = accessoryPresentationSession
+        teardownExpandedAccessoryController(controller)
+        if let gesture = accessoryDismissGesture {
+            bottomBarAccessoryWrapper?.removeGestureRecognizer(gesture)
+        }
+        accessoryDismissGesture = nil
+        expandedAccessoryViewController = nil
+        accessoryTransitionGeometry = nil
+        accessoryPresentationSession = nil
+        accessoryPresentationProgress = 0
+        accessoryUsesExpandedSystemChrome = false
+        accessoryForcedCollapse = false
+        accessoryDismissCompletions.removeAll()
+        bottomBarAccessoryExpandedContentHost?.alpha = 0
+        bottomBarAccessoryExpandedContentHost?.isUserInteractionEnabled = false
+        bottomBarAccessorySharedElementHost?.removeFromSuperview()
+        bottomBarAccessorySharedElementHost?.accessibilityElementsHidden = true
+
+        if let presentationSession {
+            restoreAccessoryPresentationSession(presentationSession)
+        }
+        let chromeVisible = max(0, 1 - effectiveTabBarHiddenProgress)
+        tabBarView.alpha = chromeVisible
+        tabBarView.isUserInteractionEnabled = chromeVisible > 0.99
+        if let layout = currentlyAppliedLayout {
+            containerLayoutUpdated(layout, transition: .immediate)
+        }
+        attachScrollObserverIfPossible()
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
     }
 
     private var _bottomBarAccessory: TabBarAccessoryView?
@@ -1281,6 +1326,7 @@ open class AetherTabBarController: AetherViewController {
         // replaced directly.
         bottomBarAccessoryTransitionCoordinator?.reset(to: .collapsed)
         bottomBarAccessoryTransitionCoordinator = nil
+        teardownOrphanedExpandedAccessoryIfNeeded()
 
         // A -> B reuses the active surface and its hosts. This branch runs
         // after a possible expanded session has synchronously settled, so the

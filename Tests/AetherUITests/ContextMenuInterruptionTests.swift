@@ -302,8 +302,13 @@ final class ContextMenuInterruptionTests: XCTestCase {
     func testSourceCaptionFadesBeforeOpeningShapeLeavesItsButton() {
         let host = makeHost(appearance: .legacy, menuHeight: 160, sourceWidth: 160)
         defer { host.tearDownGlassEffects() }
+        // The source remains visible until the attached lens has started to
+        // cover it; fading it during the old .02... .20 window exposed a
+        // blank shell between the button and the menu body.
+        host.setProgress(0.08, direction: .opening)
+        XCTAssertGreaterThan(host.sourceProxyContainer.alpha, 0.95)
         host.setProgress(0.15, direction: .opening)
-        XCTAssertLessThan(host.sourceProxyContainer.alpha, 0.25)
+        XCTAssertGreaterThan(host.sourceProxyContainer.alpha, 0.50)
         XCTAssertEqual(host.finalMenuGlassSurfaceView.bounds.size, CGSize(width: 160, height: 44))
         host.setProgress(0.30, direction: .opening)
         XCTAssertEqual(host.sourceProxyContainer.alpha, 0)

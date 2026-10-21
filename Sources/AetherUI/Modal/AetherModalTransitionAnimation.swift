@@ -410,7 +410,17 @@ private final class AetherModalSourceDismissAnimator: NSObject, UIViewController
             return
         }
 
-        let startFrame = fromView.frame
+        // UIKit leaves the dismissed view translated while an interactive
+        // call swipe is handed to this animator. `frame` is undefined when a
+        // transform is active and can point at the pre-gesture bounds, so the
+        // morph would collapse toward the source from the wrong rectangle.
+        // Converting the untransformed bounds through the active hierarchy
+        // preserves the visible presentation frame, including the live drag
+        // offset, and keeps the reverse morph connected to its source.
+        let startFrame = fromView.convert(fromView.bounds, to: container)
+        let originalBounds = fromView.bounds
+        let originalCenter = fromView.center
+        let originalTransform = fromView.transform
         let cfg = sourceTransition.configuration
         let sourceView = sourceTransition.resolvedSourceView()
         let sourceSnapshot = Self.makeSourceSnapshot(
@@ -473,7 +483,13 @@ private final class AetherModalSourceDismissAnimator: NSObject, UIViewController
                 morphView.removeFromSuperview()
                 fromView.alpha = 1.0
                 if !completed {
-                    fromView.frame = startFrame
+                    // Preserve an interactive swipe that UIKit may have left
+                    // on the dismissed view. `startFrame` is in transition
+                    // container coordinates and cannot safely be assigned to
+                    // `frame` when the view has a non-identity transform.
+                    fromView.bounds = originalBounds
+                    fromView.center = originalCenter
+                    fromView.transform = originalTransform
                     fromView.setNeedsLayout()
                     fromView.layoutIfNeeded()
                 }

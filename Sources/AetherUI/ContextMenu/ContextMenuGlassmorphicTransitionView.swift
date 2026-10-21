@@ -74,7 +74,11 @@ func contextMenuSourceMaterializationSample(
 ) -> ContextMenuSourceMaterializationSample {
     let t = max(0.0, min(1.0, rawProgress))
     if direction == .opening {
-        let fade = contextMenuBloomSmoothRange(t, start: 0.02, end: 0.20)
+        // Keep the source readable while the first lens is still attached.
+        // The old .02... .20 fade left a blank source shell before the body
+        // had enough volume to cover the button, especially for touch-up
+        // driven ordinary controls.
+        let fade = contextMenuBloomSmoothRange(t, start: 0.08, end: 0.26)
         return .init(opacity: 1.0 - fade, blurRadius: 0.0)
     }
     let elapsed = 1.0 - t
@@ -256,11 +260,11 @@ private func contextMenuReferenceOpeningGeometry(
 ) -> ContextMenuBloomGeometrySample {
     let raw = max(0, min(1, progress))
     let t = raw
-    if t == 0 || (!reduceMotion && t <= 0.16) {
+    if t == 0 || (!reduceMotion && t <= 0.10) {
         return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0)
     }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
-    let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
+    let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.26)
     // The reference pear grows on both axes while it travels. A separate
     // width-limited lens height flattened tall menus, then forced their
     // height to catch up in a few frames after the centre had already stopped.
@@ -290,7 +294,7 @@ private func contextMenuReferenceOpeningGeometry(
     // A single centre trajectory carries the compact drop into the menu.
     // Deriving Y from an anchored growing rectangle while moving X ahead
     // made the seed slide sideways; both axes must share the arrival clock.
-    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.58)
+    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.58)
     // Quadratic travel bends toward the destination: the vertical component
     // leads while the compact body leaves the button, then the horizontal
     // component catches up. Translation overlaps expansion instead of
@@ -312,7 +316,7 @@ private func contextMenuReferenceOpeningGeometry(
     // source lobe or rigid rotation is needed to suggest a drop.
     // Relax the shoulder as volume spreads. Holding a tight corner until
     // after expansion left a flat ledge next to the neck in the middle frames.
-    let tension = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.16, end: 0.30)
+    let tension = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.28)
         * (1 - contextMenuBloomSmoothRange(t, start: 0.34, end: 0.82))
     let side = min(frame.width, frame.height)
     func corner(x: CGFloat, y: CGFloat) -> CGFloat {
@@ -419,12 +423,17 @@ func contextMenuBloomGeometrySample(
             ]
             let contraction = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 0.72, 0.59, 0.37, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                // Keep a broad shoulder while the height drains. The old
+                // width profile reached the source width by 110 ms and left
+                // a tall, narrow stem for the rest of the close; the next
+                // frames then widened it back into the button. The reference
+                // keeps one continuous asymmetric lobe all the way through.
+                values: [1.0, 0.74, 0.62, 0.46, 0.32, 0.20, 0.11, 0.05, 0.015, 0.0, 0.0],
                 at: elapsed
             )
             let sourceCompression = contextMenuBloomSample(
                 times: times,
-                values: [0.0, 0.0, 0.0, 0.0, 0.06, 0.25, 0.28, 0.14, 0.06, 0.0, 0.0],
+                values: [0.0, 0.0, 0.0, 0.02, 0.10, 0.20, 0.24, 0.16, 0.08, 0.0, 0.0],
                 at: elapsed
             )
             let widthDifference = target.width - source.width
@@ -435,7 +444,7 @@ func contextMenuBloomGeometrySample(
                 : contraction
             let shortHeightT = contextMenuBloomSample(
                 times: times,
-                values: [1.0, 0.90, 0.765, 0.72, 0.585, 0.36, 0.215, 0.08, 0.02, 0.0, 0.0],
+                values: [1.0, 0.90, 0.77, 0.66, 0.52, 0.36, 0.22, 0.11, 0.035, 0.0, 0.0],
                 at: elapsed
             )
             let tallness = contextMenuClosingTallness(target: target)
@@ -922,7 +931,7 @@ func contextMenuGlassmorphicGeometrySample(
         let dx = sourceCenter.x - center.x
         let dy = sourceCenter.y - center.y
         let distance = hypot(dx, dy)
-        let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(shapeProgress, start: 0.16, end: 0.26)
+        let neck = reduceMotion ? 0 : contextMenuBloomSmoothRange(shapeProgress, start: 0.10, end: 0.24)
             * (1 - contextMenuBloomSmoothRange(shapeProgress, start: 0.32, end: 0.52))
         let side = min(body.width, body.height)
         let reach = min(distance, side * 0.30 + source.height * 0.48) * neck
@@ -2145,8 +2154,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     }
 
     func prepareMenuContentSnapshots(from view: UIView) {
-        view.layoutIfNeeded()
+        Self.layoutRecursively(in: view)
         Self.ensureTextureContentIsDisplayed(in: view)
+        // Texture nodes can finish their display pass by updating a nested
+        // UIKit wrapper. Resolve that layout once more before capturing the
+        // menu image so header labels do not disappear from the snapshot.
+        Self.layoutRecursively(in: view)
         let image = Self.renderImage(from: view)
         sharpMenuSnapshotView.image = image
         blurredMenuSnapshotView.image = Self.blurredImage(from: image, radius: 18.0) ?? image
@@ -2644,7 +2657,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         // reaches an exact endpoint, so completion does not cause a one-frame
         // brightness snap when the snapshots are removed.
         let contentT = contentTimelineProgress(rawT: rawT)
-        var weights = contextMenuBloomClosingContentWeights(at: contentT)
+        var weights = animationDirection >= 0
+            ? contextMenuBloomContentWeights(at: contentT)
+            : contextMenuBloomClosingContentWeights(at: contentT)
         var interruptedBlend: CGFloat = 0
         var interruptedReveal: CGFloat?
         if let state = interruptedCollapse {
@@ -2810,7 +2825,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             }
             // Share the absolute clock with the pear. A second acceleration
             // of this phase squeezed the whole optical transfer into a burst.
-            return contextMenuBloomNormalize(t, start: 0.20, end: 0.94)
+            return contextMenuBloomNormalize(t, start: 0.14, end: 0.90)
         }
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
@@ -3431,6 +3446,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
         return renderer.image { _ in
             view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+    }
+
+    private static func layoutRecursively(in view: UIView) {
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        for subview in view.subviews {
+            layoutRecursively(in: subview)
         }
     }
 
