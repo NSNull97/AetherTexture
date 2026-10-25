@@ -580,6 +580,22 @@ open class AetherViewController: ASDKViewController<ASDisplayNode> {
         return nil
     }
 
+    // MARK: - Custom Stack Transition
+
+    /// Returns a transition that replaces the default horizontal slide.
+    ///
+    /// The navigation container asks the controller that is being pushed for
+    /// `.push`, and the controller that is being popped for `.pop`. Returning
+    /// `nil` keeps the default slide.
+    open func customNavigationTransition(
+        for operation: AetherNavigationTransitionOperation,
+        from fromController: AetherViewController,
+        to toController: AetherViewController,
+        isInteractive: Bool
+    ) -> AetherCustomNavigationTransition? {
+        return nil
+    }
+
     // MARK: - Additional Heights
 
     open var additionalNavigationBarHeight: CGFloat {

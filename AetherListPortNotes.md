@@ -1,5 +1,10 @@
 # AetherList Port Notes
 
+> Historical implementation notes. The UIKit `AetherListView` described in
+> some entries was removed from the package target; the current public list API
+> is ``AetherListNode``. References below document the migration history and
+> are not a promise of a compatibility type.
+
 ## Source Scope Reviewed
 
 - `TelegramMessenger/Telegram-iOS/submodules/Display/Source/ListView.swift`

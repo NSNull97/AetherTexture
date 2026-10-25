@@ -227,7 +227,9 @@ final class TouchEffect {
         animation.stiffness = angularFrequency * angularFrequency
         animation.damping = 2.0 * dampingRatio * angularFrequency
         animation.initialVelocity = spring.initialVelocity
-        animation.duration = reducesMotion ? 0.0 : spring.duration
+        // Play the spring to rest; cutting it at `spring.duration` removed
+        // the release overshoot and ended with a visible snap.
+        animation.duration = reducesMotion ? 0.0 : animation.settlingDuration
         animation.isRemovedOnCompletion = true
 
         CATransaction.begin()

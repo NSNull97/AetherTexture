@@ -26,7 +26,19 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
 
     private let glassBackground: GlassBackgroundView
     private let contentContainer = UIView()
-    internal var contextMenuPresentationContentView: UIView { contentContainer }
+    /// Everything drawn above the material, including custom content hosted
+    /// directly in the glass content view (not only the built-in title/icon).
+    internal var contextMenuPresentationContentView: UIView { glassBackground.contentView }
+
+    /// Set while a context menu's proxy stands in for this button. State
+    /// updates during the menu (enabled, appearance) must not bring the
+    /// original back on top of the transition.
+    internal var isSuppressedForContextMenu = false {
+        didSet {
+            guard isSuppressedForContextMenu != oldValue else { return }
+            updateInteractionState()
+        }
+    }
     private var iconNode: ASImageNode?
     private var titleNode: ASTextNode?
     private var titleFont: UIFont = .aetherScaledSystemFont(ofSize: 15.0, weight: .medium)
@@ -40,6 +52,18 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
     /// target/action users can also subscribe to `.touchUpInside` or
     /// `.primaryActionTriggered`.
     public var action: ((GlassButton) -> Void)?
+
+    /// Menu shown as the button's primary action, like UIKit's
+    /// `showsMenuAsPrimaryAction`: it opens on touch-down, and the same
+    /// touch can slide onto a row and lift to choose it. While set, the
+    /// press highlight and `.touchUpInside`/`action` are not delivered.
+    public var contextMenuItemsProvider: (() -> [ContextMenuItem])?
+    /// Menu style; `.unspecified` follows the button's environment.
+    public var contextMenuUserInterfaceStyle: UIUserInterfaceStyle = .unspecified
+    private var presentedContextMenu: ContextMenuController?
+    /// The touch that opened the menu stays owned by it until lift-off,
+    /// even if the menu is dismissed first.
+    private var tracksContextMenuTouch = false
 
     /// Optional per-control style. `nil` follows its container/application.
     public var appearanceStyleOverride: AetherAppearanceStyle? = nil {
@@ -489,7 +513,7 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
             ?? AetherAppearance.runtimeCurrent.style
         let tokens = AetherLegacySurfaceTokens.resolve(role: .button, traitCollection: traitCollection)
         updateElasticPressRenderer(for: style)
-        alpha = isEnabled ? 1.0 : (style.usesLiquidGlass ? 0.4 : tokens.disabledAlpha)
+        alpha = isSuppressedForContextMenu ? 0.0 : (isEnabled ? 1.0 : (style.usesLiquidGlass ? 0.4 : tokens.disabledAlpha))
         pressRecognizer?.isEnabled = enabled
         elasticRecognizer?.isEnabled = enabled
         if !enabled {
@@ -565,6 +589,8 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
         let location = recognizer.location(in: self)
         let isInside = bounds.contains(location)
 
+        if handleContextMenuPress(recognizer, isInside: isInside) { return }
+
         switch recognizer.state {
         case .began:
             isHighlighted = isInside
@@ -595,6 +621,61 @@ public final class GlassButton: UIControl, AetherAppearanceConsumer {
 
         default:
             break
+        }
+    }
+}
+
+extension GlassButton {
+    /// The menu currently presented from `contextMenuItemsProvider`.
+    public var presentedContextMenuController: ContextMenuController? { presentedContextMenu }
+
+    /// Closes the primary-action menu, e.g. when the owning screen goes away.
+    public func dismissContextMenu(animated: Bool = true) {
+        presentedContextMenu?.dismiss(animated: animated)
+        presentedContextMenu = nil
+    }
+
+    /// Routes a press to the primary-action menu. Returns false when the
+    /// button has no menu and the ordinary control events apply.
+    fileprivate func handleContextMenuPress(_ recognizer: UIGestureRecognizer, isInside: Bool) -> Bool {
+        let location = recognizer.location(in: nil)
+        switch recognizer.state {
+        case .began:
+            guard isInside, presentedContextMenu == nil, let provider = contextMenuItemsProvider else {
+                return false
+            }
+            let items = provider()
+            guard !items.isEmpty, window != nil else { return false }
+            tracksContextMenuTouch = true
+            isHighlighted = false
+            sendActions(for: .touchDown)
+            let menu = ContextMenuController(
+                source: .init(view: self, cornerRadius: cornerRadius ?? bounds.height / 2.0),
+                items: items,
+                appearanceStyle: appearanceStyleOverride,
+                isDark: contextMenuUserInterfaceStyle == .unspecified ? nil : contextMenuUserInterfaceStyle == .dark,
+                onDismiss: { [weak self] in self?.presentedContextMenu = nil }
+            )
+            presentedContextMenu = menu
+            menu.present()
+            menu.beginPresentingTouch(at: location)
+            return true
+        case .changed:
+            guard tracksContextMenuTouch else { return false }
+            presentedContextMenu?.updatePresentingTouch(at: location)
+            return true
+        case .ended:
+            guard tracksContextMenuTouch else { return false }
+            tracksContextMenuTouch = false
+            presentedContextMenu?.endPresentingTouch(at: location)
+            return true
+        case .cancelled, .failed:
+            guard tracksContextMenuTouch else { return false }
+            tracksContextMenuTouch = false
+            presentedContextMenu?.cancelPresentingTouch()
+            return true
+        default:
+            return tracksContextMenuTouch
         }
     }
 }

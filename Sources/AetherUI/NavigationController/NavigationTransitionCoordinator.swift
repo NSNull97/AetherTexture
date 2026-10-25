@@ -4,6 +4,15 @@ import AsyncDisplayKit
 // Direct port of Display framework `NavigationTransitionCoordinator` from
 // submodules/Display/Source/NavigationTransitionCoordinator.swift
 // adapted to pure UIKit.
+//
+// Motion follows `UINavigationController` on iOS 26/27 (see
+// `AetherMotion.navigationStack`):
+// - push/pop run as one spring on the render server, so a busy main thread
+//   (the incoming screen laying out its first frames) cannot drop or bunch
+//   frames, and the first visible frame starts from the resting position;
+// - an interactive pop moves the page through a spring that follows the
+//   finger, and on release the same page state (position and velocity) is
+//   handed to a render-server spring toward the resolved edge.
 
 enum NavigationTransitionDirection {
     case push
@@ -11,49 +20,70 @@ enum NavigationTransitionDirection {
 }
 
 private let navigationShadowWidth: CGFloat = 16.0
-private let navigationPushTransitionDuration: Double = AetherMotion.navigation.duration
-private let navigationPopTransitionDuration: Double = AetherMotion.navigation.duration
-private let navigationStationaryPopCompletionProgress: CGFloat = 0.90
 private let navigationStationaryPopVelocityTolerance: CGFloat = 140.0
-private let navigationPopThrowVelocityThreshold: CGFloat = 900.0
-private let navigationPopOneWayVelocityThreshold: CGFloat = 1500.0
-private let navigationPopThrowVelocityRange: CGFloat = 2600.0
-// A soft first frame followed by a quick, monotonic catch-up. Keeping the
-// endpoint flat avoids both a mechanical launch and a final correction.
-private let navigationSettleCurve = ContainedViewLayoutTransitionCurve.custom(0.20, 0.28, 0.22, 1.0)
-private let navigationMinimumContinuationSlope: CGFloat = 0.0
-private let navigationMaximumContinuationSlope: CGFloat = 4.80
-private let navigationContinuationControlPointMaxY: CGFloat = 0.88
-private let navigationInteractiveVelocityTailDuration: CGFloat = 0.095
-private let navigationMinimumInteractiveCompletionDuration: CGFloat = 0.20
-private let navigationMinimumLightThrowCompletionDuration: CGFloat = 0.26
-private let navigationReleaseProgressFrameAllowance: CGFloat = 1.35
-private let navigationReleaseMinimumProgressDistance: CGFloat = 1.5
-private let navigationRecentVelocityMinimumSampleDuration: CFTimeInterval = 1.0 / 240.0
-private let navigationRecentVelocityMaximumSampleAge: CFTimeInterval = 0.14
+/// Residual motion below this many points is invisible; the transition
+/// completes there instead of waiting for the spring's numeric tail.
+private let navigationSettleTolerance: CGFloat = 0.25
 
 private func navigationTransitionPosition(_ value: CGFloat) -> CGFloat {
     return value
 }
 
-private func navigationSmootherStep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
-    guard edge0 != edge1 else {
-        return value < edge0 ? 0.0 : 1.0
+/// Exact damped-spring evolution of a displacement `u` (current − target)
+/// and velocity `v` over `t` seconds.
+struct NavigationSpringStep {
+    let spring: AetherMotion.PhysicalSpring
+
+    func advance(displacement u0: CGFloat, velocity v0: CGFloat, by t: CGFloat) -> (displacement: CGFloat, velocity: CGFloat) {
+        guard t > 0.0 else {
+            return (u0, v0)
+        }
+        let omega = 2.0 * .pi / CGFloat(max(0.001, spring.response))
+        let zeta = spring.dampingRatio
+        if abs(zeta - 1.0) < 1e-4 {
+            let decay = exp(-omega * t)
+            let c = v0 + omega * u0
+            let u = (u0 + c * t) * decay
+            let v = (c - omega * (u0 + c * t)) * decay
+            return (u, v)
+        } else if zeta < 1.0 {
+            let omegaD = omega * sqrt(1.0 - zeta * zeta)
+            let decay = exp(-zeta * omega * t)
+            let a = u0
+            let b = (v0 + zeta * omega * u0) / omegaD
+            let cosT = cos(omegaD * t)
+            let sinT = sin(omegaD * t)
+            let u = decay * (a * cosT + b * sinT)
+            let v = decay * ((b * omegaD - zeta * omega * a) * cosT - (a * omegaD + zeta * omega * b) * sinT)
+            return (u, v)
+        } else {
+            let root = omega * sqrt(zeta * zeta - 1.0)
+            let r1 = -zeta * omega + root
+            let r2 = -zeta * omega - root
+            let c2 = (v0 - r1 * u0) / (r2 - r1)
+            let c1 = u0 - c2
+            let e1 = exp(r1 * t)
+            let e2 = exp(r2 * t)
+            return (c1 * e1 + c2 * e2, c1 * r1 * e1 + c2 * r2 * e2)
+        }
     }
-    let t = max(0.0, min(1.0, (value - edge0) / (edge1 - edge0)))
-    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
 
-private func navigationLerp(_ from: CGFloat, _ to: CGFloat, _ t: CGFloat) -> CGFloat {
-    return from + (to - from) * t
-}
-
-private func navigationNonInteractiveTransitionDuration(for direction: NavigationTransitionDirection) -> Double {
-    switch direction {
-    case .push:
-        return navigationPushTransitionDuration
-    case .pop:
-        return navigationPopTransitionDuration
+    /// Time after which the motion stays within `tolerance` points.
+    func settleDuration(distance: CGFloat, velocity: CGFloat, tolerance: CGFloat = navigationSettleTolerance) -> Double {
+        guard abs(distance) > tolerance || abs(velocity) > 1.0 else {
+            return 0.0
+        }
+        let step: CGFloat = 1.0 / 240.0
+        var t: CGFloat = 0.0
+        var lastOutside: CGFloat = 0.0
+        while t < 2.0 {
+            t += step
+            let state = advance(displacement: distance, velocity: velocity, by: t)
+            if abs(state.displacement) > tolerance {
+                lastOutside = t
+            }
+        }
+        return Double(lastOutside + step)
     }
 }
 
@@ -62,53 +92,6 @@ private final class NavigationProgressDisplayLinkTarget: NSObject {
 
     @objc func handleDisplayLink(_ link: CADisplayLink) {
         tick?(link)
-    }
-}
-
-private struct NavigationProgressTiming {
-    let p1x: CGFloat
-    let p1y: CGFloat
-    let p2x: CGFloat
-    let p2y: CGFloat
-
-    static let linear = NavigationProgressTiming(p1x: 0.0, p1y: 0.0, p2x: 1.0, p2y: 1.0)
-    static let easeInOut = NavigationProgressTiming(p1x: 0.42, p1y: 0.0, p2x: 0.58, p2y: 1.0)
-    static let navigationEaseOut = NavigationProgressTiming(p1x: 0.18, p1y: 0.82, p2x: 0.22, p2y: 1.0)
-    static let navigationSettle = NavigationProgressTiming(p1x: 0.20, p1y: 0.28, p2x: 0.22, p2y: 1.0)
-
-    func withInitialSlope(_ slope: CGFloat) -> NavigationProgressTiming {
-        let matchedSlope = max(navigationMinimumContinuationSlope, min(navigationMaximumContinuationSlope, slope))
-        let matchedP1X = matchedSlope > .ulpOfOne
-            ? min(p1x, navigationContinuationControlPointMaxY / matchedSlope)
-            : p1x
-        return NavigationProgressTiming(
-            p1x: matchedP1X,
-            p1y: matchedSlope * matchedP1X,
-            p2x: p2x,
-            p2y: p2y
-        )
-    }
-
-    func value(at input: CGFloat) -> CGFloat {
-        let x = max(0.0, min(1.0, input))
-        var lower: CGFloat = 0.0
-        var upper: CGFloat = 1.0
-        var t = x
-        for _ in 0..<8 {
-            let estimatedX = cubicValue(t: t, p1: p1x, p2: p2x)
-            if estimatedX < x {
-                lower = t
-            } else {
-                upper = t
-            }
-            t = (lower + upper) * 0.5
-        }
-        return cubicValue(t: t, p1: p1y, p2: p2y)
-    }
-
-    private func cubicValue(t: CGFloat, p1: CGFloat, p2: CGFloat) -> CGFloat {
-        let inverse = 1.0 - t
-        return 3.0 * inverse * inverse * t * p1 + 3.0 * inverse * t * t * p2 + t * t * t
     }
 }
 
@@ -124,7 +107,8 @@ final class NavigationTransitionCoordinator {
 
     /// 0 = start of transition, 1 = complete. For push, visually "1" means the
     /// new screen fully on-screen; for pop, "1" means the popped screen fully
-    /// off-screen to the right.
+    /// off-screen to the right. While a render-server spring is running this
+    /// is its destination.
     private(set) var progress: CGFloat = 0.0
 
     let isInteractive: Bool
@@ -141,6 +125,7 @@ final class NavigationTransitionCoordinator {
     private let topBar: NavigationBarView?
     private let bottomBar: NavigationBarView?
     private let progressUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
+    private let motion = AetherMotion.navigationStack
 
     private let dimView: UIView
     private let shadowNode: ASImageNode
@@ -151,30 +136,39 @@ final class NavigationTransitionCoordinator {
     private let transitionCornerMask = CAShapeLayer()
 
     private var currentCompletion: (() -> Void)?
-    private var progressDisplayLink: CADisplayLink?
-    private var progressDisplayLinkTarget: NavigationProgressDisplayLinkTarget?
-    private var progressAnimationElapsed: CFTimeInterval = 0.0
-    private var progressAnimationStartTimestamp: CFTimeInterval?
-    private var progressAnimationDuration: CFTimeInterval = 0.0
-    private var progressAnimationFrom: CGFloat = 0.0
-    private var progressAnimationTo: CGFloat = 0.0
-    private var progressAnimationTiming: NavigationProgressTiming = .navigationEaseOut
-    private var progressAnimationCompletion: (() -> Void)?
-    private var previousInteractiveProgressSample: (progress: CGFloat, timestamp: CFTimeInterval)?
-    private var currentInteractiveProgressSample: (progress: CGFloat, timestamp: CFTimeInterval)?
-    private var specializedAnimationProgress: CGFloat = 0
-    private var updateSpecializedLayout: (() -> Void)?
+
+    // Interactive tracking: page progress and velocity (progress units/s)
+    // following `trackingTarget` through `motion.tracking`.
+    private var trackingTarget: CGFloat = 0.0
+    private var trackingVelocity: CGFloat = 0.0
+    private var trackingDisplayLink: CADisplayLink?
+    private var trackingDisplayLinkTarget: NavigationProgressDisplayLinkTarget?
+    private var trackingLastTimestamp: CFTimeInterval?
+
+    // Render-server spring in flight.
+    private var springGeneration: Int = 0
+    private var springCompletion: (() -> Void)?
+
+    private static let animationKey = "aether.navigation.stack"
 
     var completionTransition: ContainedViewLayoutTransition {
-        return makeCompletionTransition(velocity: 0.0)
+        return makeReleaseTransition(target: 1.0, velocity: 0.0)
     }
 
-    static func nonInteractiveCompletionTransition(direction: NavigationTransitionDirection) -> ContainedViewLayoutTransition {
-        return .animated(duration: navigationNonInteractiveTransitionDuration(for: direction), curve: navigationSettleCurve)
+    static func nonInteractiveCompletionTransition(direction _: NavigationTransitionDirection) -> ContainedViewLayoutTransition {
+        let spring = AetherMotion.navigationStack.transition
+        let width = UIScreen.main.bounds.width
+        return .animated(
+            duration: NavigationSpringStep(spring: spring).settleDuration(distance: width, velocity: 0.0),
+            curve: .customSpring(damping: spring.dampingRatio, initialVelocity: 0.0)
+        )
     }
 
     func completionTransition(velocity: CGFloat) -> ContainedViewLayoutTransition {
-        return makeCompletionTransition(velocity: effectiveCompletionVelocity(for: velocity))
+        guard isInteractive else {
+            return Self.nonInteractiveCompletionTransition(direction: direction)
+        }
+        return makeReleaseTransition(target: 1.0, velocity: releaseVelocity(gestureVelocity: velocity))
     }
 
     var cancelTransition: ContainedViewLayoutTransition {
@@ -182,16 +176,11 @@ final class NavigationTransitionCoordinator {
     }
 
     func cancelTransition(velocity: CGFloat) -> ContainedViewLayoutTransition {
-        let returningVelocity = max(0.0, -velocity)
-        guard returningVelocity > navigationStationaryPopVelocityTolerance else {
-            return .animated(duration: navigationPopTransitionDuration, curve: navigationSettleCurve)
-        }
-        let distance = max(0.0, progress) * max(1.0, container.bounds.width)
-        let inertialDuration = distance / returningVelocity + navigationInteractiveVelocityTailDuration
-        let duration = max(0.18, min(navigationPopTransitionDuration, Double(inertialDuration)))
-        return .animated(duration: duration, curve: navigationSettleCurve)
+        return makeReleaseTransition(target: 0.0, velocity: releaseVelocity(gestureVelocity: velocity))
     }
 
+    /// UIKit's resolution of a released back swipe: a leftward motion
+    /// cancels, a throw completes, otherwise the finger position decides.
     func shouldCompleteInteractivePop(progress proposedProgress: CGFloat? = nil, velocity: CGFloat) -> Bool {
         guard isInteractive, direction == .pop else {
             return progress >= 1.0
@@ -199,11 +188,11 @@ final class NavigationTransitionCoordinator {
         if velocity < -navigationStationaryPopVelocityTolerance {
             return false
         }
-        if effectiveCompletionVelocity(for: velocity) > navigationPopThrowVelocityThreshold {
+        if velocity >= motion.completionVelocity {
             return true
         }
         let effectiveProgress = proposedProgress ?? progress
-        return effectiveProgress >= navigationStationaryPopCompletionProgress
+        return effectiveProgress >= motion.completionProgress
     }
 
     // MARK: - Init
@@ -244,6 +233,7 @@ final class NavigationTransitionCoordinator {
         self.dimView = UIView()
         self.dimView.backgroundColor = .black
         self.dimView.alpha = 0.0
+        self.dimView.isUserInteractionEnabled = false
 
         self.shadowNode = ASImageNode()
         self.shadowNode.image = navigationShadowImage
@@ -252,16 +242,8 @@ final class NavigationTransitionCoordinator {
 
         // Z-order: bottomView is added first by the caller; we add dim + shadow
         // just below topView so the shadow falls on bottomView.
-        switch direction {
-        case .push:
-            if topView.superview == nil {
-                container.addSubview(topView)
-            }
-        case .pop:
-            // The caller is expected to have inserted bottomView below topView.
-            if topView.superview == nil {
-                container.addSubview(topView)
-            }
+        if topView.superview == nil {
+            container.addSubview(topView)
         }
 
         if !isFlat {
@@ -272,14 +254,14 @@ final class NavigationTransitionCoordinator {
         }
 
         dimView.frame = container.bounds
-        setProgress(0.0, transition: .immediate, recordsInteractiveSample: false, completion: {})
+        setProgress(0.0, transition: .immediate, completion: {})
     }
 
     deinit {
-        invalidateProgressDisplayLink()
+        invalidateTrackingDisplayLink()
     }
 
-    // MARK: - Progress
+    // MARK: - Corners
 
     func updateCornerRadii(top: CGFloat, bottom: CGFloat?) {
         requestedTopCornerRadius = top
@@ -360,49 +342,39 @@ final class NavigationTransitionCoordinator {
         CATransaction.commit()
     }
 
+    // MARK: - Progress
+
     /// Reapply the current motion to a resized surface without restarting its
-    /// clock or changing gesture progress.
+    /// clock or changing gesture progress. A running render-server spring is
+    /// additive, so it keeps its offset on top of the resized endpoint.
     func updateLayout() {
         updateCornerRadii(top: requestedTopCornerRadius, bottom: requestedBottomCornerRadius)
-        if let updateSpecializedLayout {
-            updateSpecializedLayout()
-        } else {
-            updateContentProgress(progress, transition: .immediate, completion: {})
-            progressUpdated?(progress, .immediate)
-        }
+        updateContentProgress(progress, transition: .immediate, completion: {})
+        progressUpdated?(progress, .immediate)
     }
 
-    /// Maps `progress` (0 → 1) to the on-screen position of the transition.
-    /// Mirrors the original: `position = 1 - progress` for `.push`, `position =
-    /// progress` for `.pop`. All geometry is driven by `position`.
+    /// Places the pages at `progress` right away (or with `transition`).
     func updateProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
-        setProgress(progress, transition: transition, recordsInteractiveSample: true, completion: completion)
+        trackingVelocity = 0.0
+        trackingTarget = progress
+        setProgress(progress, transition: transition, completion: completion)
     }
 
-    func updateProgressForRelease(_ proposedProgress: CGFloat, velocity: CGFloat) {
-        guard isInteractive, direction == .pop else {
-            updateProgress(proposedProgress, transition: .immediate, completion: {})
+    /// Interactive pop: the page follows `progress` (the finger) through the
+    /// tracking spring on the display clock.
+    func trackInteractiveProgress(_ progress: CGFloat) {
+        guard !animatingCompletion else { return }
+        trackingTarget = progress
+        guard motion.tracking.response > 0.0 else {
+            trackingVelocity = 0.0
+            setProgress(progress, transition: .immediate, completion: {})
             return
         }
-
-        let delta = proposedProgress - progress
-        guard abs(delta) > .ulpOfOne else {
-            return
-        }
-
-        let width = max(1.0, container.bounds.width)
-        let frameProgress = abs(velocity) / width * CGFloat(preferredProgressFrameDuration())
-        let minimumProgress = navigationReleaseMinimumProgressDistance / width
-        let maximumDelta = max(minimumProgress, frameProgress * navigationReleaseProgressFrameAllowance)
-        let clampedDelta = max(-maximumDelta, min(maximumDelta, delta))
-        setProgress(progress + clampedDelta, transition: .immediate, recordsInteractiveSample: false, completion: {})
+        startTrackingDisplayLinkIfNeeded()
     }
 
-    private func setProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, recordsInteractiveSample: Bool, completion: @escaping () -> Void) {
+    private func setProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
         self.progress = progress
-        if recordsInteractiveSample {
-            recordInteractiveProgressSample(progress)
-        }
         var framesWereApplied = false
         var completedSynchronously = false
         updateContentProgress(progress, transition: transition) {
@@ -419,7 +391,17 @@ final class NavigationTransitionCoordinator {
         }
     }
 
-    private func updateContentProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
+    private struct ContentFrames {
+        let top: CGRect
+        let bottom: CGRect
+        let shadow: CGRect
+        let shadowAlpha: CGFloat
+        let dimAlpha: CGFloat
+    }
+
+    /// Maps `progress` (0 → 1) to the on-screen position of the transition:
+    /// `position = 1 - progress` for `.push`, `position = progress` for `.pop`.
+    private func contentFrames(for progress: CGFloat) -> ContentFrames {
         let position: CGFloat
         switch direction {
         case .push:
@@ -434,13 +416,30 @@ final class NavigationTransitionCoordinator {
         if isFlat {
             bottomFrame = CGRect(origin: CGPoint(x: -navigationTransitionPosition((1.0 - position) * size.width), y: 0.0), size: size)
         } else {
-            // Parallax: bottomView moves at 30% of topView's displacement.
-            bottomFrame = CGRect(origin: CGPoint(x: (position - 1.0) * size.width * 0.3, y: 0.0), size: size)
+            bottomFrame = CGRect(origin: CGPoint(x: (position - 1.0) * size.width * motion.parallax, y: 0.0), size: size)
         }
+        let shadowFrame = CGRect(
+            x: topFrame.minX - navigationShadowWidth,
+            y: 0.0,
+            width: navigationShadowWidth,
+            height: size.height
+        )
+        let coverage = 1.0 - position
+        return ContentFrames(
+            top: topFrame,
+            bottom: bottomFrame,
+            shadow: shadowFrame,
+            shadowAlpha: coverage * 0.9,
+            dimAlpha: max(0.0, min(1.0, coverage)) * motion.dimming
+        )
+    }
+
+    private func updateContentProgress(_ progress: CGFloat, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
+        let frames = contentFrames(for: progress)
 
         var canInvokeCompletion = false
         var hadEarlyCompletion = false
-        transition.updateFrame(view: topView, frame: topFrame, completion: { _ in
+        transition.updateFrame(view: topView, frame: frames.top, completion: { _ in
             if canInvokeCompletion {
                 completion()
             } else {
@@ -449,19 +448,11 @@ final class NavigationTransitionCoordinator {
         })
         canInvokeCompletion = true
 
-        transition.updateFrame(view: bottomView, frame: bottomFrame)
-
-        let shadowFrame = CGRect(
-            x: topFrame.minX - navigationShadowWidth,
-            y: 0.0,
-            width: navigationShadowWidth,
-            height: size.height
-        )
-        transition.updateFrame(view: shadowNode.view, frame: shadowFrame)
-        transition.updateAlpha(view: shadowNode.view, alpha: (1.0 - position) * 0.9)
-
-        transition.updateFrame(view: dimView, frame: CGRect(origin: .zero, size: CGSize(width: max(0.0, topFrame.minX), height: size.height)))
-        transition.updateAlpha(view: dimView, alpha: 0.0)
+        transition.updateFrame(view: bottomView, frame: frames.bottom)
+        transition.updateFrame(view: shadowNode.view, frame: frames.shadow)
+        transition.updateAlpha(view: shadowNode.view, alpha: frames.shadowAlpha)
+        transition.updateFrame(view: dimView, frame: CGRect(origin: .zero, size: container.bounds.size))
+        transition.updateAlpha(view: dimView, alpha: frames.dimAlpha)
 
         if hadEarlyCompletion {
             completion()
@@ -470,256 +461,17 @@ final class NavigationTransitionCoordinator {
 
     // MARK: - Animation entry points
 
-    /// Finish the transition with a soft ease-out. Fast interactive pops use a
-    /// one-way exit overpull: the outgoing card travels slightly past the
-    /// right edge and is removed there, so it doesn't visibly spring back to
-    /// the exact final edge position before teardown.
+    /// Finish the transition. A non-interactive push/pop runs the transition
+    /// spring from rest; a released swipe continues from the page's current
+    /// position and velocity with the release spring.
     func animateCompletion(velocity: CGFloat = 0.0, completion: @escaping () -> Void) {
         animatingCompletion = true
         currentCompletion = completion
-
-        let effectiveVelocity = effectiveCompletionVelocity(for: velocity)
-        if shouldUseOneWayPopExit(velocity: effectiveVelocity) {
-            invalidateProgressDisplayLink()
-            animateOneWayPopExit(velocity: effectiveVelocity)
-            return
-        }
-
-        let transition = makeCompletionTransition(velocity: effectiveVelocity)
-        let progressVelocity = continuationVelocity(for: effectiveVelocity) / max(1.0, container.bounds.width)
-        animateProgressWithDisplayLink(to: 1.0, transition: transition, initialVelocity: progressVelocity, completion: { [weak self] in
+        let spring = isInteractive ? motion.release : motion.transition
+        let initialVelocity = isInteractive ? releaseVelocity(gestureVelocity: velocity) : 0.0
+        runSpring(to: 1.0, spring: spring, velocity: initialVelocity) { [weak self] in
             self?.finish()
-        })
-    }
-
-    private func makeCompletionTransition(velocity: CGFloat) -> ContainedViewLayoutTransition {
-        if shouldUseOneWayPopExit(velocity: velocity) {
-            return makeOneWayPopExitTransition(velocity: velocity)
         }
-
-        if abs(velocity) < .ulpOfOne, abs(progress) < .ulpOfOne {
-            return Self.nonInteractiveCompletionTransition(direction: direction)
-        } else {
-            let duration = interactiveCompletionDuration(velocity: velocity)
-            return .animated(duration: duration, curve: navigationSettleCurve)
-        }
-    }
-
-    private func shouldUseOneWayPopExit(velocity: CGFloat) -> Bool {
-        guard isInteractive, direction == .pop else {
-            return false
-        }
-        return velocity > navigationPopOneWayVelocityThreshold
-    }
-
-    private func fastPopStrength(velocity: CGFloat) -> CGFloat {
-        let rawStrength = max(0.0, min(1.0, (max(0.0, velocity) - navigationPopOneWayVelocityThreshold) / navigationPopThrowVelocityRange))
-        return rawStrength * rawStrength * (3.0 - 2.0 * rawStrength)
-    }
-
-    private func throwCompletionStrength(velocity: CGFloat) -> CGFloat {
-        return navigationSmootherStep(navigationPopThrowVelocityThreshold, navigationPopOneWayVelocityThreshold, max(0.0, velocity))
-    }
-
-    private func continuationVelocity(for velocity: CGFloat) -> CGFloat {
-        guard isInteractive, direction == .pop, velocity > navigationPopThrowVelocityThreshold else {
-            return velocity
-        }
-        let strength = throwCompletionStrength(velocity: velocity)
-        let scale = navigationLerp(0.78, 1.0, strength)
-        return velocity * scale
-    }
-
-    private func recordInteractiveProgressSample(_ progress: CGFloat) {
-        guard isInteractive, direction == .pop, !animatingCompletion else {
-            return
-        }
-
-        let timestamp = CACurrentMediaTime()
-        if let currentInteractiveProgressSample, abs(currentInteractiveProgressSample.progress - progress) < 0.0005 {
-            return
-        }
-        previousInteractiveProgressSample = currentInteractiveProgressSample
-        currentInteractiveProgressSample = (progress, timestamp)
-    }
-
-    private func recentInteractiveProgressVelocity() -> CGFloat? {
-        guard isInteractive, direction == .pop,
-              let previousInteractiveProgressSample,
-              let currentInteractiveProgressSample else {
-            return nil
-        }
-
-        let sampleAge = CACurrentMediaTime() - currentInteractiveProgressSample.timestamp
-        guard sampleAge <= navigationRecentVelocityMaximumSampleAge else {
-            return nil
-        }
-
-        let sampleDuration = currentInteractiveProgressSample.timestamp - previousInteractiveProgressSample.timestamp
-        guard sampleDuration >= navigationRecentVelocityMinimumSampleDuration else {
-            return nil
-        }
-
-        let progressDelta = currentInteractiveProgressSample.progress - previousInteractiveProgressSample.progress
-        guard progressDelta > 0.0 else {
-            return nil
-        }
-
-        return progressDelta / CGFloat(sampleDuration)
-    }
-
-    private func effectiveCompletionVelocity(for velocity: CGFloat) -> CGFloat {
-        guard isInteractive, direction == .pop else {
-            return velocity
-        }
-
-        let recognizerVelocity = max(0.0, velocity)
-        let sampledVelocity = (recentInteractiveProgressVelocity() ?? 0.0) * max(1.0, container.bounds.width)
-        guard sampledVelocity > 0.0 else {
-            return velocity
-        }
-
-        return max(recognizerVelocity, sampledVelocity)
-    }
-
-    private func makeOneWayPopExitTransition(velocity: CGFloat) -> ContainedViewLayoutTransition {
-        return .animated(duration: interactiveCompletionDuration(velocity: velocity), curve: navigationSettleCurve)
-    }
-
-    private func interactiveCompletionDuration(velocity: CGFloat) -> Double {
-        guard isInteractive, direction == .pop, velocity > navigationPopThrowVelocityThreshold else {
-            return navigationPopTransitionDuration
-        }
-
-        let remainingProgress = max(0.0, min(1.0, 1.0 - progress))
-        let remainingDistance = remainingProgress * max(1.0, container.bounds.width)
-        let inertialDuration = remainingDistance / max(1.0, velocity) + navigationInteractiveVelocityTailDuration
-        let throwStrength = throwCompletionStrength(velocity: velocity)
-        let minimumDuration = navigationLerp(
-            navigationMinimumLightThrowCompletionDuration,
-            navigationMinimumInteractiveCompletionDuration,
-            throwStrength
-        )
-        return Double(max(minimumDuration, min(CGFloat(navigationPopTransitionDuration), inertialDuration)))
-    }
-
-    private func oneWayPopExitOvershoot(velocity: CGFloat, width: CGFloat) -> CGFloat {
-        let flickStrength = fastPopStrength(velocity: velocity)
-        let velocityOvershoot = 56.0 * flickStrength
-        let currentOvershoot = max(0.0, progress - 1.0) * width
-        return max(velocityOvershoot, currentOvershoot)
-    }
-
-    private func velocityMatchedTiming(from: CGFloat, to: CGFloat, duration: Double, velocity: CGFloat, baseTiming: NavigationProgressTiming = .navigationSettle, allowsZeroVelocityHandoff: Bool = false) -> NavigationProgressTiming {
-        let distance = to - from
-        guard duration > 0.0, abs(distance) > .ulpOfOne else {
-            return baseTiming
-        }
-
-        let direction: CGFloat = distance >= 0.0 ? 1.0 : -1.0
-        let directedVelocity = velocity * direction
-        guard directedVelocity > 0.0 else {
-            return allowsZeroVelocityHandoff ? baseTiming.withInitialSlope(0.0) : baseTiming
-        }
-
-        let desiredSlope = directedVelocity * CGFloat(duration) / abs(distance)
-        return baseTiming.withInitialSlope(desiredSlope)
-    }
-
-    private func animateOneWayPopExit(velocity: CGFloat) {
-        invalidateProgressDisplayLink()
-
-        let transition = makeOneWayPopExitTransition(velocity: velocity)
-        let size = container.bounds.size
-        let width = max(1.0, size.width)
-        let startProgress = progress
-        let startTopX = topView.frame.minX
-        let startBottomX = bottomView.frame.minX
-        let targetX = max(startTopX + 1.0, width + oneWayPopExitOvershoot(velocity: velocity, width: width))
-        let flickStrength = fastPopStrength(velocity: velocity)
-        let currentOverpullX = max(0.0, progress - 1.0) * width
-        let bottomRubberbandAmplitude = max(
-            4.0 + 16.0 * flickStrength,
-            min(20.0, currentOverpullX * 0.12)
-        )
-        let duration = max(0.001, transition.duration)
-        let topExitProgress = max(0.50, 0.64 - 0.10 * flickStrength)
-        let timing = velocityMatchedTiming(
-            from: startTopX,
-            to: targetX,
-            duration: duration * Double(topExitProgress),
-            velocity: velocity
-        )
-
-        let applyFrame: (NavigationTransitionCoordinator, CGFloat, Bool) -> Void = { coordinator, linearProgress, finished in
-            coordinator.specializedAnimationProgress = linearProgress
-            let currentSize = coordinator.container.bounds.size
-            let widthScale = currentSize.width / width
-            let clampedProgress = max(0.0, min(1.0, linearProgress))
-            let externalProgress = finished ? 1.0 : startProgress + (1.0 - startProgress) * clampedProgress
-            let topLinearProgress = min(1.0, clampedProgress / topExitProgress)
-            let easedProgress = timing.value(at: topLinearProgress)
-            let topX = finished
-                ? targetX
-                : startTopX + (targetX - startTopX) * easedProgress
-            let bottomCatchUpProgress = navigationSmootherStep(0.0, 0.42, clampedProgress)
-            let bottomPullProgress = navigationSmootherStep(0.20, topExitProgress, clampedProgress)
-            let bottomSettleProgress = navigationSmootherStep(topExitProgress, 1.0, clampedProgress)
-            let bottomBaseX = startBottomX * (1.0 - bottomCatchUpProgress)
-            let bottomRubberbandX = bottomRubberbandAmplitude * bottomPullProgress * (1.0 - bottomSettleProgress)
-            let bottomX = finished ? 0.0 : bottomBaseX + bottomRubberbandX
-
-            let topFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(topX * widthScale), y: 0.0), size: currentSize)
-            let bottomFrame = CGRect(origin: CGPoint(x: navigationTransitionPosition(bottomX * widthScale), y: 0.0), size: currentSize)
-            coordinator.topView.frame = topFrame
-            coordinator.bottomView.transform = .identity
-            coordinator.bottomView.frame = bottomFrame
-
-            coordinator.shadowNode.view.frame = CGRect(
-                x: topFrame.minX - navigationShadowWidth,
-                y: 0.0,
-                width: navigationShadowWidth,
-                height: currentSize.height
-            )
-            coordinator.shadowNode.view.alpha = finished ? 0.0 : max(0.0, 1.0 - topX / width) * 0.9
-            coordinator.dimView.frame = CGRect(origin: .zero, size: currentSize)
-            coordinator.dimView.alpha = 0.0
-            coordinator.progress = externalProgress
-            coordinator.progressUpdated?(externalProgress, .immediate)
-        }
-
-        updateSpecializedLayout = { [weak self] in
-            guard let self else { return }
-            applyFrame(self, self.specializedAnimationProgress, false)
-        }
-        applyFrame(self, 0.0, false)
-        let startTimestamp = CACurrentMediaTime()
-        let target = NavigationProgressDisplayLinkTarget()
-        target.tick = { [weak self] link in
-            guard let self else {
-                return
-            }
-            let frameTimestamp = max(CACurrentMediaTime(), max(link.timestamp, link.targetTimestamp))
-            // A skipped frame must not lengthen the pop. The presentation
-            // clock advances while the main thread is busy even if the
-            // display link does not deliver every callback.
-            let elapsed = max(0.0, frameTimestamp - startTimestamp)
-
-            if elapsed >= duration {
-                applyFrame(self, 1.0, true)
-                self.finish()
-            } else {
-                applyFrame(self, CGFloat(elapsed / duration), false)
-            }
-        }
-        let link = CADisplayLink(target: target, selector: #selector(NavigationProgressDisplayLinkTarget.handleDisplayLink(_:)))
-        if #available(iOS 15.0, *) {
-            let preferred = Float(preferredProgressFramesPerSecond())
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60.0, maximum: preferred, preferred: preferred)
-        }
-        progressDisplayLinkTarget = target
-        progressDisplayLink = link
-        link.add(to: .main, forMode: .common)
     }
 
     /// Abort the transition (e.g. interactive pan released without enough
@@ -727,13 +479,9 @@ final class NavigationTransitionCoordinator {
     func animateCancel(velocity: CGFloat = 0.0, _ completion: @escaping () -> Void) {
         animatingCompletion = true
         currentCompletion = completion
-        let transition = cancelTransition(velocity: velocity)
-        let progressVelocity = min(0.0, velocity) / max(1.0, container.bounds.width)
-        animateProgressWithDisplayLink(
-            to: 0.0,
-            transition: transition,
-            initialVelocity: progressVelocity,
-            completion: { [weak self] in
+        let spring = isInteractive ? motion.release : motion.transition
+        let initialVelocity = isInteractive ? releaseVelocity(gestureVelocity: velocity) : 0.0
+        runSpring(to: 0.0, spring: spring, velocity: initialVelocity) { [weak self] in
             guard let self else { return }
             // Remove the incoming view entirely — same controller just came
             // back to its original position.
@@ -748,14 +496,14 @@ final class NavigationTransitionCoordinator {
             let hook = self.currentCompletion
             self.currentCompletion = nil
             hook?()
-            }
-        )
+        }
     }
 
     /// Instantly complete the transition without animation (used when the
     /// transition is being replaced mid-flight by a deeper one).
     func performCompletion(completion: @escaping () -> Void) {
-        invalidateProgressDisplayLink()
+        invalidateTrackingDisplayLink()
+        cancelSpring()
         updateProgress(1.0, transition: .immediate, completion: { [weak self] in
             self?.finish()
             completion()
@@ -765,123 +513,190 @@ final class NavigationTransitionCoordinator {
     /// Synchronously mark the transition as complete and tear down overlays.
     /// Used when the caller has already applied `progress = 1.0`.
     func complete() {
-        invalidateProgressDisplayLink()
+        invalidateTrackingDisplayLink()
+        cancelSpring()
         animatingCompletion = true
         progress = 1.0
         finish()
     }
 
-    // MARK: - High-refresh progress driving
+    // MARK: - Interactive tracking
 
-    private func animateProgressWithDisplayLink(to targetProgress: CGFloat, transition: ContainedViewLayoutTransition, initialVelocity: CGFloat = 0.0, completion: @escaping () -> Void) {
-        guard case let .animated(duration, curve) = transition, duration > 0.0 else {
-            invalidateProgressDisplayLink()
-            updateProgress(targetProgress, transition: .immediate, completion: {})
-            completion()
-            return
+    /// Page velocity handed to the release spring, in points per second.
+    /// While tracking, the page's own spring velocity keeps the hand-off
+    /// continuous; a throw faster than the page is carried over too.
+    private func releaseVelocity(gestureVelocity: CGFloat) -> CGFloat {
+        let width = max(1.0, container.bounds.width)
+        let pageVelocity = trackingVelocity * width
+        let signedGesture: CGFloat
+        switch direction {
+        case .pop:
+            signedGesture = gestureVelocity
+        case .push:
+            signedGesture = -gestureVelocity
         }
+        if signedGesture > 0.0 {
+            return max(pageVelocity, signedGesture)
+        } else if signedGesture < 0.0 {
+            return min(pageVelocity, signedGesture)
+        }
+        return pageVelocity
+    }
 
-        invalidateProgressDisplayLink()
-        progressAnimationFrom = progress
-        progressAnimationTo = targetProgress
-        progressAnimationDuration = duration
-        let baseTiming = progressTiming(for: curve)
-        progressAnimationTiming = velocityMatchedTiming(
-            from: progress,
-            to: targetProgress,
-            duration: duration,
-            velocity: initialVelocity,
-            baseTiming: baseTiming,
-            allowsZeroVelocityHandoff: isInteractive
+    private func makeReleaseTransition(target: CGFloat, velocity: CGFloat) -> ContainedViewLayoutTransition {
+        let spring = isInteractive ? motion.release : motion.transition
+        let width = max(1.0, container.bounds.width)
+        let distance = (progress - target) * width
+        let duration = NavigationSpringStep(spring: spring).settleDuration(distance: distance, velocity: velocity)
+        let normalizedVelocity = abs(distance) > .ulpOfOne ? velocity / -distance : 0.0
+        return .animated(
+            duration: max(0.01, duration),
+            curve: .customSpring(damping: spring.dampingRatio, initialVelocity: normalizedVelocity)
         )
-        progressAnimationCompletion = completion
-        progressAnimationElapsed = 0.0
-        progressAnimationStartTimestamp = CACurrentMediaTime()
+    }
 
+    private func startTrackingDisplayLinkIfNeeded() {
+        guard trackingDisplayLink == nil else { return }
         let target = NavigationProgressDisplayLinkTarget()
         target.tick = { [weak self] link in
-            self?.handleProgressDisplayLink(link)
+            self?.handleTrackingDisplayLink(link)
         }
         let link = CADisplayLink(target: target, selector: #selector(NavigationProgressDisplayLinkTarget.handleDisplayLink(_:)))
         if #available(iOS 15.0, *) {
-            let preferred = Float(preferredProgressFramesPerSecond())
+            let preferred = Float(preferredFramesPerSecond())
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 60.0, maximum: preferred, preferred: preferred)
         }
-        progressDisplayLinkTarget = target
-        progressDisplayLink = link
+        trackingLastTimestamp = nil
+        trackingDisplayLinkTarget = target
+        trackingDisplayLink = link
         link.add(to: .main, forMode: .common)
     }
 
-    private func handleProgressDisplayLink(_ link: CADisplayLink) {
-        let frameTimestamp = max(CACurrentMediaTime(), max(link.timestamp, link.targetTimestamp))
-        guard let startTimestamp = progressAnimationStartTimestamp else { return }
-        advanceProgressAnimation(toElapsed: max(progressAnimationElapsed, frameTimestamp - startTimestamp))
+    private func handleTrackingDisplayLink(_ link: CADisplayLink) {
+        // Advance to the time this frame is presented; the first frame of
+        // the gesture moves by one frame of spring time.
+        let frameTime = link.targetTimestamp
+        let previous = trackingLastTimestamp ?? link.timestamp
+        trackingLastTimestamp = frameTime
+        let dt = CGFloat(max(0.0, min(0.1, frameTime - previous)))
+        let state = NavigationSpringStep(spring: motion.tracking).advance(
+            displacement: progress - trackingTarget,
+            velocity: trackingVelocity,
+            by: dt
+        )
+        trackingVelocity = state.velocity
+        let next = trackingTarget + state.displacement
+        setProgress(next, transition: .immediate, completion: {})
     }
 
-    private func advanceProgressAnimation(toElapsed elapsed: CFTimeInterval) {
-        progressAnimationElapsed = max(0.0, elapsed)
-
-        let linearProgress = progressAnimationDuration > 0.0
-            ? min(1.0, progressAnimationElapsed / progressAnimationDuration)
-            : 1.0
-        let easedProgress = progressAnimationTiming.value(at: CGFloat(linearProgress))
-        let nextProgress = progressAnimationFrom + (progressAnimationTo - progressAnimationFrom) * easedProgress
-        progress = nextProgress
-        updateContentProgress(nextProgress, transition: .immediate, completion: {})
-        progressUpdated?(nextProgress, .immediate)
-
-        if linearProgress >= 1.0 {
-            let finalProgress = progressAnimationTo
-            let completion = progressAnimationCompletion
-            invalidateProgressDisplayLink()
-            progress = finalProgress
-            updateContentProgress(finalProgress, transition: .immediate, completion: {})
-            progressUpdated?(finalProgress, .immediate)
-            completion?()
-        }
+    private func invalidateTrackingDisplayLink() {
+        trackingDisplayLink?.invalidate()
+        trackingDisplayLink = nil
+        trackingDisplayLinkTarget = nil
+        trackingLastTimestamp = nil
     }
 
-    private func preferredProgressFramesPerSecond() -> Int {
+    private func preferredFramesPerSecond() -> Int {
         let screenMaximum = container.window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond
         return min(120, max(60, screenMaximum))
     }
 
-    private func preferredProgressFrameDuration() -> CFTimeInterval {
-        return 1.0 / CFTimeInterval(preferredProgressFramesPerSecond())
+    // MARK: - Render-server spring
+
+    /// Moves every transition layer to `target` with one physical spring on
+    /// the render server. Model values jump to the destination; additive
+    /// animations carry the remaining offset, so layout changes during the
+    /// settle land on the right endpoint.
+    private func runSpring(to target: CGFloat, spring: AetherMotion.PhysicalSpring, velocity: CGFloat, completion: @escaping () -> Void) {
+        invalidateTrackingDisplayLink()
+        cancelSpring()
+
+        let width = max(1.0, container.bounds.width)
+        let from = contentFrames(for: progress)
+        let to = contentFrames(for: target)
+        let distance = (progress - target) * width
+        let duration = NavigationSpringStep(spring: spring).settleDuration(distance: distance, velocity: velocity)
+        // CASpringAnimation velocity is in units of the animated distance.
+        let normalizedVelocity = abs(distance) > .ulpOfOne ? velocity / -distance : 0.0
+
+        springGeneration += 1
+        let generation = springGeneration
+        springCompletion = completion
+
+        var didSettle = false
+        let settle: () -> Void = { [weak self] in
+            guard !didSettle else { return }
+            didSettle = true
+            guard let self, self.springGeneration == generation, let completion = self.springCompletion else { return }
+            self.springCompletion = nil
+            completion()
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        // Fires once the render server has played the spring. The animation
+        // begins at the commit that carries it, so main-thread work done
+        // before that commit (the incoming screen's first layout) delays
+        // the start instead of skipping its first frames.
+        CATransaction.setCompletionBlock(settle)
+
+        progress = target
+        trackingTarget = target
+        trackingVelocity = 0.0
+        updateContentProgress(target, transition: .immediate, completion: {})
+        progressUpdated?(target, .immediate)
+
+        var addedAnimation = false
+        if duration > 0.0 {
+            let add: (CALayer, String, CGFloat) -> Void = { layer, keyPath, delta in
+                guard abs(delta) > 0.001 else { return }
+                let animation = CASpringAnimation(keyPath: keyPath)
+                animation.mass = 1.0
+                animation.stiffness = spring.stiffness
+                animation.damping = spring.damping
+                animation.initialVelocity = normalizedVelocity
+                animation.fromValue = NSNumber(value: Double(delta))
+                animation.toValue = NSNumber(value: 0.0)
+                animation.isAdditive = true
+                animation.duration = duration
+                animation.isRemovedOnCompletion = true
+                animation.aetherPreferHighFrameRate()
+                layer.add(animation, forKey: Self.animationKey + "." + keyPath)
+                addedAnimation = true
+            }
+            add(topView.layer, "position.x", from.top.minX - to.top.minX)
+            add(bottomView.layer, "position.x", from.bottom.minX - to.bottom.minX)
+            if !isFlat {
+                add(shadowNode.layer, "position.x", from.shadow.minX - to.shadow.minX)
+                add(shadowNode.layer, "opacity", from.shadowAlpha - to.shadowAlpha)
+                add(dimView.layer, "opacity", from.dimAlpha - to.dimAlpha)
+            }
+        }
+        CATransaction.commit()
+
+        if !addedAnimation {
+            // Already at rest: still resolve on the next turn, like a running
+            // spring, so callers finish handling the gesture event first.
+            DispatchQueue.main.async(execute: settle)
+        } else {
+            // Layers outside a rendering window never report completion.
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.25, execute: settle)
+        }
     }
 
-    private func invalidateProgressDisplayLink() {
-        progressDisplayLink?.invalidate()
-        progressDisplayLink = nil
-        progressDisplayLinkTarget = nil
-        progressAnimationCompletion = nil
-        progressAnimationElapsed = 0.0
-        progressAnimationStartTimestamp = nil
-        updateSpecializedLayout = nil
-    }
-
-    private func progressTiming(for curve: ContainedViewLayoutTransitionCurve) -> NavigationProgressTiming {
-        switch curve {
-        case .linear:
-            return .linear
-        case .easeInOut:
-            return .easeInOut
-        case .spring, .customSpring:
-            return .navigationEaseOut
-        case let .custom(p1x, p1y, p2x, p2y):
-            return NavigationProgressTiming(
-                p1x: CGFloat(p1x),
-                p1y: CGFloat(p1y),
-                p2x: CGFloat(p2x),
-                p2y: CGFloat(p2y)
-            )
+    private func cancelSpring() {
+        springGeneration += 1
+        springCompletion = nil
+        for layer in [topView.layer, bottomView.layer, shadowNode.layer, dimView.layer] {
+            layer.removeAnimation(forKey: Self.animationKey + ".position.x")
+            layer.removeAnimation(forKey: Self.animationKey + ".opacity")
         }
     }
 
     // MARK: - Teardown
 
     private func finish() {
-        invalidateProgressDisplayLink()
+        invalidateTrackingDisplayLink()
         cleanupOverlays()
         restoreTopViewCorners()
         let hook = currentCompletion

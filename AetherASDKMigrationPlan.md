@@ -1,5 +1,9 @@
 # AetherUI ASDK / Texture Migration Plan
 
+> Status (October 24, 2026): the Texture migration is the active package line
+> and `AetherListView` has been removed. Older references to that type in this
+> historical plan describe superseded intermediate steps.
+
 ## Current State
 
 AetherUI started as a UIKit-first SwiftPM package inspired by Telegram Display.
@@ -11,8 +15,8 @@ Key local surfaces:
 
 - `Package.swift` exposes a single `AetherUI` SwiftPM library product with an
   iOS 15+ floor for the Texture migration line.
-- `AetherListView` is now the deprecated legacy `UIView` + `UIScrollView`
-  virtualization stack kept for old consumers and parity tests.
+- The former `AetherListView` UIKit + `UIScrollView` virtualization stack was
+  removed after the migration; current consumers use `AetherListNode`.
 - `AetherListNode` is now the migration home for list logic: an
   `ASDisplayNode` / `ASScrollNode` container that owns item storage,
   Texture-row materialization, reuse, offsets, scroll state, sticky headers,

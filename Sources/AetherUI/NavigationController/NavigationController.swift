@@ -84,6 +84,9 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
     private weak var sharedNavigationBarController: AetherViewController?
     private var isUpdatingSharedNavigationBar: Bool = false
     private var interactiveNavigationBarTransition: NavigationBarInteractiveTransition?
+    /// Liquid stand-in for a glass title view; outlives the bar transition
+    /// state until the real title view has been revealed.
+    private var activeGlassTitleMorph: NavigationGlassTitleMorph?
     private struct PendingViewControllersUpdate {
         let controllers: [AetherViewController]
         let animated: Bool
@@ -167,6 +170,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         var didResolveButtonTransition: Bool = false
         var resolvedCompleted: Bool?
         var scheduledButtonTransition: DispatchWorkItem?
+        var glassTitleMorph: NavigationGlassTitleMorph?
 
         init(
             direction: NavigationTransitionDirection,
@@ -1663,7 +1667,16 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         installTransitionNavigationBars(state)
         refreshInteractiveNavigationBarTransition(state, layout: layout, transition: .immediate)
         updateExternalNavigationBarHeightsForTransition(state, layout: layout)
+        cancelGlassTitleMorph()
+        if direction == .push {
+            // The trailing button is read before the bar morphs to the target.
+            beginGlassTitleMorphIfNeeded(state)
+        }
         scheduleNavigationBarButtonTransition(state, layout: layout)
+        if direction == .pop {
+            // The button the title flows into belongs to the target bar.
+            beginGlassTitleMorphIfNeeded(state)
+        }
         sourceController.containerLayoutUpdated(layoutForController?(sourceController, layout) ?? layout, transition: .immediate)
         targetController.containerLayoutUpdated(layoutForController?(targetController, layout) ?? layout, transition: .immediate)
         installTransitionNavigationBars(state)
@@ -1884,6 +1897,116 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         bar.bringButtonLayerToFrontIfNeeded()
     }
 
+    // MARK: - Glass title morph
+
+    private var isRootCustomTransitionActive: Bool {
+        switch rootContainer {
+        case let .flat(container):
+            return container.isCustomTransitionActive
+        case let .split(container):
+            return container.masterContainer.isCustomTransitionActive || container.detailContainer.isCustomTransitionActive
+        case nil:
+            return false
+        }
+    }
+
+    /// A glass title view (`titleViewStyle == .glass`) does not slide with
+    /// its page: on push it flows out of the nearest glass bar button, on a
+    /// non-interactive pop it flows back into the target's button.
+    private func beginGlassTitleMorphIfNeeded(_ state: NavigationBarInteractiveTransition) {
+        guard !state.isInteractive, !isRootCustomTransitionActive, let sharedNavigationBar else {
+            return
+        }
+        let isPush = state.direction == .push
+        let titleController = isPush ? state.targetController : state.sourceController
+        let titleBar = isPush ? state.targetBar : state.sourceBar
+        let titleBarRestOrigin = isPush ? state.targetBaseFrame.origin : state.sourceBaseFrame.origin
+        guard titleController.navigationBarItem.titleViewStyle == .glass,
+              let titleView = titleBar.glassTitleMorphTitleView,
+              titleView.bounds.width > 1.0 else {
+            return
+        }
+        let title = titleView.convert(titleView.bounds, to: titleBar)
+            .offsetBy(dx: titleBarRestOrigin.x, dy: titleBarRestOrigin.y)
+        guard let anchor = sharedNavigationBar.glassTitleMorphAnchor(in: view) else {
+            return
+        }
+        let content: (view: UIView, frame: CGRect)?
+        if let provider = titleView as? NavigationGlassTitleContentProviding,
+           let copy = provider.makeGlassTitleContentCopy() {
+            let frame = titleView.convert(copy.frame, to: titleBar)
+                .offsetBy(dx: titleBarRestOrigin.x, dy: titleBarRestOrigin.y)
+            content = (copy.view, frame)
+        } else {
+            content = Self.renderGlassTitleContent(titleView).map { image in
+                (NavigationGlassTitleSnapshotView(image: image), title)
+            }
+        }
+        titleBar.setGlassTitleMorphHidesTitleView(true)
+        if isPush {
+            sharedNavigationBar.setGlassTitleMorphHidesTitleView(true)
+        }
+        let chromeLayer = sharedNavigationBar.glassTitleMorphChromeLayer
+        let morph = NavigationGlassTitleMorph(
+            hostView: view,
+            below: chromeLayer.superview === view ? chromeLayer : sharedNavigationBar,
+            direction: isPush ? .appear : .disappear,
+            anchor: anchor.frame,
+            title: title,
+            content: content,
+            isDark: view.traitCollection.userInterfaceStyle == .dark,
+            anchorScale: { [weak sharedNavigationBar] scale in
+                sharedNavigationBar?.setGlassTitleMorphAnchorScale(scale, isTrailing: anchor.isTrailing)
+            }
+        )
+        state.glassTitleMorph = morph
+        activeGlassTitleMorph = morph
+        morph.start()
+    }
+
+    /// Renders the title's text. Native glass materials do not render into
+    /// an image, so a whole glass title view yields just its content.
+    private static func renderGlassTitleContent(_ view: UIView) -> UIImage? {
+        view.layoutIfNeeded()
+        let size = view.bounds.size
+        guard size.width >= 1.0, size.height >= 1.0 else { return nil }
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.opaque = false
+        var image: UIImage?
+        view.traitCollection.performAsCurrent {
+            image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                view.layer.render(in: context.cgContext)
+            }
+        }
+        return image
+    }
+
+    private func cancelGlassTitleMorph() {
+        guard let morph = activeGlassTitleMorph else { return }
+        activeGlassTitleMorph = nil
+        morph.cancel()
+        sharedNavigationBar?.setGlassTitleMorphHidesTitleView(false)
+    }
+
+    private func finishGlassTitleMorph(_ state: NavigationBarInteractiveTransition, bar: NavigationBarImpl, completed: Bool) {
+        state.sourceBar.setGlassTitleMorphHidesTitleView(false)
+        state.targetBar.setGlassTitleMorphHidesTitleView(false)
+        guard let morph = state.glassTitleMorph, activeGlassTitleMorph === morph else { return }
+        guard completed, state.direction == .push else {
+            if !completed {
+                cancelGlassTitleMorph()
+            }
+            return
+        }
+        bar.setGlassTitleMorphHidesTitleView(true)
+        morph.reveal { [weak self, weak bar, weak morph] in
+            bar?.setGlassTitleMorphHidesTitleView(false)
+            if let self, let morph, self.activeGlassTitleMorph === morph {
+                self.activeGlassTitleMorph = nil
+            }
+        }
+    }
+
     private func finishInteractiveNavigationBarTransition(_ state: NavigationBarInteractiveTransition, completed: Bool) {
         state.scheduledButtonTransition?.cancel()
         state.scheduledButtonTransition = nil
@@ -1922,6 +2045,7 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
         bar.setButtonContentHiddenForTransition(false)
         bar.setButtonChromeScale(1.0, transition: finishButtonTransition)
         installSharedNavigationBarOwnership(bar, on: targetController)
+        finishGlassTitleMorph(state, bar: bar, completed: completed)
 
         state.sourceBar.detachButtonLayerFromHost()
         state.sourceBar.removeFromSuperview()
@@ -2174,5 +2298,30 @@ open class AetherNavigationController: AetherViewController, UIGestureRecognizer
                 curve: .navigationFluidMorph
             )
             : .immediate
+    }
+}
+
+/// UIKit snapshot fallback for glass titles that do not provide a semantic
+/// content copy. Keeping the bitmap in a drawing view preserves the title's
+/// transition content without introducing a passive UIKit image hierarchy.
+private final class NavigationGlassTitleSnapshotView: UIView {
+    private let image: UIImage
+
+    init(image: UIImage) {
+        self.image = image
+        super.init(frame: .zero)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        contentMode = .scaleAspectFit
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ rect: CGRect) {
+        image.draw(in: rect)
     }
 }

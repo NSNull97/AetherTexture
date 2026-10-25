@@ -1,6 +1,6 @@
 # AetherUI Texture Node Migration Map
 
-Last updated: July 8, 2026.
+Last updated: October 24, 2026.
 
 ## Texture-Native Now
 
@@ -13,9 +13,7 @@ Last updated: July 8, 2026.
   support, node-native swipe action buttons, animated transaction replay,
   particle-dissolve removal, and scroll helper APIs.
 - `AetherListItem`: primary callbacks are node-first
-  (`selected(listNode:)`, `swipeActionSelected(_:listNode:isFullSwipe:)`);
-  deprecated `AetherListView` callbacks are isolated behind
-  `AetherLegacyListItem`.
+  (`selected(listNode:)`, `swipeActionSelected(_:listNode:isFullSwipe:)`).
 - `AetherDisplayNode`, `AetherControlNode`, `AetherScreenNode`: base
   node-first composition primitives.
 - `AetherNavigationNode`: Texture screen-stack container.
@@ -42,8 +40,8 @@ Last updated: July 8, 2026.
 - `_AetherNodeHostView` is the internal UIKit host boundary for embedding an
   `ASDisplayNode` in node controllers. Public `AetherNodeHostingView` remains
   only as a deprecated compatibility shim.
-- `AetherListView` remains the deprecated legacy UIKit list engine for old
-  consumers and parity tests.
+- The former `AetherListView` UIKit engine was removed from the package target;
+  consumers should migrate to ``AetherListNode``.
 - `AetherListNode.scroller`, `keyboardDismissMode`,
   `topOverscrollBackgroundView`, `bottomOverscrollBackgroundView`, and
   `panVelocity(in:)` are deprecated escape hatches. Prefer
@@ -54,8 +52,8 @@ Last updated: July 8, 2026.
 
 ## Still To Move
 
-- Quarantine/deprecate older view/controller-first APIs in docs and examples
-  once their node replacements cover the same demo flows.
+- Keep historical migration notes clearly marked while current guides describe
+  only the public node-first API.
 - Remaining deep glass/backdrop implementation classes can stay UIKit-backed
   while public construction moves to node wrappers.
 

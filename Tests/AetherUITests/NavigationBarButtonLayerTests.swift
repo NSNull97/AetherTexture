@@ -524,7 +524,7 @@ final class NavigationBarButtonLayerTests: XCTestCase {
         XCTAssertEqual(button.imageView?.frame.width ?? 0.0, 38.0, accuracy: 0.5)
         XCTAssertEqual(button.imageView?.frame.height ?? 0.0, 38.0, accuracy: 0.5)
         button.isHighlighted = true
-        button.configurationUpdateHandler?(button)
+        button.layoutIfNeeded()
         XCTAssertEqual(button.alpha, 1.0)
         XCTAssertEqual(button.imageView?.alpha ?? 0.0, 1.0)
         button.isHighlighted = false

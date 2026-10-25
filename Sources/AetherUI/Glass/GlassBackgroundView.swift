@@ -737,6 +737,48 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
         appliedAppearanceStyle.usesLiquidGlass
     }
 
+    private var nativeMaterializationEffect: UIVisualEffect?
+    /// Direction of the last native glass materialization, if any.
+    internal private(set) var lastNativeMaterializationForTesting: Bool?
+
+    /// Shows or hides the native glass the way UIKit's own bar buttons do:
+    /// by animating `UIVisualEffectView.effect`. Layer opacity animations do
+    /// not reach `UIGlassEffect`, so the material otherwise pops in or out on
+    /// the first frame. Returns `false` when no native glass is installed.
+    @discardableResult
+    internal func animateNativeMaterialization(appearing: Bool, duration: TimeInterval) -> Bool {
+        guard #available(iOS 26.0, *), let nativeView, duration > 0.0 else {
+            return false
+        }
+        let current = nativeView.effect as? UIGlassEffect
+        guard let glass = current ?? (nativeMaterializationEffect as? UIGlassEffect) else {
+            return false
+        }
+        nativeMaterializationEffect = glass
+        lastNativeMaterializationForTesting = appearing
+        let cleared: UIVisualEffect?
+        if #available(iOS 26.1, *) {
+            cleared = nil
+        } else {
+            cleared = UIVisualEffect()
+        }
+        if appearing {
+            UIView.performWithoutAnimation {
+                nativeView.effect = cleared
+            }
+            UIView.animate(withDuration: duration, delay: AetherMotion.navigationChrome.buttonAppearanceDelay, options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]) {
+                nativeView.effect = glass
+            }
+        } else {
+            // Stays cleared: the next insertion re-applies the remembered
+            // material and animates it in.
+            UIView.animate(withDuration: duration, delay: 0.0, options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]) {
+                nativeView.effect = cleared
+            }
+        }
+        return true
+    }
+
     internal func tearDownLiquidRenderer() {
         nativeView?.effect = nil
         legacyMaterialView?.effect = nil
@@ -2651,9 +2693,9 @@ public class GlassBackgroundView: UIView, AetherAppearanceConsumer {
     }
 
     private static var shouldUseSyntheticStrokeFallback: Bool {
-        if #available(iOS 27.0, *) {
-            return false
-        }
+        // UIKit's native outline is not exposed consistently on iOS 27
+        // runtimes, even when the material itself is available. Keep Aether's
+        // explicit hairline so custom glass surfaces retain their edge.
         return true
     }
 
@@ -2928,7 +2970,7 @@ public final class GlassBackgroundContainerView: UIView, AetherAppearanceConsume
     }
 
     internal var isUsingNativeContainerEffect: Bool {
-        nativeView != nil
+        return nativeView != nil
     }
 
     internal var isUsingAnyGlassContainerEffect: Bool {

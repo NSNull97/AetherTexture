@@ -32,7 +32,7 @@ tab bar. В отличие от `UITabBarController`, не владеет nav ba
 ```swift
 func makeRootController() -> AetherTabBarController {
 
-    func makeTab(_ root: ViewController, item: UITabBarItem) -> AetherNavigationController {
+    func makeTab(_ root: AetherViewController, item: UITabBarItem) -> AetherNavigationController {
         let nav = AetherNavigationController(mode: .single)
         nav.setViewControllers([root], animated: false)
         nav.tabBarItem = item
@@ -545,7 +545,7 @@ tabs.chromeTopY(in: someView)    // CGFloat? — верхняя Y-координ
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationController>
 - <doc:Search>
 - <doc:Glass>

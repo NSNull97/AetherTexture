@@ -39,7 +39,7 @@ class HomeController: AetherViewController {
 }
 ```
 
-Подробнее об интеграции — <doc:ViewController> (раздел
+Подробнее об интеграции — <doc:AetherViewController> (раздел
 «Content-unavailable overlay»).
 
 ### Прямое использование
@@ -254,8 +254,8 @@ func updateSearchResults(_ results: [SearchResult], query: String) {
 
 | Свойство / метод | Назначение |
 |---|---|
-| `ViewController.aetherContentUnavailableConfiguration` | Установка/чтение конфигурации. |
-| `ViewController.setAetherContentUnavailableConfiguration(_:animated:)` | Animated смена. |
+| ``AetherViewController/aetherContentUnavailableConfiguration`` | Установка/чтение конфигурации. |
+| ``AetherViewController/setAetherContentUnavailableConfiguration(_:animated:)`` | Animated смена. |
 
 ## Edge cases
 
@@ -275,5 +275,5 @@ func updateSearchResults(_ results: [SearchResult], query: String) {
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:Skeleton>

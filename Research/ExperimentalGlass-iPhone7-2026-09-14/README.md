@@ -7,7 +7,7 @@
 - iPhone 7 (iPhone9,3), iOS 15.8.3, USB UDID `a3e3a07434c037bf412fcbb589221a48b305cc96`.
 - PushApp `ru.wsoft.PushApp`, версия 26, сборка 7, PID замеров 1478.
 - Release, Swift `-O`, whole-module optimization, coverage выключен, `AETHER_GLASS_PROFILE` включён.
-- IPA: `/Users/nsnull/Documents/GitHub/Work/MultiPushApp/PushApp/build/PushApp-experimentalGlass-iPhone7-build7-profile.ipa`.
+- IPA: локальный артефакт сборки PushApp; файл не входит в репозиторий.
 - Установлено поверх приложения, без удаления. Последняя проверка: 17 тестов прошли, Release собран, подпись проверена.
 
 ## Подтверждённая причина отказа от кеша
@@ -64,7 +64,7 @@ filters=[] backgroundFilters=[]
 - `Sources/AetherUI/Glass/Experimental/ExperimentalGlassBackgroundCapture.swift` — prepareFrame, sharedSnapshot, pruning, fingerprint.
 - `Sources/AetherUI/Glass/Experimental/ExperimentalGlassDiagnostics.swift` — агрегирование метрик раз в 2 секунды.
 - `Sources/AetherUI/ChatBackground/ChatBackgroundNode.swift:392` — создание motion effect.
-- `/Users/nsnull/Documents/GitHub/Work/MultiPushApp/PushApp/PushApp/Modules/Notifications/CrystalListNotificationsViewController.swift:269` — включение motion.
+- `CrystalListNotificationsViewController.swift:269` в потребляющем PushApp — включение motion.
 - `Sources/AetherUI/Modal/AetherModalController.swift:539` — большая поверхность модалки.
 - `Sources/AetherUI/ContextMenu/ContextMenuController.swift:273` — overlay меню.
 

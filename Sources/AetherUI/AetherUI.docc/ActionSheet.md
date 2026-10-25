@@ -55,6 +55,6 @@ reverse source transition. A tap outside or Escape also
 closes the sheet. The `dismissed` callback receives `true` for those
 user cancellations and `false` for `dismissAnimated()`.
 
-``AetherActionSheetTheme.light`` and `.dark` use the same card and pill
+`AetherActionSheetTheme.light` and `.dark` use the same card and pill
 colors as Alert. Custom themes may set `cardBackgroundColor` separately
 from `itemBackgroundColor`.

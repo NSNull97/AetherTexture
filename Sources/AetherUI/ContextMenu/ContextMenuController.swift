@@ -30,10 +30,13 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     // MARK: - Animation constants
 
     internal static let glassmorphicTiming = ContextMenuGlassmorphicTiming(
-        // This renderer spends the last ~230 ms settling its shared surface
-        // and row overscale. The generic source morph has a different clock.
-        openDuration: 0.60,
-        closeDuration: AetherMotion.contextMenu.dismissal.duration
+        // Measured on the iOS 27 references at 60 fps: the filter menu grows
+        // from half to 90% of its width in the first part of a 720 ms opening
+        // clock; the final settle remains below one pixel. Closing uses a
+        // shorter 500 ms clock so the source handoff finishes promptly. The
+        // generic source morph keeps its own clock.
+        openDuration: 0.72,
+        closeDuration: 0.50
     )
     private static let previewOpenDuration: TimeInterval = 0.29
     private static let previewDismissDuration: TimeInterval = 0.29
@@ -337,12 +340,24 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         host.addSubview(dim)
         self.dimView = dim
 
+        let inheritedStyle: UIUserInterfaceStyle = {
+            if source.overrideUserInterfaceStyle != .unspecified {
+                return source.traitCollection.userInterfaceStyle
+            }
+            if window.traitCollection.userInterfaceStyle != .unspecified {
+                return window.traitCollection.userInterfaceStyle
+            }
+            return host.traitCollection.userInterfaceStyle
+        }()
+        let isDark = self.isDark ?? (inheritedStyle == .dark)
+
         // Compute menu metrics.
         let menuMetrics = resolvedMenuMetrics
         let actionsView = ContextMenuActionsView(
             items: items,
             appearanceStyle: resolvedAppearanceStyle,
-            actionTextColor: actionTextColor
+            actionTextColor: actionTextColor,
+            userInterfaceStyle: isDark ? .dark : .light
         )
         let maxWidth = min(max(1.0, host.bounds.width - 24.0), menuMetrics.preferredWidth)
         let menuSize = actionsView.preferredSize(
@@ -352,6 +367,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         var sourceCornerRadius = self.source.cornerRadius ?? source.layer.cornerRadius
         let activeSourceLease: SourcePresentationLease?
         let sourceVisualMode: ContextMenuSourceVisualMode?
+        var sourceHasGlassSurface = true
         let sourceRectInHost: CGRect
 
         if usesLeasedSourcePresentation {
@@ -372,6 +388,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                   "hit:", descriptor.hitView, "visual:", descriptor.visualView)
             #endif
             sourceVisualMode = transitionMode
+            sourceHasGlassSurface = Self.isGlassContextMenuSource(descriptor.visualView)
+                || Self.isGlassContextMenuSource(descriptor.hitView)
             sourceCornerRadius = descriptor.sourceCornerRadius
             guard let lease = SourcePresentationLease(
                 sourceID: ObjectIdentifier(descriptor.visualView),
@@ -426,16 +444,6 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         #endif
         self.menuFrameInHost = menuFrame
 
-        let inheritedStyle: UIUserInterfaceStyle = {
-            if source.overrideUserInterfaceStyle != .unspecified {
-                return source.traitCollection.userInterfaceStyle
-            }
-            if window.traitCollection.userInterfaceStyle != .unspecified {
-                return window.traitCollection.userInterfaceStyle
-            }
-            return host.traitCollection.userInterfaceStyle
-        }()
-        let isDark = self.isDark ?? (inheritedStyle == .dark)
         // Action rows resolve `.label` while their snapshots are prepared.
         // Pin the same effective style used by the source so a wrapped
         // control on a dark window cannot produce black rows in the glass.
@@ -462,6 +470,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
                     isDark: isDark,
                     sourceLease: activeSourceLease,
                     sourceMode: sourceVisualMode,
+                    sourceHasGlassSurface: sourceHasGlassSurface,
                     actionsView: actionsView,
                     sourceRectInHost: sourceRectInHost,
                     sourceCornerRadius: sourceCornerRadius,
@@ -536,6 +545,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
     }
 
     internal var hasGlassmorphicTransitionForTesting: Bool { glassmorphicHost != nil }
+    internal var menuFrameForTesting: CGRect { menuFrameInHost }
     internal var usesSourcePresentationLeaseForTesting: Bool { sourcePresentationLease != nil }
     internal var resolvedPresentationStyleForTesting: ContextMenuPresentationStyle {
         resolvedPresentationStyle
@@ -667,6 +677,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         isDark: Bool,
         sourceLease: SourcePresentationLease?,
         sourceMode: ContextMenuSourceVisualMode,
+        sourceHasGlassSurface: Bool,
         actionsView: ContextMenuActionsView,
         sourceRectInHost: CGRect,
         sourceCornerRadius: CGFloat,
@@ -678,6 +689,7 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             finalCornerRadius: resolvedMenuMetrics.cornerRadius,
             sourceCornerRadius: sourceCornerRadius,
             sourceMode: sourceMode,
+            sourceHasGlassSurface: sourceHasGlassSurface,
             isDark: isDark,
             appearanceStyle: resolvedAppearanceStyle
         )
@@ -1176,11 +1188,19 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             // original trigger. Keeping a source gap makes the lens look like
             // a detached popover and also leaves the trigger awkwardly visible
             // beside the menu.
+            // Like UIKit, a trigger in the lower half grows its menu upward
+            // from its bottom edge (call-screen and player references); a
+            // trigger in the upper half grows downward from its top edge.
             let downward = sourceRect.minY
             let upward = sourceRect.maxY - menuSize.height
-            if downward + menuSize.height <= hostBounds.maxY - safeBottom {
+            let fitsDownward = downward + menuSize.height <= hostBounds.maxY - safeBottom
+            let fitsUpward = upward >= safeTop
+            let prefersUpward = sourceRect.midY > hostBounds.midY
+            if prefersUpward, fitsUpward {
+                initialY = upward
+            } else if fitsDownward {
                 initialY = downward
-            } else if upward >= safeTop {
+            } else if fitsUpward {
                 initialY = upward
             } else {
                 initialY = min(
@@ -1431,6 +1451,49 @@ public final class ContextMenuController: AetherAppearanceConsumer {
         dismiss()
     }
 
+    // MARK: - Presenting touch
+
+    /// A menu opened on touch-down keeps the opening finger, like UIKit's
+    /// primary-action menus: sliding highlights rows and pulls the platter,
+    /// lifting on a row chooses it. Lifting without having moved leaves the
+    /// menu open (the finger is still over the trigger the menu now covers).
+    private static let presentingTouchTravel: CGFloat = 10
+    private var presentingTouchStart: CGPoint?
+    private var presentingTouchTravelled = false
+
+    public func beginPresentingTouch(at locationInWindow: CGPoint) {
+        presentingTouchStart = locationInWindow
+        presentingTouchTravelled = false
+    }
+
+    public func updatePresentingTouch(at locationInWindow: CGPoint) {
+        guard let start = presentingTouchStart, isPresented, let actionsView else { return }
+        if !presentingTouchTravelled {
+            guard hypot(locationInWindow.x - start.x, locationInWindow.y - start.y) > Self.presentingTouchTravel else { return }
+            presentingTouchTravelled = true
+            actionsView.beginExternalInteraction(at: actionsView.convert(locationInWindow, from: nil))
+        }
+        actionsView.updateExternalInteraction(at: actionsView.convert(locationInWindow, from: nil))
+        if let surface = menuContainer, surface.isUserInteractionEnabled {
+            let point = surface.superview?.convert(locationInWindow, from: nil) ?? locationInWindow
+            surface.updateElasticStretch(toward: CGPoint(x: point.x - (surface.center.x - surface.bounds.width / 2),
+                                                         y: point.y - (surface.center.y - surface.bounds.height / 2)))
+        }
+    }
+
+    public func endPresentingTouch(at locationInWindow: CGPoint) {
+        defer { presentingTouchStart = nil; presentingTouchTravelled = false }
+        menuContainer?.releaseElasticStretch()
+        guard presentingTouchTravelled, isPresented, let actionsView else { return }
+        actionsView.endExternalInteraction(at: actionsView.convert(locationInWindow, from: nil))
+    }
+
+    public func cancelPresentingTouch() {
+        defer { presentingTouchStart = nil; presentingTouchTravelled = false }
+        menuContainer?.releaseElasticStretch()
+        if presentingTouchTravelled { actionsView?.cancelExternalInteraction() }
+    }
+
     // MARK: - Submenu page stack
 
     /// Hooks an actions view into the controller — action callbacks,
@@ -1517,7 +1580,8 @@ public final class ContextMenuController: AetherAppearanceConsumer {
             items: submenu,
             headerStyle: .disclosure(title: item.title),
             appearanceStyle: resolvedAppearanceStyle,
-            actionTextColor: actionTextColor
+            actionTextColor: actionTextColor,
+            userInterfaceStyle: isDark ? .dark : .light
         )
         submenuActions.overrideUserInterfaceStyle = isDark ? .dark : .light
         let cardWidth = surfaceView.bounds.width
@@ -1710,6 +1774,15 @@ private final class ContextMenuSurfaceInteractionGestureRecognizer: UIGestureRec
         trackedTouch = nil
     }
 
+    private func stretch(toward touch: UITouch) {
+        guard let surface = view as? MenuGlassSurfaceView else { return }
+        // Untransformed coordinates: the pull must not chase its own scale.
+        let point = touch.location(in: surface.superview)
+        let origin = CGPoint(x: surface.center.x - surface.bounds.width / 2,
+                             y: surface.center.y - surface.bounds.height / 2)
+        surface.updateElasticStretch(toward: CGPoint(x: point.x - origin.x, y: point.y - origin.y))
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard trackedTouch == nil, let touch = touches.first, let actionsView else {
             state = .failed
@@ -1717,12 +1790,14 @@ private final class ContextMenuSurfaceInteractionGestureRecognizer: UIGestureRec
         }
         trackedTouch = touch
         actionsView.beginExternalInteraction(at: touch.location(in: actionsView))
+        stretch(toward: touch)
         state = .began
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let trackedTouch, touches.contains(trackedTouch), let actionsView else { return }
         actionsView.updateExternalInteraction(at: trackedTouch.location(in: actionsView))
+        stretch(toward: trackedTouch)
         state = .changed
     }
 
@@ -1731,6 +1806,7 @@ private final class ContextMenuSurfaceInteractionGestureRecognizer: UIGestureRec
             state = .ended
             return
         }
+        (view as? MenuGlassSurfaceView)?.releaseElasticStretch()
         actionsView.endExternalInteraction(at: trackedTouch.location(in: actionsView))
         self.trackedTouch = nil
         state = .ended
@@ -1738,6 +1814,7 @@ private final class ContextMenuSurfaceInteractionGestureRecognizer: UIGestureRec
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         if trackedTouch != nil {
+            (view as? MenuGlassSurfaceView)?.releaseElasticStretch()
             actionsView?.cancelExternalInteraction()
         }
         trackedTouch = nil

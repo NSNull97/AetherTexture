@@ -107,13 +107,17 @@ final class ContextMenuClosingAbsorptionTests: XCTestCase {
                     isRelaxing = true
                 }
                 if isRelaxing {
-                    XCTAssertLessThanOrEqual(major, previousMajor + 0.000001,
+                    // 0.001 pt: sub-pixel solver noise on the flat stretch
+                    // plateau is not a second stretch.
+                    XCTAssertLessThanOrEqual(major, previousMajor + 0.001,
                         "The restored source stretched a second time: \(fixture), sample \(index)")
                 }
                 previousMajor = major
             }
             XCTAssertTrue(isRelaxing)
-            XCTAssertGreaterThan(maximumMajor, fixture.source.width * 1.10,
+            // Closing now lands softly (1.10/0.94 head stretch instead of
+            // 1.36/0.76): visible, but without the snap-back jitter.
+            XCTAssertGreaterThan(maximumMajor, fixture.source.width * 1.05,
                 "The liquid stretch before absorption must remain visible")
             XCTAssertEqual(previousMajor, fixture.source.width, accuracy: 0.000001)
         }

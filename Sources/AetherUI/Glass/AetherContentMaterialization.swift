@@ -10,13 +10,17 @@ final class AetherMaterializationImageView: UIView {
     let imageSize: CGSize
     let maximumBlurRadius: CGFloat
     private let imageView = UIImageView()
-    private let images: [UIImage]
+    private var images: [UIImage]
     private let radii: [CGFloat]
     private let imagePadding: CGFloat
     private(set) var blurRadius: CGFloat = 0
     private var displayedIndex = -1
 
-    init(image: UIImage, maximumBlurRadius: CGFloat) {
+    /// `preparesBlurLevelsAsynchronously` renders the blur levels off the
+    /// main thread; until they arrive the nearest prepared level (the sharp
+    /// image) is shown. Context menus use it so touch-down is not blocked by
+    /// 16 Core Image passes.
+    init(image: UIImage, maximumBlurRadius: CGFloat, preparesBlurLevelsAsynchronously: Bool = false) {
         let original = AetherContentMaterialization.normalizedImage(image)
         imageSize = original.size
         let maximumBlur = maximumBlurRadius.isFinite ? max(0, maximumBlurRadius) : 0
@@ -34,10 +38,27 @@ final class AetherMaterializationImageView: UIView {
             return maximumBlur * t * t
         }
         radii = preparedRadii
-        images = preparedRadii.map { radius in
-            AetherContentMaterialization.blurredImage(padded, radius: radius)
+        if preparesBlurLevelsAsynchronously, preparedRadii.count > 1 {
+            images = [padded]
+        } else {
+            images = preparedRadii.map { radius in
+                AetherContentMaterialization.blurredImage(padded, radius: radius)
+            }
         }
         super.init(frame: CGRect(origin: .zero, size: original.size))
+        if preparesBlurLevelsAsynchronously, preparedRadii.count > 1 {
+            let levels = Array(preparedRadii.dropFirst())
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let rendered = levels.map { AetherContentMaterialization.blurredImage(padded, radius: $0) }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.images = [padded] + rendered
+                    let radius = self.blurRadius
+                    self.displayedIndex = -1
+                    self.setBlurRadius(radius)
+                }
+            }
+        }
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         imageView.isUserInteractionEnabled = false
@@ -63,7 +84,7 @@ final class AetherMaterializationImageView: UIView {
     func setBlurRadius(_ radius: CGFloat) {
         let resolved = radius.isFinite ? min(maximumBlurRadius, max(0, radius)) : 0
         blurRadius = resolved
-        let index = radii.indices.min { abs(radii[$0] - resolved) < abs(radii[$1] - resolved) } ?? 0
+        let index = images.indices.min { abs(radii[$0] - resolved) < abs(radii[$1] - resolved) } ?? 0
         guard index != displayedIndex else { return }
         displayedIndex = index
         imageView.image = images[index]

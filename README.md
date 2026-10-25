@@ -3,7 +3,7 @@
 [![iOS 15+](https://img.shields.io/badge/iOS-15%2B-blue.svg)](https://www.apple.com/ios/)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org/)
 [![SPM](https://img.shields.io/badge/SPM-supported-brightgreen.svg)](https://swift.org/package-manager/)
-[![Documentation](https://img.shields.io/badge/docs-online-purple.svg)](https://nsnull97.github.io/AetherUI/documentation/aetherui/)
+[![Documentation](https://img.shields.io/badge/docs-online-purple.svg)](https://nsnull97.github.io/AetherTexture/documentation/aetherui/)
 
 Texture-first UIKit-hosted фреймворк навигации с тремя appearance styles:
 классическим Legacy и поколениями Liquid Glass v1/v2. Новая линия AetherUI
@@ -17,7 +17,7 @@ Texture-backed rendering/list logic. Новые `AetherScreenNode`,
 `AetherSliderNode`, `AetherContentUnavailableNode`, `AetherSkeletonNode` и
 control-ноды задают node-first API без публичной привязки к UIKit-композиции.
 
-📖 **[Документация](https://nsnull97.github.io/AetherUI/documentation/aetherui/)** — DocC, обновляется на каждом push автоматически.
+📖 **[Документация](https://nsnull97.github.io/AetherTexture/documentation/aetherui/)** — DocC, обновляется на каждом push автоматически.
 
 ---
 
@@ -57,7 +57,7 @@ control-ноды задают node-first API без публичной прив�
 | **Glass** | `AetherGlassButtonNode`, `GlassBackgroundView`, `GlassControlGroup`, `GlassButton`, `LiquidLensView`, `EdgeEffectView` |
 | **Sheets** | `AetherModalNodeNavigationController`, node content overloads for `AetherModalController`, `AetherActionSheetController`, `AetherAlertController` |
 | **Overlays** | `AetherToastController`, `AetherTooltipController`, `ContextMenuController` |
-| **Lists** | `AetherListNode` (Texture-native ASScrollNode engine), deprecated legacy `AetherListView` |
+| **Lists** | `AetherListNode` (Texture-native ASScrollNode engine) |
 | **Bars** | `AetherToolbarNode`, legacy `AetherFloatingToolbarView`, legacy `AetherToolbarView` |
 | **Misc** | `AetherSegmentedControlNode`, `AetherSliderNode`, `AetherSkeletonNode`, `AetherContentUnavailableNode` |
 | **Search** | `AetherSearchController` (nav bar / bottom placement), `AetherActiveSearchBar` |
@@ -181,7 +181,7 @@ defines в `swiftSettings` AetherUI и `cSettings` AetherUIBridging либо
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/NSNull97/AetherUI.git", from: "1.0.0")
+    .package(url: "https://github.com/NSNull97/AetherTexture.git", branch: "main")
 ]
 
 // targets:
@@ -193,7 +193,10 @@ dependencies: [
 
 ### Через Xcode
 
-`File → Add Package Dependencies… → URL: https://github.com/NSNull97/AetherUI.git`
+`File → Add Package Dependencies… → URL: https://github.com/NSNull97/AetherTexture.git`
+
+До публикации первого version tag используйте ветку `main`. После релиза
+замените зависимость на `from: "<version>"`.
 
 ---
 
@@ -272,7 +275,7 @@ func makeRootTabBarController() -> AetherTabBarController {
 }
 ```
 
-Подробнее — **[Quick Start в документации](https://nsnull97.github.io/AetherUI/documentation/aetherui/quickstart)**.
+Подробнее — **[Quick Start в документации](https://nsnull97.github.io/AetherTexture/documentation/aetherui/quickstart)**.
 
 ---
 
@@ -300,30 +303,30 @@ glass-morph переход между двумя барами.
 
 Полная DocC-документация со всеми API таблицами, edge cases и примерами использования каждого компонента:
 
-🔗 **https://nsnull97.github.io/AetherUI/documentation/aetherui/**
+🔗 **https://nsnull97.github.io/AetherTexture/documentation/aetherui/**
 
 Разделы:
-- [Quick Start](https://nsnull97.github.io/AetherUI/documentation/aetherui/quickstart) — минимальное приложение за 10 минут
-- [Appearance](https://nsnull97.github.io/AetherUI/documentation/aetherui/appearance) — Legacy, Liquid Glass v1/v2, live switching и migration
-- [AetherViewController](https://nsnull97.github.io/AetherUI/documentation/aetherui/aetherviewcontroller) — базовый класс экрана
-- [AetherWindow](https://nsnull97.github.io/AetherUI/documentation/aetherui/aetherwindow) — keyboard tracking, status bar dispatcher
-- [NavigationController](https://nsnull97.github.io/AetherUI/documentation/aetherui/navigationcontroller) — стек экранов с glass-morph
-- [NavigationBar](https://nsnull97.github.io/AetherUI/documentation/aetherui/navigationbar) — theme, accessory, search
-- [TabBar](https://nsnull97.github.io/AetherUI/documentation/aetherui/tabbar) — pill, accessory, expanded morph
-- [Glass](https://nsnull97.github.io/AetherUI/documentation/aetherui/glass) — низкоуровневые primitives
-- [EdgeEffect](https://nsnull97.github.io/AetherUI/documentation/aetherui/edgeeffect) — variable blur frost
-- [Search](https://nsnull97.github.io/AetherUI/documentation/aetherui/search) — nav bar / bottom / tab-showcase search
-- [ContextMenu](https://nsnull97.github.io/AetherUI/documentation/aetherui/contextmenu) — morph / preview / submenu
-- [Modal](https://nsnull97.github.io/AetherUI/documentation/aetherui/modal) — двухдетентный glass-sheet
-- [ListView](https://nsnull97.github.io/AetherUI/documentation/aetherui/listview) — виртуализованный, с Metal-частицами
-- [ActionSheet](https://nsnull97.github.io/AetherUI/documentation/aetherui/actionsheet)
-- [Alert](https://nsnull97.github.io/AetherUI/documentation/aetherui/alert)
-- [Toast](https://nsnull97.github.io/AetherUI/documentation/aetherui/toast)
-- [Tooltip](https://nsnull97.github.io/AetherUI/documentation/aetherui/tooltip)
-- [Toolbar](https://nsnull97.github.io/AetherUI/documentation/aetherui/toolbar)
-- [SegmentedControl](https://nsnull97.github.io/AetherUI/documentation/aetherui/segmentedcontrol)
-- [Skeleton](https://nsnull97.github.io/AetherUI/documentation/aetherui/skeleton)
-- [ContentUnavailable](https://nsnull97.github.io/AetherUI/documentation/aetherui/contentunavailable)
+- [Quick Start](https://nsnull97.github.io/AetherTexture/documentation/aetherui/quickstart) — минимальное приложение за 10 минут
+- [Appearance](https://nsnull97.github.io/AetherTexture/documentation/aetherui/appearance) — Legacy, Liquid Glass v1/v2, live switching и migration
+- [AetherViewController](https://nsnull97.github.io/AetherTexture/documentation/aetherui/aetherviewcontroller) — базовый класс экрана
+- [AetherWindow](https://nsnull97.github.io/AetherTexture/documentation/aetherui/aetherwindow) — keyboard tracking, status bar dispatcher
+- [NavigationController](https://nsnull97.github.io/AetherTexture/documentation/aetherui/navigationcontroller) — стек экранов с glass-morph
+- [NavigationBar](https://nsnull97.github.io/AetherTexture/documentation/aetherui/navigationbar) — theme, accessory, search
+- [TabBar](https://nsnull97.github.io/AetherTexture/documentation/aetherui/tabbar) — pill, accessory, expanded morph
+- [Glass](https://nsnull97.github.io/AetherTexture/documentation/aetherui/glass) — низкоуровневые primitives
+- [EdgeEffect](https://nsnull97.github.io/AetherTexture/documentation/aetherui/edgeeffect) — variable blur frost
+- [Search](https://nsnull97.github.io/AetherTexture/documentation/aetherui/search) — nav bar / bottom / tab-showcase search
+- [ContextMenu](https://nsnull97.github.io/AetherTexture/documentation/aetherui/contextmenu) — morph / preview / submenu
+- [Modal](https://nsnull97.github.io/AetherTexture/documentation/aetherui/modal) — двухдетентный glass-sheet
+- [ListView](https://nsnull97.github.io/AetherTexture/documentation/aetherui/listview) — виртуализованный, с Metal-частицами
+- [ActionSheet](https://nsnull97.github.io/AetherTexture/documentation/aetherui/actionsheet)
+- [Alert](https://nsnull97.github.io/AetherTexture/documentation/aetherui/alert)
+- [Toast](https://nsnull97.github.io/AetherTexture/documentation/aetherui/toast)
+- [Tooltip](https://nsnull97.github.io/AetherTexture/documentation/aetherui/tooltip)
+- [Toolbar](https://nsnull97.github.io/AetherTexture/documentation/aetherui/toolbar)
+- [SegmentedControl](https://nsnull97.github.io/AetherTexture/documentation/aetherui/segmentedcontrol)
+- [Skeleton](https://nsnull97.github.io/AetherTexture/documentation/aetherui/skeleton)
+- [ContentUnavailable](https://nsnull97.github.io/AetherTexture/documentation/aetherui/contentunavailable)
 
 ---
 
@@ -355,4 +358,6 @@ bottomBarAccessory и floating surfaces — это одновременно gall
 
 ## License
 
-MIT
+The AetherUI source is released under the [MIT License](LICENSE). Materials
+with separate provenance are listed in [NOTICE.md](NOTICE.md) and
+`ThirdParty/`.

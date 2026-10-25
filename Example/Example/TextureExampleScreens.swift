@@ -103,6 +103,18 @@ enum ExampleRootFactory {
         #else
         let sharedGroupAutoplay = false
         #endif
+        if let index = arguments.firstIndex(of: "--context-menu-reference") {
+            let kind = arguments.indices.contains(index + 1) ? arguments[index + 1] : "glass"
+            let root = TextureContextMenuReferenceController(plain: kind == "plain", autoplay: arguments.contains("--context-menu-reference-autoplay"))
+            let navigation = AetherNavigationController(mode: .single)
+            navigation.setViewControllers([root], animated: false)
+            navigation.updateAppearance(store.appearance)
+            // A light window with an explicitly dark menu reproduces the
+            // call screen of the consuming app.
+            window.overrideUserInterfaceStyle = arguments.contains("--context-menu-reference-light-window") ? .light : .dark
+            window.backgroundColor = .black
+            return navigation
+        }
         if arguments.contains("--animation-reference") || arguments.contains("--animation-reference-autoplay") || sharedGroupAutoplay {
             let root = TextureAnimationReferenceController(autoplay: arguments.contains("--animation-reference-autoplay") || sharedGroupAutoplay)
             let navigation = AetherNavigationController(mode: .single)
@@ -3276,5 +3288,182 @@ private final class TextureAnimationReferenceTitleView: UIView {
         nameNode.frame = CGRect(x: 0, y: 41, width: bounds.width, height: 17)
         avatarNode.recursivelyEnsureDisplaySynchronously(true)
         nameNode.recursivelyEnsureDisplaySynchronously(true)
+    }
+}
+
+/// Reference stand for menus opened from an ordinary glass button (call
+/// screen) and from a background-less glyph button (player "…").
+private final class TextureContextMenuReferenceController: AetherViewController {
+    private let plain: Bool
+    private let autoplay: Bool
+    private var activeMenu: ContextMenuController?
+    private var sourceButton: UIView?
+    private var scheduledSteps: [DispatchWorkItem] = []
+
+    init(plain: Bool, autoplay: Bool) {
+        self.plain = plain
+        self.autoplay = autoplay
+        super.init(navigationBarPresentationData: .defaultTheme(edgeColor: .black))
+    }
+
+    required init(coder aDecoder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { scheduledSteps.forEach { $0.cancel() } }
+
+    private var forcesDarkMenu: Bool {
+        ProcessInfo.processInfo.arguments.contains("--context-menu-reference-light-window")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        displayNavigationBar = false
+        let gradient = CAGradientLayer()
+        gradient.colors = plain
+            ? [UIColor(red: 0.24, green: 0.17, blue: 0.15, alpha: 1).cgColor, UIColor(red: 0.13, green: 0.10, blue: 0.09, alpha: 1).cgColor]
+            : [UIColor(red: 0.20, green: 0.22, blue: 0.30, alpha: 1).cgColor, UIColor(red: 0.42, green: 0.26, blue: 0.18, alpha: 1).cgColor, UIColor(red: 0.12, green: 0.13, blue: 0.18, alpha: 1).cgColor]
+        gradient.frame = UIScreen.main.bounds
+        view.layer.addSublayer(gradient)
+        plain ? buildPlayer() : buildCallScreen()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard autoplay, scheduledSteps.isEmpty else { return }
+        for cycle in 0..<2 {
+            let base = 1.0 + Double(cycle) * 3.0
+            schedule(after: base) { $0.showMenu() }
+            schedule(after: base + 1.8) { $0.activeMenu?.dismiss() }
+        }
+    }
+
+    private func buildCallScreen() {
+        let symbols = [("speaker.wave.2.fill", "Аудио"), ("video.fill", "FaceTime"), ("mic.slash.fill", "Без звука"),
+                       ("ellipsis", "Ещё"), ("phone.down.fill", "Завершить"), ("circle.grid.3x3.fill", "Клавиатура")]
+        // Geometry measured from the call-screen reference recording.
+        let size: CGFloat = 76
+        let bounds = UIScreen.main.bounds
+        for (index, entry) in symbols.enumerated() {
+            let column = CGFloat(index % 3), row = CGFloat(index / 3)
+            let x = bounds.width / 2 + (column - 1) * 121 - size / 2
+            let y = bounds.height - 280 + row * 123
+            let button = GlassButton(image: UIImage(systemName: entry.0, withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)))
+            button.frame = CGRect(x: x, y: y, width: size, height: size)
+            button.accessibilityIdentifier = "context-menu-reference.\(index)"
+            view.addSubview(button)
+            if index == 0 {
+                // The real primary-action path: opens on touch-down and lets
+                // the same finger slide onto a row.
+                button.contextMenuItemsProvider = { [weak self] in self?.audioItems() ?? [] }
+                sourceButton = button
+            }
+            let label = UILabel(frame: CGRect(x: x - 15, y: y + size + 4, width: size + 30, height: 16))
+            label.text = entry.1
+            label.textAlignment = .center
+            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.textColor = .white
+            view.addSubview(label)
+        }
+        let name = UILabel(frame: CGRect(x: 0, y: 110, width: bounds.width, height: 40))
+        name.text = "Kolohoushenka"
+        name.textAlignment = .center
+        name.font = .systemFont(ofSize: 30, weight: .semibold)
+        name.textColor = .white
+        view.addSubview(name)
+    }
+
+    private func buildPlayer() {
+        let bounds = UIScreen.main.bounds
+        // Geometry measured from the player reference recording.
+        let art = UIView(frame: CGRect(x: 73, y: 150, width: 256, height: 256))
+        art.backgroundColor = UIColor(red: 0.55, green: 0.32, blue: 0.20, alpha: 1)
+        art.layer.cornerRadius = 10
+        let face = UIImageView(image: UIImage(systemName: "face.dashed.fill"))
+        face.tintColor = UIColor(red: 0.85, green: 0.35, blue: 0.85, alpha: 1)
+        face.frame = art.bounds.insetBy(dx: 40, dy: 40)
+        art.addSubview(face)
+        view.addSubview(art)
+        let titleY = bounds.height * 0.567
+        let title = UILabel(frame: CGRect(x: 24, y: titleY, width: 240, height: 44))
+        title.numberOfLines = 2
+        title.text = "VELVET COLLAPSE\nSCRAPING BI"
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.textColor = .white
+        view.addSubview(title)
+        let star = UIButton(type: .system)
+        star.setImage(UIImage(systemName: "star"), for: .normal)
+        star.tintColor = .white
+        star.frame = CGRect(x: bounds.width - 104, y: titleY + 2, width: 40, height: 40)
+        view.addSubview(star)
+        let more = UIButton(type: .system)
+        more.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold)), for: .normal)
+        more.tintColor = .white
+        more.frame = CGRect(x: bounds.width - 60, y: titleY + 2, width: 40, height: 40)
+        more.accessibilityIdentifier = "context-menu-reference.more"
+        more.addAction(UIAction { [weak self] _ in self?.showMenu() }, for: .touchDown)
+        view.addSubview(more)
+        sourceButton = more
+        let progress = UIView(frame: CGRect(x: 24, y: titleY + 70, width: bounds.width - 48, height: 6))
+        progress.backgroundColor = UIColor.white.withAlphaComponent(0.25)
+        progress.layer.cornerRadius = 3
+        view.addSubview(progress)
+        for (index, symbol) in ["backward.fill", "play.fill", "forward.fill"].enumerated() {
+            let icon = UIImageView(image: UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 34)))
+            icon.tintColor = .white
+            icon.contentMode = .center
+            icon.frame = CGRect(x: bounds.width / 2 + CGFloat(index - 1) * 110 - 30, y: titleY + 130, width: 60, height: 60)
+            view.addSubview(icon)
+        }
+    }
+
+    private func showMenu() {
+        guard activeMenu == nil, let source = sourceButton else { return }
+        let menu = ContextMenuController(
+            source: .init(view: source, cornerRadius: plain ? nil : source.bounds.height / 2),
+            items: plain ? playerItems() : audioItems(),
+            hasHapticFeedback: false,
+            isDark: forcesDarkMenu ? true : nil,
+            onDismiss: { [weak self] in self?.activeMenu = nil }
+        )
+        activeMenu = menu
+        menu.present()
+    }
+
+    private func audioItems() -> [ContextMenuItem] {
+        [
+            .header(title: "Аудиовыход"),
+            action("speaker", "Динамик", "speaker.wave.2"),
+            action("iphone", "iPhone", "iphone", selected: true),
+            action("mac", "MacBook Air — NSNull (2)", "laptopcomputer")
+        ]
+    }
+
+    private func playerItems() -> [ContextMenuItem] {
+        func item(_ id: String, _ title: String, _ symbol: String) -> ContextMenuActionItem {
+            ContextMenuActionItem(id: id, title: title, icon: UIImage(systemName: symbol), iconSide: .leading, action: { _, handle in handle.dismiss() })
+        }
+        return [
+            .actionRow([item("add", "Добавить", "plus.circle"), item("fav", "Избранное", "star"), item("share", "Поделиться", "square.and.arrow.up")]),
+            .separator,
+            action("playlist", "Добавить в плейлист", "text.badge.plus"),
+            action("station", "Создать станцию", "dot.radiowaves.left.and.right"),
+            action("album", "Перейти к альбому", "square.stack"),
+            action("artist", "Перейти к артисту", "music.microphone"),
+            action("credits", "Посмотреть авторство", "info.circle"),
+            .separator,
+            action("less", "Предлагать меньше", "hand.thumbsdown")
+        ]
+    }
+
+    private func action(_ id: String, _ title: String, _ symbol: String, selected: Bool = false) -> ContextMenuItem {
+        .action(.init(id: id, title: title, icon: UIImage(systemName: symbol), iconSide: .leading, isSelected: selected, action: { _, handle in handle.dismiss() }))
+    }
+
+    private func schedule(after delay: TimeInterval, action: @escaping (TextureContextMenuReferenceController) -> Void) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            action(self)
+        }
+        scheduledSteps.append(work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }

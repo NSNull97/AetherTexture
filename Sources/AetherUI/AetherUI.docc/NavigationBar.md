@@ -521,7 +521,7 @@ defaults; factory `liquidGlass(...)` — preset для типового испо
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationController>
 - <doc:Search>
 - <doc:Glass>

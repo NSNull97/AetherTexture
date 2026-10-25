@@ -9,7 +9,9 @@ keyboard avoidance, particle dissolve через Metal.
 ``AetherListNode`` — Texture-native порт `Display.ListView` из Telegram-iOS
 на базе `ASScrollNode`. Виртуализация позволяет работать со списками в десятки
 тысяч элементов без лагов: в памяти держатся только visible + preload buffer.
-Deprecated ``AetherListView`` оставлен только как legacy compatibility layer.
+Текущая package target публикует только ``AetherListNode``. Старый UIKit
+`AetherListView` удалён после завершения миграции; исторические port notes
+сохраняются в корне репозитория для контекста.
 
 Ключевые возможности:
 
@@ -573,12 +575,13 @@ UIKit только как внутреннюю scroll/gesture boundary. Для �
 `bottomOverscrollBackgroundNode` и `panVelocity(relativeTo:)`; одноимённые
 UIKit escape hatches оставлены только для миграции.
 
-### ``AetherListView``
+### Миграция со старого UIKit списка
 
-Deprecated legacy UIKit list. New code should use ``AetherListNode``; legacy
-`UIView` escape hatches such as `keyboardDismissMode`,
-`particleDissolveOverlayHost`, `topOverscrollBackgroundView`, and
-`bottomOverscrollBackgroundView` are kept only for migration.
+`AetherListView` больше не входит в package target. Для новых и существующих
+экранов используйте ``AetherListNode`` и его node-based API:
+`keyboardDismissBehavior`, `topOverscrollBackgroundNode`,
+`bottomOverscrollBackgroundNode` и `panVelocity(relativeTo:)`. Сводка
+заменителей приведена в `AetherNodeMigrationMap.md`.
 
 ### ``AetherListItem`` (протокол)
 
@@ -624,6 +627,6 @@ Deprecated legacy UIKit list. New code should use ``AetherListNode``; legacy
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationController>
 - <doc:ContextMenu>

@@ -198,10 +198,17 @@ final class NavigationGlassMaterializationTests: XCTestCase {
         let size = group.update(items: [button], transition: transition)
 
         XCTAssertEqual(group.surfaceFrameForTesting, CGRect(origin: .zero, size: size))
-        let reveal = try XCTUnwrap(group.surfaceMaterializationAnimationForTesting)
-        XCTAssertEqual((reveal.values?.first as? NSNumber)?.doubleValue, 0)
-        XCTAssertEqual((reveal.values?.last as? NSNumber)?.doubleValue, 1)
         let backdrop = try XCTUnwrap(descendant(GlassBackgroundView.self, in: group))
+        if let appearing = backdrop.lastNativeMaterializationForTesting {
+            // Native UIGlassEffect ignores layer opacity; it materializes by
+            // animating the effect itself, as UIKit's bar buttons do.
+            XCTAssertTrue(appearing)
+            XCTAssertNil(group.surfaceMaterializationAnimationForTesting)
+        } else {
+            let reveal = try XCTUnwrap(group.surfaceMaterializationAnimationForTesting)
+            XCTAssertEqual((reveal.values?.first as? NSNumber)?.doubleValue, 0)
+            XCTAssertEqual((reveal.values?.last as? NSNumber)?.doubleValue, 1)
+        }
         XCTAssertNil(backdrop.layer.animation(forKey: "bounds"))
         XCTAssertNotNil(group.itemButton(id: "filter"))
     }

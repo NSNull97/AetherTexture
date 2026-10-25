@@ -1,5 +1,7 @@
 # Направленное вытягивание и закрытие по внешнему тапу
 
+> Визуальные материалы и логи этого аудита хранятся во внешнем каталоге; они не входят в репозиторий.
+
 Изменения после `d7e1010`, ветка `codex/glassmorphic-video-parity`.
 
 ## Закрытие по тапу
@@ -18,7 +20,7 @@
 
 ## Что взято из завершённого аудита стекла
 
-Основание — [AetherGlassRuntimeResearch.md](/Users/nsnull/Downloads/AetherTextureKit/AetherGlassRuntimeResearch.md), в частности разделы о `glassBackground`, `glassForeground`, `CASDFKeyFillHighlightEffect` и materialization на iOS 26/27.
+Основание — [AetherGlassRuntimeResearch.md](./AetherGlassRuntimeResearch.md), в частности разделы о `glassBackground`, `glassForeground`, `CASDFKeyFillHighlightEffect` и materialization на iOS 26/27.
 
 - Уже интегрированные `contentLensing`, `excludingShadow` и cache key regular/clear сохранены. Runtime-тест дополнительно проверяет фактическое обнуление обычной и, если она существует, кольцевой тени.
 - При активном нативном преломлении переход больше не накладывает собственный белый scattering-слой и радиальный блик поверх системного материала. UIKit сохраняет собственные key/fill-блики и рассеивание; fallback продолжает использовать прежнюю подсветку. Это убирает дублирующую оптику, но не означает завершённой калибровки материала по референсу.
@@ -29,9 +31,9 @@
 
 ## Визуальная проверка
 
-Example собран и записан в отдельном симуляторе iOS 27. [Фрагмент открытия и закрытия длинной кнопки, обычная скорость](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/menu-open-close.mp4) содержит 78 кадров со строго возрастающими PTS, без синтеза промежуточных кадров.
+Example собран и записан в отдельном симуляторе iOS 27. Фрагмент открытия и закрытия длинной кнопки, обычная скорость содержит 78 кадров со строго возрастающими PTS, без синтеза промежуточных кадров.
 
-Просмотрены все кадры выбранных интервалов: [длинная кнопка — открытие](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/wide/opening.jpg), [закрытие](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/wide/closing.jpg), [короткое меню — открытие](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/reference/opening.jpg), [закрытие](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/reference/closing.jpg).
+Просмотрены все кадры выбранных интервалов: длинная кнопка — открытие, закрытие, короткое меню — открытие, закрытие.
 
 В полных сырых записях simctl есть отдельные регрессии timestamps при запуске/навигации вне этих интервалов; полные записи не использованы как измерение производительности. Физический PushApp не запускался, его исходники не менялись.
 
@@ -39,6 +41,6 @@ Example собран и записан в отдельном симулятор�
 
 Целевые 66 тестов прошли: внешний hit-test, отказ от обработки внешних тапов по настройке, вытягивание, зеркальный наклон, точные конечные состояния, прерывания и нативные фильтры. Полные результаты находятся в каталоге артефактов `directed-flow`.
 
-- Основной прогон: **633 теста, 4 пропуска, 0 ошибок**. Прежние шесть исключений сбоев базовой версии сохранены, новых исключений нет. [Лог](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/tests-full.log).
-- `APPSTORE_SAFE`: **171 тест, 0 ошибок**. [Лог](/Users/nsnull/Downloads/AetherTexture-AnimationAudit-2026-09-14/directed-flow/tests-safe.log).
+- Основной прогон: **633 теста, 4 пропуска, 0 ошибок**. Прежние шесть исключений сбоев базовой версии сохранены, новых исключений нет. Лог.
+- `APPSTORE_SAFE`: **171 тест, 0 ошибок**. Лог.
 - Example: `BUILD SUCCEEDED`; `git diff --check` без замечаний.

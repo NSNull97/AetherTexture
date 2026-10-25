@@ -41,8 +41,9 @@ semantic surface renderer выбирает system surface либо Liquid Glass 
   ``ContextMenuController``.
 - Высокопроизводительный ``AetherListNode`` — Texture-native порт
   `Display.ListView` из Telegram-iOS с виртуализацией, transactions, sticky
-  headers, swipe actions, reorder и Metal-частицами. ``AetherListView`` —
-  deprecated legacy layer.
+  headers, swipe actions, reorder и Metal-частицами. Старый UIKit list engine
+  удалён из текущей package target; миграция выполняется через
+  `AetherNodeMigrationMap.md`.
 - Node wrappers для оставшихся reusable surfaces: `AetherNavigationBarNode`,
   `AetherToolbarNode`, `AetherSliderNode`, `AetherContentUnavailableNode`,
   `AetherSkeletonNode`. Их анимационно-критичные UIKit/CoreAnimation internals
@@ -81,7 +82,7 @@ UIKit-анимацией.
 @Links(visualStyle: detailedGrid) {
     - <doc:QuickStart>
     - <doc:Appearance>
-    - <doc:ViewController>
+    - <doc:AetherViewController>
     - <doc:NavigationController>
     - <doc:TabBar>
     - <doc:Glass>
@@ -96,7 +97,7 @@ UIKit-анимацией.
 
 ### Основа
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:AetherWindow>
 
 ### Навигация

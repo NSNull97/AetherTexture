@@ -58,6 +58,17 @@ private final class AetherURLImageBarButton: UIButton {
         super.layoutSubviews()
         imageView?.frame = bounds
     }
+
+    /// Must stay a legacy (non-configuration) button: assigning
+    /// `configurationUpdateHandler` switches UIKit to the configuration
+    /// visual provider, which ignores `setImage(_:for:)`, drops the image
+    /// view and resets the corner radius, leaving only the gray fill.
+    /// The same image for `.highlighted` disables the legacy press dimming.
+    func setAvatarImage(_ image: UIImage?) {
+        setImage(image, for: .normal)
+        setImage(image, for: .highlighted)
+        setNeedsLayout()
+    }
 }
 
 // MARK: - UIBarButtonItem + ContextMenu
@@ -100,13 +111,9 @@ public extension UIBarButtonItem {
         button.tintColor = .label
         button.contentHorizontalAlignment = .fill
         button.contentVerticalAlignment = .fill
-        button.configurationUpdateHandler = { button in
-            button.alpha = 1.0
-            button.imageView?.alpha = 1.0
-        }
         button.imageView?.contentMode = .scaleAspectFill
         button.imageView?.clipsToBounds = true
-        button.setImage(placeholderImage, for: .normal)
+        button.setAvatarImage(placeholderImage)
         if let target, let action {
             button.addTarget(target, action: action, for: .touchUpInside)
         }
@@ -123,8 +130,7 @@ public extension UIBarButtonItem {
                 return
             }
             DispatchQueue.main.async {
-                button?.setImage(image.withRenderingMode(.alwaysOriginal), for: .normal)
-                button?.setNeedsLayout()
+                button?.setAvatarImage(image.withRenderingMode(.alwaysOriginal))
             }
         }.resume()
     }

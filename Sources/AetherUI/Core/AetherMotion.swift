@@ -106,6 +106,15 @@ public enum AetherMotion {
         public var sizeMorphPrimaryAmplitude: CGFloat
         public var sizeMorphCrossAmplitude: CGFloat
         public var sizeMorphCounterAmplitude: CGFloat
+        /// Bar-button glass and glyphs appearing or disappearing together.
+        /// UIKit (iOS 27): visible from ~50–70 ms to ~170–185 ms after the
+        /// change, i.e. a ~0.22 s smoothed ramp.
+        public var buttonMaterializationDuration: TimeInterval
+        /// Incoming bar-button content starts after the outgoing content has
+        /// begun to leave (UIKit cross-dissolves sequentially).
+        public var buttonAppearanceDelay: TimeInterval
+        /// Outgoing bar-button glass and glyphs (UIKit: ~50–200 ms).
+        public var buttonDematerializationDuration: TimeInterval
 
         public init(
             geometry: Spring,
@@ -122,7 +131,10 @@ public enum AetherMotion {
             sizeMorphPulseDuration: TimeInterval = 0.24,
             sizeMorphPrimaryAmplitude: CGFloat = 0.075,
             sizeMorphCrossAmplitude: CGFloat = 0.025,
-            sizeMorphCounterAmplitude: CGFloat = 0.008
+            sizeMorphCounterAmplitude: CGFloat = 0.008,
+            buttonMaterializationDuration: TimeInterval = 0.22,
+            buttonAppearanceDelay: TimeInterval = 0.06,
+            buttonDematerializationDuration: TimeInterval = 0.28
         ) {
             self.geometry = geometry
             self.contentAppearanceDuration = contentAppearanceDuration
@@ -139,6 +151,9 @@ public enum AetherMotion {
             self.sizeMorphPrimaryAmplitude = sizeMorphPrimaryAmplitude
             self.sizeMorphCrossAmplitude = sizeMorphCrossAmplitude
             self.sizeMorphCounterAmplitude = sizeMorphCounterAmplitude
+            self.buttonMaterializationDuration = buttonMaterializationDuration
+            self.buttonAppearanceDelay = buttonAppearanceDelay
+            self.buttonDematerializationDuration = buttonDematerializationDuration
         }
     }
 
@@ -182,6 +197,82 @@ public enum AetherMotion {
     public static let navigation = Spring(
         duration: 0.34,
         dampingRatio: 0.88
+    )
+
+    /// A damped spring described the way UIKit/SwiftUI springs are:
+    /// `response` is the period of the undamped oscillation.
+    public struct PhysicalSpring: Equatable {
+        public var response: TimeInterval
+        public var dampingRatio: CGFloat
+
+        public init(response: TimeInterval, dampingRatio: CGFloat) {
+            self.response = response
+            self.dampingRatio = dampingRatio
+        }
+
+        public var stiffness: CGFloat {
+            let omega = 2.0 * .pi / CGFloat(max(0.001, response))
+            return omega * omega
+        }
+
+        public var damping: CGFloat {
+            return 2.0 * dampingRatio * 2.0 * .pi / CGFloat(max(0.001, response))
+        }
+    }
+
+    /// Page motion of the default horizontal stack transition.
+    public struct StackTransition: Equatable {
+        /// Non-interactive push and pop.
+        public var transition: PhysicalSpring
+        /// The page following the finger during an interactive pop; a zero
+        /// response moves the page with the finger directly.
+        public var tracking: PhysicalSpring
+        /// Settle/cancel after the finger lifts; keeps the page velocity.
+        public var release: PhysicalSpring
+        /// Share of the top page's travel applied to the page underneath.
+        public var parallax: CGFloat
+        /// Black dimming applied to the page underneath at full coverage.
+        public var dimming: CGFloat
+        /// Released without a throw, a pop completes past this progress.
+        public var completionProgress: CGFloat
+        /// A throw faster than this (pt/s) completes regardless of progress.
+        public var completionVelocity: CGFloat
+
+        public init(
+            transition: PhysicalSpring,
+            tracking: PhysicalSpring,
+            release: PhysicalSpring,
+            parallax: CGFloat,
+            dimming: CGFloat,
+            completionProgress: CGFloat,
+            completionVelocity: CGFloat
+        ) {
+            self.transition = transition
+            self.tracking = tracking
+            self.release = release
+            self.parallax = parallax
+            self.dimming = dimming
+            self.completionProgress = completionProgress
+            self.completionVelocity = completionVelocity
+        }
+    }
+
+    /// Push/pop follow `UINavigationController` on iOS 27 (measured frame
+    /// by frame: a critically damped spring, response ≈ 0.286 s) but run
+    /// ~16% faster by request: response 0.24 s, visually done by ~0.31 s.
+    /// The back swipe follows the Telegram reference instead of UIKit's
+    /// smoothed tracking: the page is glued to the finger (`tracking`
+    /// response 0 = no follower spring) and settles in ~0.25 s without a
+    /// bounce, carrying the gesture velocity. UIKit iOS 27 for comparison:
+    /// tracking ζ 0.8 / 0.155 s, release ζ 0.85 / 0.30 s with 1–2 pt overshoot.
+    public static let navigationStack = StackTransition(
+        transition: PhysicalSpring(response: 0.24, dampingRatio: 1.0),
+        tracking: PhysicalSpring(response: 0.0, dampingRatio: 1.0),
+        release: PhysicalSpring(response: 0.17, dampingRatio: 1.0),
+        parallax: 0.3,
+        dimming: 0.1,
+        completionProgress: 0.5,
+        completionVelocity: 500.0
     )
 
     /// Navbar glass geometry and glyph handoff now use the full navigation
@@ -270,9 +361,13 @@ public enum AetherMotion {
     )
 
     /// Native navbar controls expand by roughly 10–15% in the reference.
+    /// Springs match Telegram's/iOS 26 glass touch effect (`duration` is the
+    /// e⁻⁴ envelope, ω = 4 / (ζ·duration)): lift-on m 1.36 / k 568 / c 39.7
+    /// (ω ≈ 20.4, ζ ≈ 0.71) and a jelly release m 2 / k 460 / c 21.8
+    /// (ω ≈ 15.2, ζ ≈ 0.36) that visibly overshoots its rest shape.
     public static let navigationButtonPress = Press(
-        press: Spring(duration: 0.38, dampingRatio: 0.84),
-        release: Spring(duration: 0.52, dampingRatio: 0.88),
+        press: Spring(duration: 0.28, dampingRatio: 0.71),
+        release: Spring(duration: 0.73, dampingRatio: 0.36),
         pressedSizeIncrease: 6.0,
         maximumTranslation: 18.0
     )

@@ -2156,11 +2156,12 @@ open class AetherTabBarController: AetherViewController {
         direction: NavigationTransitionDirection,
         isInteractive: Bool
     ) -> TabBarVisibilityContentTiming {
-        // Keep the tab-bar blur/fade on the same fixed clock as navbar chrome.
-        // Deriving both duration and push phase from AetherMotion keeps their
-        // endpoints aligned when the shared production profile changes.
-        let duration = max(0.01, AetherMotion.navigationChrome.contentAppearanceDuration)
-        let pushDelay = max(0.0, AetherMotion.navigation.duration - duration)
+        // The compact tab-bar content follows the measured button handoff
+        // clock. Its 60 ms push delay lets the outgoing chrome start before
+        // the tab-bar glyphs cross-fade, while the navigation bar keeps the
+        // full-screen 340 ms geometry clock.
+        let duration = max(0.01, AetherMotion.navigationChrome.buttonDematerializationDuration)
+        let pushDelay = max(0.0, AetherMotion.navigationChrome.buttonAppearanceDelay)
         return TabBarVisibilityContentTiming(
             duration: duration,
             delay: !isInteractive && direction == .push ? pushDelay : 0.0

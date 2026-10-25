@@ -11,7 +11,7 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
             let fraction = CGFloat(index) / 1000
             let offset = ContextMenuSingleSourceReturn.sourceOffset(fraction: fraction, height: 44, anchor: anchor)
             XCTAssertLessThanOrEqual(offset, 0)
-            XCTAssertGreaterThanOrEqual(offset, -7.040001)
+            XCTAssertGreaterThanOrEqual(offset, -1.760001)
             if fraction <= 0.14 { XCTAssertEqual(offset, 0) }
             if fraction <= 0.5 {
                 XCTAssertLessThanOrEqual(offset, previous + 0.000001)
@@ -20,11 +20,13 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
             }
             let mirrored = ContextMenuSingleSourceReturn.sourceOffset(fraction: fraction, height: 44,
                 anchor: .init(unitPoint: CGPoint(x: 1, y: 1)))
-            XCTAssertEqual(mirrored, -offset, accuracy: 0.000001)
+            // Bottom-anchored menus land on their trigger from above with half
+            // the (already barely visible) recoil.
+            XCTAssertEqual(mirrored, -offset * 0.5, accuracy: 0.000001)
             previous = offset
         }
         XCTAssertEqual(ContextMenuSingleSourceReturn.sourceOffset(fraction: 0.5, height: 44, anchor: anchor),
-            -7.04, accuracy: 0.000001)
+            -1.76, accuracy: 0.000001)
         XCTAssertEqual(previous, 0)
     }
 
@@ -48,7 +50,9 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
             XCTAssertEqual(acceleration(time), 0, accuracy: 2)
         }
         XCTAssertEqual(velocity(duration * 0.5), 0, accuracy: 0.05)
-        XCTAssertGreaterThan(acceleration(duration * 0.5), 1000,
+        // The recoil is now 1/4 of its former height, so its restoring
+        // acceleration scales by the same factor.
+        XCTAssertGreaterThan(acceleration(duration * 0.5), 250,
             "A spring turn needs restoring acceleration; joining two eased halves would pause at the peak")
     }
 
@@ -76,7 +80,8 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
                     let marker = fixture.marker.convert(fixture.marker.bounds, to: host)
                     assertRect(marker, equals: originalMarker.offsetBy(dx: 0, dy: source.transform.ty))
                     if frame == 43 {
-                        XCTAssertGreaterThan(source.transform.ty * (bottom ? 1 : -1), 5,
+                        // A bottom anchor keeps a quarter-strength recoil.
+                        XCTAssertGreaterThan(source.transform.ty * (bottom ? 1 : -1), bottom ? 0.6 : 1.2,
                             "The single source must visibly recoil, including a caption and a bottom anchor")
                         XCTAssertEqual(completions, 0)
                     }
@@ -229,6 +234,44 @@ final class ContextMenuSingleSourceReturnTests: XCTestCase {
         XCTAssertEqual(actual.minY, expected.minY, accuracy: 0.000001, file: file, line: line)
         XCTAssertEqual(actual.width, expected.width, accuracy: 0.000001, file: file, line: line)
         XCTAssertEqual(actual.height, expected.height, accuracy: 0.000001, file: file, line: line)
+    }
+
+    func testBarePlainSourceCondensesAndEvaporatesWithoutARestingCapsule() {
+        let source = CGRect(x: 340, y: 500, width: 40, height: 40)
+        let target = CGRect(x: 125, y: 154, width: 255, height: 386)
+        let host = ContextMenuGlassmorphicTransitionView(sourceFrameInOverlay: source,
+            targetMenuFrameInOverlay: target, finalCornerRadius: 27, sourceCornerRadius: 20,
+            sourceMode: .leasedGlassSource, sourceHasGlassSurface: false, isDark: true,
+            appearanceStyle: .liquidGlassV1)
+        host.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        host.layoutIfNeeded()
+        defer { host.tearDownGlassEffects() }
+
+        host.setProgress(0, direction: .opening)
+        XCTAssertEqual(host.glassPresenceForTesting, 0, accuracy: 0.001)
+        XCTAssertTrue(host.finalMenuGlassSurfaceView.isHidden)
+        host.setProgress(0.06, direction: .opening)
+        XCTAssertLessThan(host.sourceProxyContainer.alpha, 0.01, "The bare glyph leaves as soon as the lens starts")
+        host.setProgress(1, direction: .opening)
+        XCTAssertEqual(host.glassPresenceForTesting, 1, accuracy: 0.001)
+
+        host.animateCollapse(duration: 0.44, damping: 0.9)
+        host.advanceAnimation(to: 1)
+        for frame in 1...101 {
+            host.advanceAnimation(to: 1 + 0.44 * Double(frame) / 100)
+        }
+        XCTAssertEqual(host.glassPresenceForTesting, 0, accuracy: 0.001)
+        XCTAssertTrue(host.finalMenuGlassSurfaceView.isHidden, "No source-sized capsule may remain at rest")
+        XCTAssertEqual(host.sourceProxyContainer.alpha, 1, accuracy: 0.001)
+    }
+
+    func testGlassSourceKeepsAnOpaqueGlassField() {
+        let fixture = makeHost(width: 44)
+        defer { fixture.host.tearDownGlassEffects() }
+        for progress: CGFloat in [0, 0.05, 0.5, 1] {
+            fixture.host.setProgress(progress, direction: .opening)
+            XCTAssertEqual(fixture.host.glassPresenceForTesting, 1)
+        }
     }
 
     private func makeHost(width: CGFloat, bottom: Bool = false,

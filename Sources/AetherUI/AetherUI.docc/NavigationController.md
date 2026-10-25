@@ -296,7 +296,7 @@ nav.requestLayout(transition: .animated(duration: 0.3, curve: .easeInOut))
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationBar>
 - <doc:AetherWindow>
 - <doc:TabBar>

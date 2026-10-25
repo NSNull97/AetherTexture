@@ -7,7 +7,7 @@
 Данная статья проводит читателя через минимальный полнофункциональный скелет
 приложения на AetherUI: установка пакета, настройка `SceneDelegate`,
 корневой tab bar, два экрана, push к деталям и обратно. По её прочтении
-рекомендуется ознакомиться с <doc:Appearance>, <doc:ViewController>,
+рекомендуется ознакомиться с <doc:Appearance>, <doc:AetherViewController>,
 <doc:NavigationController> и <doc:TabBar> для углублённого изучения.
 
 > Tip: Для интерактивного ознакомления откройте Xcode-проект `Example/Example.xcodeproj`
@@ -20,7 +20,7 @@
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/nicko170/AetherUI.git", from: "1.0.0")
+    .package(url: "https://github.com/NSNull97/AetherTexture.git", branch: "main")
 ]
 
 // targets:
@@ -32,7 +32,10 @@ dependencies: [
 
 ### Через Xcode
 
-`File → Add Package Dependencies… → URL: https://github.com/nicko170/AetherUI.git`
+`File → Add Package Dependencies… → URL: https://github.com/NSNull97/AetherTexture.git`
+
+До публикации первого version tag используйте ветку `main`. После релиза
+замените зависимость на `from: "<version>"`.
 
 ### Импорт
 
@@ -221,7 +224,7 @@ final class DetailController: AetherViewController {
 ```swift
 func makeRootTabBarController() -> AetherTabBarController {
 
-    func makeTab(_ root: ViewController, item: UITabBarItem) -> AetherNavigationController {
+    func makeTab(_ root: AetherViewController, item: UITabBarItem) -> AetherNavigationController {
         let nav = AetherNavigationController(mode: .single)
         nav.setViewControllers([root], animated: false)
         nav.tabBarItem = item
@@ -310,7 +313,7 @@ SceneDelegate
 
 ## Дальнейшее изучение
 
-- <doc:ViewController> — жизненный цикл, layout, accessory-зоны, focus
+- <doc:AetherViewController> — жизненный цикл, layout, accessory-зоны, focus
 - <doc:NavigationController> — push/pop, замена стека, edge-swipe, минимизация
 - <doc:NavigationBar> — theme, title, accessory-контент, search
 - <doc:TabBar> — theme pill'а, badges, accessory над tab bar'ом

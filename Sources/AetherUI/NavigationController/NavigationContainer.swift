@@ -14,6 +14,14 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     private(set) var controllers: [AetherViewController] = []
     private var controllerViews: [UIView] = []
     private var transitionCoordinator: NavigationTransitionCoordinator?
+    /// A controller-rendered transition replacing `transitionCoordinator`.
+    private var customTransition: AetherCustomNavigationTransition?
+    /// Set once an interactive custom pop has been released, so late pan
+    /// samples cannot drive a transition that is already resolving.
+    private var isResolvingCustomTransition: Bool = false
+    /// Only a custom pop started by the pan gesture is driven by it; a
+    /// running non-interactive custom push or pop ignores pan updates.
+    private var isCustomTransitionInteractive: Bool = false
     private var transitionControllers: [AetherViewController] = []
 
     private struct PendingControllersUpdate {
@@ -38,11 +46,17 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     private(set) var isInstallingTransition: Bool = false
 
     private var isTransitionActive: Bool {
-        return transitionCoordinator != nil || isInstallingTransition || isDeferringPendingControllersUpdate
+        return transitionCoordinator != nil || customTransition != nil || isInstallingTransition || isDeferringPendingControllersUpdate
     }
 
     var isTransitioning: Bool {
         isTransitionActive
+    }
+
+    /// A controller-rendered transition owns the motion of its chrome too;
+    /// navigation bar observers skip their own title morphs for it.
+    var isCustomTransitionActive: Bool {
+        customTransition != nil
     }
 
     public var topController: AetherViewController? {
@@ -284,6 +298,17 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     private func performTransition(from: AetherViewController, to: AetherViewController, push: Bool, layout: ContainerViewLayout) {
         let frame = CGRect(origin: .zero, size: layout.size)
 
+        let owner = push ? to : from
+        if let custom = owner.customNavigationTransition(
+            for: push ? .push : .pop,
+            from: from,
+            to: to,
+            isInteractive: false
+        ) {
+            performCustomTransition(custom, from: from, to: to, push: push, layout: layout)
+            return
+        }
+
         // Mark the transition as "being installed" BEFORE any call that
         // could reach the view hierarchy for `to` (including
         // `to.containerLayoutUpdated` which lays out the bar, and
@@ -359,7 +384,11 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
     }
 
     private func finishTransition(completed: Bool, removedController: AetherViewController? = nil) {
+        let endedCustomTransition = customTransition
         transitionCoordinator = nil
+        customTransition = nil
+        isResolvingCustomTransition = false
+        isCustomTransitionInteractive = false
         transitionControllers.removeAll()
         controllerViews = controllers.last.map { [$0.view!] } ?? []
         navigationBarTransitionEnded?(completed)
@@ -367,8 +396,148 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
             controllerRemoved?(removedController)
         }
         bottomBarTransitionEnded?(completed)
+        endedCustomTransition?.didEnd(completed: completed)
         transitionDidSettle?()
         applyPendingControllersUpdateIfPossible(deferred: true)
+    }
+
+    // MARK: - Custom Transitions
+
+    /// Installs both views at their settled frames and hands the motion to a
+    /// controller-provided transition. Navigation bar and bottom bar
+    /// observers receive the same lifecycle as the default slide.
+    private func performCustomTransition(
+        _ custom: AetherCustomNavigationTransition,
+        from: AetherViewController,
+        to: AetherViewController,
+        push: Bool,
+        layout: ContainerViewLayout
+    ) {
+        let frame = CGRect(origin: .zero, size: layout.size)
+
+        isInstallingTransition = true
+        customTransition = custom
+        isCustomTransitionInteractive = false
+        transitionControllers = [from, to]
+        controllerViews = [from.view, to.view]
+        to.view.frame = frame
+        bottomBarTransitionBegan?(push ? .push : .pop, from, to, layout, false)
+        to.containerLayoutUpdated(resolvedLayout(for: to, baseLayout: layout), transition: .immediate)
+
+        navigationBarTransitionBegan?(push ? .push : .pop, from, to, layout, false)
+        if push {
+            addSubview(to.view)
+        } else {
+            insertSubview(to.view, belowSubview: from.view)
+        }
+        to.view.frame = frame
+        to.containerLayoutUpdated(resolvedLayout(for: to, baseLayout: layout), transition: .immediate)
+
+        isInstallingTransition = false
+
+        custom.prepare(context: AetherNavigationTransitionContext(
+            operation: push ? .push : .pop,
+            containerView: self,
+            fromController: from,
+            toController: to,
+            isInteractive: false
+        ))
+        navigationBarTransitionProgress?(0.0, .immediate)
+        bottomBarTransitionProgress?(0.0, .immediate)
+
+        custom.animate { [weak self] in
+            guard let self, self.customTransition === custom else { return }
+            self.navigationBarTransitionProgress?(1.0, .immediate)
+            self.bottomBarTransitionProgress?(1.0, .immediate)
+            from.view.removeFromSuperview()
+            self.finishTransition(completed: true, removedController: push ? nil : from)
+        }
+    }
+
+    /// Starts an interactive pop rendered by the popped controller. Returns
+    /// `false` when the controller keeps the default slide.
+    private func beginInteractiveCustomPop(
+        currentController: AetherViewController,
+        previousController: AetherViewController,
+        layout: ContainerViewLayout,
+        translation: CGPoint,
+        location: CGPoint
+    ) -> Bool {
+        guard let custom = currentController.customNavigationTransition(
+            for: .pop,
+            from: currentController,
+            to: previousController,
+            isInteractive: true
+        ) else {
+            return false
+        }
+
+        let frame = CGRect(origin: .zero, size: layout.size)
+        isInstallingTransition = true
+        customTransition = custom
+        isCustomTransitionInteractive = true
+        transitionControllers = [currentController, previousController]
+        controllerViews = [currentController.view, previousController.view]
+        previousController.view.frame = frame
+        previousController.containerLayoutUpdated(resolvedLayout(for: previousController, baseLayout: layout), transition: .immediate)
+        navigationBarTransitionBegan?(.pop, currentController, previousController, layout, true)
+        bottomBarTransitionBegan?(.pop, currentController, previousController, layout, true)
+        insertSubview(previousController.view, belowSubview: currentController.view)
+        previousController.view.frame = frame
+        previousController.containerLayoutUpdated(resolvedLayout(for: previousController, baseLayout: layout), transition: .immediate)
+
+        isResolvingCustomTransition = false
+        isInstallingTransition = false
+
+        custom.prepare(context: AetherNavigationTransitionContext(
+            operation: .pop,
+            containerView: self,
+            fromController: currentController,
+            toController: previousController,
+            isInteractive: true
+        ))
+        custom.updateInteractive(translation: translation, location: location)
+        currentController.view.endEditing(true)
+        return true
+    }
+
+    private func resolveInteractiveCustomPop(
+        _ custom: AetherCustomNavigationTransition,
+        recognizer: UIPanGestureRecognizer
+    ) {
+        guard !isResolvingCustomTransition else { return }
+        isResolvingCustomTransition = true
+
+        let translation = recognizer.translation(in: self)
+        let velocity = recognizer.velocity(in: self)
+        let shouldComplete = recognizer.state == .ended
+            && custom.shouldCompleteInteractive(translation: translation, velocity: velocity)
+        let chromeTransition: ContainedViewLayoutTransition = .animated(
+            duration: AetherMotion.navigation.duration,
+            curve: .easeInOut
+        )
+
+        if shouldComplete {
+            let committedController = controllers.last!
+            custom.finishInteractive(velocity: velocity) { [weak self] in
+                guard let self, self.customTransition === custom else { return }
+                let removed = self.controllers.removeLast()
+                removed.view.removeFromSuperview()
+                self.finishTransition(completed: true, removedController: removed)
+            }
+            navigationBarTransitionResolutionBegan?(true, chromeTransition)
+            bottomBarTransitionResolutionBegan?(true, chromeTransition)
+            controllerRemovalCommitted?(committedController)
+        } else {
+            custom.cancelInteractive(velocity: velocity) { [weak self] in
+                guard let self, self.customTransition === custom else { return }
+                let previousController = self.controllers[self.controllers.count - 2]
+                previousController.view.removeFromSuperview()
+                self.finishTransition(completed: false)
+            }
+            navigationBarTransitionResolutionBegan?(false, chromeTransition)
+            bottomBarTransitionResolutionBegan?(false, chromeTransition)
+        }
     }
 
     // MARK: - Interactive Gesture
@@ -421,12 +590,16 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
             break
 
         case .changed:
-            if let coordinator = transitionCoordinator, !coordinator.animatingCompletion {
+            if let custom = customTransition {
+                if isCustomTransitionInteractive, !isResolvingCustomTransition {
+                    custom.updateInteractive(translation: translation, location: recognizer.location(in: self))
+                }
+            } else if let coordinator = transitionCoordinator, !coordinator.animatingCompletion {
                 // Coordinator already exists — user has started a pop and is
-                // now in the middle of it. Apply the (possibly rubberbanded)
-                // progress freely, including negative values for backward
-                // overscroll.
-                coordinator.updateProgress(progress, transition: .immediate, completion: {})
+                // now in the middle of it. The page follows the (possibly
+                // rubberbanded) finger progress through the tracking spring,
+                // including negative values for backward overscroll.
+                coordinator.trackInteractiveProgress(progress)
             } else if transitionCoordinator == nil, translation.x > 0, let layout = validLayout {
                 // First *rightward* movement — spawn the pop coordinator now
                 // and immediately apply the current progress. Anything before
@@ -436,6 +609,16 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                 let previousController = controllers[controllers.count - 2]
                 guard currentController.attemptNavigation({}) else {
                     (recognizer as? InteractiveTransitionGestureRecognizer)?.cancel()
+                    return
+                }
+
+                if beginInteractiveCustomPop(
+                    currentController: currentController,
+                    previousController: previousController,
+                    layout: layout,
+                    translation: translation,
+                    location: recognizer.location(in: self)
+                ) {
                     return
                 }
 
@@ -466,7 +649,7 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
                 )
                 self.transitionCoordinator = coordinator
                 isInstallingTransition = false
-                coordinator.updateProgress(progress, transition: .immediate, completion: {})
+                coordinator.trackInteractiveProgress(progress)
 
                 // Dismiss the keyboard along with the outgoing view. Done *after*
                 // the coordinator is installed so the keyboard's synchronous
@@ -478,11 +661,14 @@ public final class NavigationContainer: UIView, UIGestureRecognizerDelegate {
             // else: pre-coordinator state, translation still <= 0 — no-op.
 
         case .ended, .cancelled:
-            guard let coordinator = transitionCoordinator, !coordinator.animatingCompletion else {
+            if let custom = customTransition {
+                if isCustomTransitionInteractive {
+                    resolveInteractiveCustomPop(custom, recognizer: recognizer)
+                }
                 break
             }
-            if recognizer.state == .ended {
-                coordinator.updateProgressForRelease(progress, velocity: velocity.x)
+            guard let coordinator = transitionCoordinator, !coordinator.animatingCompletion else {
+                break
             }
             let shouldComplete = recognizer.state == .ended && coordinator.shouldCompleteInteractivePop(progress: progress, velocity: velocity.x)
             if shouldComplete {

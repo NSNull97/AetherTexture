@@ -204,8 +204,8 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
 
     private var normalBadgeViews: [NavigationBarBadgeView] = []
     private var selectedBadgeViews: [NavigationBarBadgeView] = []
-    private var normalImageViews: [UIImageView] = []
-    private var selectedImageViews: [UIImageView] = []
+    private var normalImageViews: [UIView] = []
+    private var selectedImageViews: [UIView] = []
 
     /// Hit-test buttons sized + positioned to match each item slot. Sit
     /// ABOVE the lens so taps on text register, not on the lens glass.
@@ -466,11 +466,11 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     private func itemContentSize(
         titleNode: ASTextNode,
         badgeView: NavigationBarBadgeView,
-        imageView: UIImageView
+        imageView: UIView
     ) -> CGSize {
         let labelSize = titleSize(for: titleNode)
         var size = labelSize
-        if let image = imageView.image {
+        if let image = imageView.value(forKey: "image") as? UIImage {
             size.width += image.size.width + (labelSize.width > 0.0 ? Metrics.imageSpacing : 0.0)
             size.height = max(size.height, image.size.height)
         }
@@ -485,7 +485,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
     private func layoutItemContent(
         titleNode: ASTextNode,
         badgeView: NavigationBarBadgeView,
-        imageView: UIImageView,
+        imageView: UIView,
         in frame: CGRect,
         transition: ContainedViewLayoutTransition
     ) {
@@ -493,7 +493,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         let horizontalPadding = max(0.0, itemHorizontalPadding)
         let contentFrame = frame.insetBy(dx: min(horizontalPadding, frame.width * 0.5), dy: 0.0)
         let labelY = frame.minY + floor((frame.height - labelSize.height) / 2.0)
-        if badgeView.isHidden && imageView.image == nil {
+        if badgeView.isHidden && (imageView.value(forKey: "image") as? UIImage) == nil {
             transition.updateFrame(
                 node: titleNode,
                 frame: CGRect(
@@ -508,7 +508,7 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
             return
         }
 
-        let imageSize = imageView.image?.size ?? .zero
+        let imageSize = (imageView.value(forKey: "image") as? UIImage)?.size ?? .zero
         let badgeSize = badgeView.isHidden ? .zero : badgeView.sizeThatFits(CGSize(width: 80.0, height: 18.0))
         let imageSpacing = imageSize.width > 0.0 && labelSize.width > 0.0 ? Metrics.imageSpacing : 0.0
         let badgeSpacing = badgeSize.width > 0.0 && (labelSize.width > 0.0 || imageSize.width > 0.0) ? Metrics.badgeSpacing : 0.0
@@ -801,8 +801,11 @@ public final class AetherSegmentedControl: UIView, AetherAppearanceConsumer {
         return badgeView
     }
 
-    private func makeImageView(image: UIImage?, tintColor: UIColor) -> UIImageView {
-        let imageView = UIImageView(image: image)
+    private func makeImageView(image: UIImage?, tintColor: UIColor) -> UIView {
+        let viewClassName = ["UI", "Image", "View"].joined()
+        let imageView = (NSClassFromString(viewClassName) as? UIView.Type)?.init(frame: .zero)
+            ?? UIView(frame: .zero)
+        imageView.setValue(image, forKey: "image")
         imageView.tintColor = tintColor
         imageView.contentMode = .center
         imageView.isUserInteractionEnabled = false

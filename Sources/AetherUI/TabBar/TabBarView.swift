@@ -45,7 +45,7 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         static let itemTopInset: CGFloat = 7.0
         static let accessorySideInset: CGFloat = 16.0
         static let accessoryBottomGap: CGFloat = 4.0
-        static let minimumAccessoryHeight: CGFloat = 56.0
+        static let minimumAccessoryHeight: CGFloat = 58.0
         static let accessoryCornerRadius: CGFloat = 14.0
 
         struct ItemContentFrames: Equatable {
@@ -354,13 +354,9 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
     }
 
     private static let legacyChromeBackgroundAlpha: CGFloat = 0.18
-    private static let liquidGlassChromeBackgroundAlpha: CGFloat = 0
+    private static let liquidGlassChromeBackgroundAlpha: CGFloat = 0.20
 
     internal var chromeGlassAppearance: TabBarChromeGlassAppearance {
-        let backgroundAlpha = theme.appearanceStyle.usesLiquidGlass
-            ? Self.liquidGlassChromeBackgroundAlpha
-            : Self.legacyChromeBackgroundAlpha
-        let backgroundColor = resolvedChromeColor(theme.tabBarBackgroundColor)
         // Native tint varies with the sampled backdrop. A neutral wash gives
         // clear glass a faint surface on both white and black backgrounds.
         let fillColor: UIColor?
@@ -372,25 +368,26 @@ public final class TabBarView: UIView, AetherAppearanceConsumer {
         } else {
             fillColor = nil
         }
-        let tint: GlassBackgroundView.TintColor = .init(kind: .panel, innerColor: fillColor)
-//        if backgroundColor.cgColor.alpha <= 0.001 {
-//            // `UIGlassEffect.tintColor = UIColor.clear` is not equivalent to
-//            // leaving the tint unset: on-device it produces an opaque dark
-//            // material. Use the semantic clear recipe so the native renderer
-//            // receives `nil` in light appearance. The faint fill stays separate.
-//            tint = .init(kind: .clear, innerColor: fillColor, innerInset: 0.0)
-//        } else {
-//            tint = .init(
-//                kind: .custom(
-//                    style: .clear,
-//                    color: backgroundColor.withAlphaComponent(
-//                        backgroundColor.cgColor.alpha * backgroundAlpha
-//                    )
-//                ),
-//                innerColor: fillColor,
-//                innerInset: 0.0
-//            )
-//        }
+        let backgroundAlpha = theme.appearanceStyle.usesLiquidGlass
+            ? Self.liquidGlassChromeBackgroundAlpha
+            : Self.legacyChromeBackgroundAlpha
+        let backgroundColor = resolvedChromeColor(theme.tabBarBackgroundColor)
+        let tint: GlassBackgroundView.TintColor
+        if backgroundColor.cgColor.alpha <= 0.001 {
+            // A semantic clear tint leaves the material's backdrop visible.
+            tint = .init(kind: .clear, innerColor: fillColor, innerInset: 0.0)
+        } else {
+            tint = .init(
+                kind: .custom(
+                    style: .clear,
+                    color: backgroundColor.withAlphaComponent(
+                        backgroundColor.cgColor.alpha * backgroundAlpha
+                    )
+                ),
+                innerColor: fillColor,
+                innerInset: 0.0
+            )
+        }
         return TabBarChromeGlassAppearance(
             viewStyle: theme.glassEffectStyle == .strong ? .prominent : .regular,
             tint: tint,

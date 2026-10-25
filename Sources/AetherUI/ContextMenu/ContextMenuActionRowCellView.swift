@@ -40,7 +40,8 @@ final class ContextMenuActionRowCellView: UIView {
 
     // MARK: - Init
 
-    init(item: ContextMenuActionItem, actionTextColor: UIColor? = nil) {
+    init(item: ContextMenuActionItem, actionTextColor: UIColor? = nil,
+         userInterfaceStyle: UIUserInterfaceStyle = .unspecified) {
         self.item = item
         self.actionTextColor = actionTextColor
         super.init(frame: .zero)
@@ -51,9 +52,9 @@ final class ContextMenuActionRowCellView: UIView {
         accessibilityLabel = item.title
         if item.isSelected { accessibilityTraits.insert(.selected) }
 
-        let tint: UIColor = item.textColor == .destructive
+        let tint: UIColor = (item.textColor == .destructive
             ? .systemRed
-            : (actionTextColor ?? .label)
+            : (actionTextColor ?? .label)).contextMenuResolved(for: userInterfaceStyle)
 
         iconNode.contentMode = .scaleAspectFit
         iconNode.tintColor = tint

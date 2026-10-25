@@ -90,6 +90,7 @@ final class ContextMenuActionItemView: UIView {
     private(set) var item: ContextMenuActionItem
     private let metrics: Metrics
     private let actionTextColor: UIColor?
+    private let userInterfaceStyle: UIUserInterfaceStyle
     var showsRowSeparator = false {
         didSet {
             guard showsRowSeparator != oldValue else { return }
@@ -109,11 +110,13 @@ final class ContextMenuActionItemView: UIView {
     init(
         item: ContextMenuActionItem,
         appearanceStyle: AetherAppearanceStyle = AetherAppearance.runtimeCurrent.style,
-        actionTextColor: UIColor? = nil
+        actionTextColor: UIColor? = nil,
+        userInterfaceStyle: UIUserInterfaceStyle = .unspecified
     ) {
         self.item = item
         self.metrics = Metrics.resolve(for: appearanceStyle)
         self.actionTextColor = actionTextColor
+        self.userInterfaceStyle = userInterfaceStyle
         super.init(frame: .zero)
 
         isUserInteractionEnabled = false
@@ -160,9 +163,9 @@ final class ContextMenuActionItemView: UIView {
         let subtitleTint: UIColor
         switch item.textColor {
         case .primary:
-            subtitleTint = actionTextColor ?? .secondaryLabel
+            subtitleTint = (actionTextColor ?? .secondaryLabel).contextMenuResolved(for: userInterfaceStyle)
         case .destructive:
-            subtitleTint = UIColor.systemRed.withAlphaComponent(0.7)
+            subtitleTint = UIColor.systemRed.contextMenuResolved(for: userInterfaceStyle).withAlphaComponent(0.7)
         }
         titleNode.attributedText = NSAttributedString(
             string: item.title,
@@ -212,8 +215,8 @@ final class ContextMenuActionItemView: UIView {
 
     private func primaryTint(for item: ContextMenuActionItem) -> UIColor {
         switch item.textColor {
-        case .primary: return actionTextColor ?? .label
-        case .destructive: return .systemRed
+        case .primary: return (actionTextColor ?? .label).contextMenuResolved(for: userInterfaceStyle)
+        case .destructive: return UIColor.systemRed.contextMenuResolved(for: userInterfaceStyle)
         }
     }
 

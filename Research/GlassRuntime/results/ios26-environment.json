@@ -2,7 +2,7 @@
   "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.0.sdk",
   "xcode": "Xcode 27.0\nBuild version 27A266a",
   "gitHead": "222e25363464cb400f31fe8eff6ff40463aa4a31",
-  "device": "D8CA274B-C4EE-4B5A-B73B-115BED77B1D9",
+  "device": "<uuid>",
   "appearance": "light",
   "sourceSHA256": "cfa1df1ec90a8c55e8a122ef5f08bc6b7868ecb97adc0f61b67908660248ba7a",
   "probeSHA256": "99ea3a13a9d21426a9d3240f3bbcc558e24d2936aeca99eee1aab0ee4973b089",

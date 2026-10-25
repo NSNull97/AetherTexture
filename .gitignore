@@ -15,6 +15,13 @@ DerivedData/
 build/
 Example/build/
 
+# Local research captures and build logs
+Research/**/preview/build/
+Research/**/session.log
+Research/**/build*.log
+Research/**/release-*.log
+Research/**/tests-*.log
+
 # DocC local builds
 *.doccarchive
 docs/

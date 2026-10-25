@@ -421,25 +421,25 @@ private final class AetherZoomAnimator: NSObject, UIViewControllerAnimatedTransi
         in container: UIView,
         frame: CGRect,
         cornerRadius: CGFloat
-    ) -> UIImageView? {
+    ) -> UIView? {
         guard let sourceSnapshotImage else { return nil }
-        let imageView = UIImageView(image: sourceSnapshotImage)
-        imageView.frame = frame
-        imageView.layer.cornerRadius = min(
+        let ghostView = AetherZoomSourceGhostView(image: sourceSnapshotImage)
+        ghostView.frame = frame
+        ghostView.layer.cornerRadius = min(
             cornerRadius,
             min(frame.width, frame.height) / 2
         )
-        imageView.clipsToBounds = true
-        imageView.alpha = 0
-        container.addSubview(imageView)
+        ghostView.clipsToBounds = true
+        ghostView.alpha = 0
+        container.addSubview(ghostView)
         UIView.animate(
             withDuration: Self.dismissalDuration * 0.45,
             delay: Self.dismissalDuration * 0.55,
             options: [.beginFromCurrentState, .curveEaseOut]
         ) {
-            imageView.alpha = 1
+            ghostView.alpha = 1
         }
-        return imageView
+        return ghostView
     }
 
     private struct ZoomMask {
@@ -551,6 +551,28 @@ private final class AetherZoomAnimator: NSObject, UIViewControllerAnimatedTransi
         let layer = view.layer.presentation() ?? view.layer
         let maximum = min(view.bounds.width, view.bounds.height) / 2
         return layer.cornerRadius > 0 ? min(layer.cornerRadius, maximum) : maximum
+    }
+}
+
+private final class AetherZoomSourceGhostView: UIView {
+    private let image: UIImage
+
+    init(image: UIImage) {
+        self.image = image
+        super.init(frame: .zero)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        contentMode = .scaleAspectFill
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ rect: CGRect) {
+        image.draw(in: rect)
     }
 }
 

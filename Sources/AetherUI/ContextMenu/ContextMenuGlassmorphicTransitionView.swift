@@ -18,33 +18,55 @@ func contextMenuLiquidAnimationSample(fraction: CGFloat, reduceMotion: Bool,
         // Contract the broad body first, leaving time for the nose and belly
         // to merge. The previous clock spent its first 90 ms almost still
         // and squeezed most of the transfer into the next 100 ms.
-        : contextMenuBloomSmoothSample(times: [0, 0.18, 0.38, 0.72, 1],
+        // Knots keep the measured «Изменить» contraction (first ~165 ms) on
+        // the longer 500 ms clock; the extra time is spent in the settle.
+        : contextMenuBloomSmoothSample(times: [0, 0.16, 0.33, 0.64, 1],
                                        values: [0, 0.24, 0.60, 0.90, 1], at: t)
     if direction == .opening {
         // One lobe has finite restoring acceleration at its peak. Joining
         // two smoothersteps there held the overscale almost still for 40 ms,
         // then accelerated into what looked like a second animation.
-        return (progress, 0.022 * contextMenuBloomPulse(t, start: 0.26, peak: 0.61, end: 1, power: 4))
+        // iOS 27 lets the platter visibly overshoot its footprint once, on
+        // the momentum it arrives with. The peak is derived from the spring
+        // itself (the moment the shape reaches its final size), so retuning
+        // the stiffness or duration cannot leave it trailing the platter.
+        let peak = contextMenuOpeningOverscalePeak
+        return (progress, 0.034 * contextMenuBloomPulse(t, start: peak - 0.22, peak: peak, end: 0.96, power: 4))
     }
     // On closing the source shoulder reaches full width much earlier than
     // the belly retracts. Its overscale must arrive with that shoulder, not
     // with the end of the menu's clock. Opening settles with the platter.
-    let envelope = contextMenuBloomSmoothRange(t, start: 0.18, end: 0.52)
-        * (1 - contextMenuBloomSmoothRange(t, start: 0.52, end: 1))
+    // Scaled with the closing knots (0.38 → 0.33): the shoulder now reaches
+    // full width at ~45% of the clock.
+    let envelope = contextMenuBloomSmoothRange(t, start: 0.16, end: 0.45)
+        * (1 - contextMenuBloomSmoothRange(t, start: 0.45, end: 1))
     return (progress, 0.014 * envelope)
 }
 
+private let contextMenuOpeningSpringStiffness: CGFloat = 6.4
+
+/// Clock fraction at which the opening shape reaches its final footprint
+/// (progress 0.78, the last width knot of the reference opening geometry).
+let contextMenuOpeningOverscalePeak: CGFloat = {
+    var lower: CGFloat = 0, upper: CGFloat = 1
+    for _ in 0..<40 {
+        let middle = (lower + upper) / 2
+        if contextMenuOpeningAnimationProgress(middle) < 0.78 { lower = middle } else { upper = middle }
+    }
+    return (lower + upper) / 2
+}()
+
 private func contextMenuOpeningAnimationProgress(_ t: CGFloat) -> CGFloat {
-    let times: [CGFloat] = [0, 0.25, 0.35, 0.45, 0.54, 0.61, 1]
-    let values: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.80, 1]
-    if t <= 0.54 { return contextMenuBloomSmoothSample(times: times, values: values, at: t) }
-    // Carry the incoming velocity into one decelerating quintic. The former
-    // final waypoint slowed the clock near the peak and accelerated it again
-    // afterwards, moving the corners and centre in a separate late pulse.
-    let velocity = contextMenuBloomTangent(times: times, values: values, index: 4)
-    let u = contextMenuBloomNormalize(t, start: 0.54, end: 1)
-    let departure = u - 6 * pow(u, 3) + 8 * pow(u, 4) - 3 * pow(u, 5)
-    return 0.70 + 0.30 * contextMenuBloomSmootherstep(u) + 0.46 * velocity * departure
+    // A critically damped spring, as UIKit drives its own menus: zero
+    // velocity but full acceleration on the first frame, then one long,
+    // light deceleration. Measured knots joined by quintic segments either
+    // stalled the first ~70 ms or, with a launch tangent, jerked on frame one.
+    // Scaled with the 0.72 s clock so the main transfer keeps its measured
+    // ~80 ms half→90% window; the added time is the sub-pixel settle.
+    let stiffness = contextMenuOpeningSpringStiffness
+    func response(_ x: CGFloat) -> CGFloat { 1 - (1 + x) * exp(-x) }
+    let u = max(0, min(1, t))
+    return response(stiffness * u) / response(stiffness)
 }
 
 /// A single smooth pulse, with no flat join at its maximum. Both endpoint
@@ -78,16 +100,20 @@ func contextMenuSourceMaterializationSample(
         // The old .02... .20 fade left a blank source shell before the body
         // had enough volume to cover the button, especially for touch-up
         // driven ordinary controls.
-        let fade = contextMenuBloomSmoothRange(t, start: 0.08, end: 0.26)
+        // The «Изменить» reference drops its caption within ~2 frames while
+        // the button is still ~0.9 of its width, then gathers into a drop.
+        let fade = contextMenuBloomSmoothRange(t, start: 0.0, end: 0.12)
         return .init(opacity: 1.0 - fade, blurRadius: 0.0)
     }
     let elapsed = 1.0 - t
     let heightFactor = max(0.0, min(1.0, (menuHeight - 180.0) / 220.0))
-    let revealStart = 0.23 + 0.06 * heightFactor
-    let reveal = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.54 + 0.06 * heightFactor)
+    // The call-screen reference shows the button's glyph inside the still
+    // shrinking drop from its 5th closing frame.
+    let revealStart = 0.12 + 0.05 * heightFactor
+    let reveal = contextMenuBloomSmoothRange(elapsed, start: revealStart, end: 0.38 + 0.05 * heightFactor)
     // Focus before most of the opacity returns. A broad 8 pt blur remained
     // visible as a dark clot, then snapped through the last raster levels.
-    let focus = contextMenuBloomSmoothRange(elapsed, start: 0.18, end: 0.40 + 0.04 * heightFactor)
+    let focus = contextMenuBloomSmoothRange(elapsed, start: 0.08, end: 0.30 + 0.04 * heightFactor)
     return .init(
         opacity: reveal,
         blurRadius: reduceMotion ? 0.0 : 3.0 * (1.0 - focus)
@@ -260,30 +286,44 @@ private func contextMenuReferenceOpeningGeometry(
 ) -> ContextMenuBloomGeometrySample {
     let raw = max(0, min(1, progress))
     let t = raw
-    if t == 0 || (!reduceMotion && t <= 0.10) {
+    if t == 0 {
         return .init(frame: source, cornerRadii: .uniform(sourceRadius), widthT: 0, heightT: 0, anchorTravelT: 0)
     }
     if t == 1 { return .init(frame: target, cornerRadii: .uniform(targetRadius), widthT: 1, heightT: 1, anchorTravelT: 1) }
-    let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.26)
+    // The trigger starts gathering into the drop on the first frame; the
+    // former 0...0.10 hold kept a dead, source-sized shell after the press.
+    let pinch = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.0, end: 0.18)
     // The reference pear grows on both axes while it travels. A separate
     // width-limited lens height flattened tall menus, then forced their
     // height to catch up in a few frames after the centre had already stopped.
-    let times: [CGFloat] = [0, 0.26, 0.42, 0.55, 0.70, 0.78, 1]
-    let widthT = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSmoothSample(
-        times: times, values: [0, 0, 0.50, 0.80, 0.98, 1, 1], at: t)
+    // Growth starts with the gathering drop and spreads over the spring's
+    // main phase. Holding the width until 0.26 and then gaining half of it
+    // by 0.42 made a ~25 ms jump once the clock became a spring.
+    let times: [CGFloat] = [0, 0.12, 0.30, 0.48, 0.64, 0.78, 1]
+    let growth = reduceMotion ? contextMenuBloomSmootherstep(t) : contextMenuBloomSmoothSample(
+        times: times, values: [0, 0.04, 0.32, 0.66, 0.90, 1, 1], at: t)
+    // A wide captioned button first gathers into its drop (the «Изменить»
+    // reference narrows, then grows); a round one grows straight away.
+    let wideness = contextMenuBloomSmoothRange(source.width / max(1, source.height), start: 1.15, end: 1.6)
+    let gathered = reduceMotion ? 1 : contextMenuBloomSmoothRange(t, start: 0.20, end: 0.40)
+    let widthT = growth * (1 - wideness * (1 - gathered))
     let travel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.24, end: 0.86)
     let directionX = 1 - 2 * anchor.unitPoint.x
     let directionY = 1 - 2 * anchor.unitPoint.y
     // The round trigger also gains volume as it leaves its resting frame.
     // Shrinking every source to 82% made its seed a thin 36×64 strip;
     // reference frames keep a full belly, roughly 0.8 of the seed's height.
-    let diameter = min(max(source.width * 0.82, source.height * 1.20), source.height * 1.45)
-    let eggHeight = source.height * 1.45
+    // A compact round trigger only swells (~1.1×) and stays round, as the
+    // call-screen reference does; a tall 1.45× egg read as a clumsy jump.
+    func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b-a)*t }
+    let compactness = wideness
+    let diameter = lerp(max(source.width, source.height) * 1.10,
+                        min(max(source.width * 0.82, source.height * 1.20), source.height * 1.45), compactness)
+    let eggHeight = lerp(max(source.width, source.height) * 1.10, source.height * 1.45, compactness)
     let egg = CGRect(
         x: source.midX - diameter * 0.5,
         y: source.midY - eggHeight * 0.5 + directionY * source.height * 0.34,
         width: diameter, height: eggHeight)
-    func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b-a)*t }
     let seed = CGRect(x: lerp(source.minX, egg.minX, pinch), y: lerp(source.minY, egg.minY, pinch),
                       width: lerp(source.width, egg.width, pinch), height: lerp(source.height, egg.height, pinch))
     let width = lerp(seed.width, target.width, widthT)
@@ -294,7 +334,7 @@ private func contextMenuReferenceOpeningGeometry(
     // A single centre trajectory carries the compact drop into the menu.
     // Deriving Y from an anchored growing rectangle while moving X ahead
     // made the seed slide sideways; both axes must share the arrival clock.
-    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.58)
+    let centerTravel = reduceMotion ? widthT : contextMenuBloomSmoothRange(t, start: 0.04, end: 0.58)
     // Quadratic travel bends toward the destination: the vertical component
     // leads while the compact body leaves the button, then the horizontal
     // component catches up. Translation overlaps expansion instead of
@@ -316,7 +356,7 @@ private func contextMenuReferenceOpeningGeometry(
     // source lobe or rigid rotation is needed to suggest a drop.
     // Relax the shoulder as volume spreads. Holding a tight corner until
     // after expansion left a flat ledge next to the neck in the middle frames.
-    let tension = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.10, end: 0.28)
+    let tension = reduceMotion ? 0 : contextMenuBloomSmoothRange(t, start: 0.02, end: 0.24)
         * (1 - contextMenuBloomSmoothRange(t, start: 0.34, end: 0.82))
     let side = min(frame.width, frame.height)
     func corner(x: CGFloat, y: CGFloat) -> CGFloat {
@@ -439,8 +479,11 @@ func contextMenuBloomGeometrySample(
             let widthDifference = target.width - source.width
             // Scale the undershoot to the trigger, not the menu: the same
             // motion remains valid for a 44 pt icon and a wide text button.
+            // A round trigger must not dip below its own size and bounce
+            // back: on a 76 pt call button that read as the button shaking.
+            let undershoot = contextMenuBloomSmoothRange(source.width / max(1, source.height), start: 1.3, end: 2.0)
             let shortWidthT = widthDifference > 1.0
-                ? contraction - source.width / widthDifference * sourceCompression
+                ? contraction - source.width / widthDifference * sourceCompression * undershoot
                 : contraction
             let shortHeightT = contextMenuBloomSample(
                 times: times,
@@ -800,7 +843,16 @@ struct ContextMenuGlassmorphicGeometrySample: Equatable {
 enum ContextMenuSingleSourceReturn {
     static func sourceOffset(fraction: CGFloat, height: CGFloat, anchor: ContextMenuBloomAnchor) -> CGFloat {
         let pulse = contextMenuBloomPulse(fraction, start: 0.14, peak: 0.50, end: 1, power: 3)
-        return -height * 0.16 * pulse * (1 - 2 * anchor.unitPoint.y)
+        // A top-anchored (navbar) drop retracts up into its button. A menu
+        // above its trigger lands on it from above: the call-screen reference
+        // settles in place, so the mirrored downward kick is only a quarter
+        // as strong and no longer covers the caption below the button.
+        // The iOS references settle the returning button with a barely
+        // visible lift (~1–2 pt). A 7 pt rise that drained back over 200 ms
+        // read as the source bobbing after it had already landed.
+        let direction = 1 - 2 * anchor.unitPoint.y
+        let amplitude: CGFloat = direction < 0 ? 0.02 : 0.04
+        return -height * amplitude * pulse * direction
     }
 
     static func surfaceOffset(fraction: CGFloat, source: CGRect, head: CGRect,
@@ -1407,13 +1459,16 @@ private func contextMenuClosingGlassmorphicGeometrySample(
     // The seed stretches along the flow before it is absorbed. This brief
     // anisotropy is the small elastic impulse that makes the glass feel like
     // one moving mass rather than two cross-fading rounded rectangles.
-    let majorScale: CGFloat = 1.36
-    let minorScale: CGFloat = 0.76
+    // Closing lands softly: a returning button that stretched to 1.36× and
+    // then snapped back to round (76 pt → 100 pt → 76 pt in ~5 frames) was
+    // the visible jitter at the end of the reference-less recordings.
+    let majorScale: CGFloat = direction == .opening ? 1.36 : 1.10
+    let minorScale: CGFloat = direction == .opening ? 0.76 : 0.94
     let projectedScaleX = hypot(majorScale * headFlowX, minorScale * headFlowY)
     let projectedScaleY = hypot(majorScale * headFlowY, minorScale * headFlowX)
     headWidth *= 1.0 + (projectedScaleX - 1.0) * headDeformationStrength
     headHeight *= 1.0 + (projectedScaleY - 1.0) * headDeformationStrength
-    let headTravel = (direction == .opening ? 12.0 : 8.0) * headDeformationStrength
+    let headTravel = (direction == .opening ? 12.0 : 3.0) * headDeformationStrength
     headCenter = CGPoint(
         x: headCenter.x + headFlowX * headTravel,
         y: headCenter.y + headFlowY * headTravel
@@ -1699,9 +1754,12 @@ private func contextMenuBloomContentWeights(
 func contextMenuBloomContentWeights(at progress: CGFloat) -> ContextMenuBloomContentWeights {
     contextMenuBloomContentWeights(
         at: progress,
-        revealRange: 0.22...0.58,
-        sharpRange: 0.46...0.82,
-        liveRange: 0.50...0.80
+        // Rows show through the drop ~2 frames after it leaves the trigger
+        // and are read through the bending rim, as in the call-screen and
+        // player references, instead of fading in after the shape settles.
+        revealRange: 0.08...0.42,
+        sharpRange: 0.36...0.74,
+        liveRange: 0.44...0.76
     )
 }
 
@@ -1869,6 +1927,10 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     private let finalCornerRadius: CGFloat
     private let sourceCornerRadius: CGFloat
     private let sourceMode: ContextMenuSourceVisualMode
+    /// False for a background-less glyph button. Such a source never owns a
+    /// resting capsule: the lens condenses out of clear air on opening and
+    /// evaporates before the bare glyph returns on closing.
+    private let sourceHasGlassSurface: Bool
     private let isDark: Bool
     private let usesOpticalDistortion: Bool
     private let sourceContentCarrier = UIView()
@@ -1919,6 +1981,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
     private var displayedContentDistortion = OpticalDistortion.zero
     private var displayedSurfaceDistortion = OpticalDistortion.zero
     private var displayedGlassSpacing: CGFloat = 0
+    private var displayedGlassPresence: CGFloat = 1
 
     init(
         sourceFrameInOverlay: CGRect,
@@ -1926,6 +1989,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         finalCornerRadius: CGFloat,
         sourceCornerRadius: CGFloat,
         sourceMode: ContextMenuSourceVisualMode,
+        sourceHasGlassSurface: Bool = true,
         isDark: Bool,
         appearanceStyle: AetherAppearanceStyle? = nil,
         surfaceRole: AetherSurfaceRole = .popup,
@@ -1936,6 +2000,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         self.finalCornerRadius = finalCornerRadius
         self.sourceCornerRadius = sourceCornerRadius
         self.sourceMode = sourceMode
+        self.sourceHasGlassSurface = sourceHasGlassSurface
         self.isDark = isDark
         self.usesOpticalDistortion = (appearanceStyle ?? AetherAppearance.runtimeCurrent.style).usesLiquidGlass
         self.glassMorphContainer = GlassBackgroundContainerView(
@@ -2057,7 +2122,9 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         // before the source lobe grows back. Mask it by the complete surface,
         // not the tiny (initially 1pt) lobe that used to hide it until the end.
         sourceContentCarrier.isUserInteractionEnabled = false
-        sourceContentCarrier.layer.mask = sourceContentMask
+        // A bare glyph has no lobe of its own and fades in place; clipping
+        // it by the evaporating lens would shrink it to a dot.
+        sourceContentCarrier.layer.mask = sourceHasGlassSurface ? sourceContentMask : nil
         addSubview(sourceContentCarrier)
         sourceContentCarrier.addSubview(sourceProxyContainer)
 
@@ -2162,7 +2229,16 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         Self.layoutRecursively(in: view)
         let image = Self.renderImage(from: view)
         sharpMenuSnapshotView.image = image
-        blurredMenuSnapshotView.image = Self.blurredImage(from: image, radius: 18.0) ?? image
+        // The blurred copy is first weighted a few frames into the opening;
+        // rendering it here held the touch-down frame for ~30–60 ms.
+        blurredMenuSnapshotView.image = nil
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let blurred = Self.blurredImage(from: image, radius: 18.0) ?? image
+            DispatchQueue.main.async {
+                guard let self, self.sharpMenuSnapshotView.image === image else { return }
+                self.blurredMenuSnapshotView.image = blurred
+            }
+        }
         updateContentFrames(for: finalMenuGlassSurfaceView.bounds)
     }
 
@@ -2181,7 +2257,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         sourceProxyContainer.subviews.forEach { $0.isHidden = true }
         let snapshots = contextMenuSharedSourceSnapshots(image: image, regions: regions)
         if snapshots.isEmpty {
-            let content = AetherMaterializationImageView(image: image, maximumBlurRadius: 8.0)
+            let content = AetherMaterializationImageView(image: image, maximumBlurRadius: 8.0,
+                                                         preparesBlurLevelsAsynchronously: true)
             content.frame = sourceProxyContainer.bounds
             sourceProxyContainer.addSubview(content)
             sourceMaterializationView = content
@@ -2203,7 +2280,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 return leftDistance == rightDistance ? lhs.offset < rhs.offset : leftDistance < rightDistance
             }
             sharedSourceRegions = ordered.map { _, snapshot in
-                let view = AetherMaterializationImageView(image: snapshot.image, maximumBlurRadius: 3)
+                let view = AetherMaterializationImageView(image: snapshot.image, maximumBlurRadius: 3,
+                                                          preparesBlurLevelsAsynchronously: true)
                 view.frame = snapshot.frame
                 carrier.addSubview(view)
                 return SharedSourceRegion(snapshot: snapshot, view: view)
@@ -2337,6 +2415,14 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         sourceSeedGlassSurfaceView.isHidden = renderedHeadAlpha <= 0.001
         sourceSeedGlassSurfaceView.updateMaterialThickness(materialProgress(rawT))
         updateBridge(using: glassSample, rawT: rawT)
+
+        let presence = glassPresence(rawT: rawT)
+        for lobe in [finalMenuGlassSurfaceView, sourceSeedGlassSurfaceView,
+                     bridgeGlassSurfaceView, bridgeContinuationGlassSurfaceView] {
+            lobe.setTransitionMaterialAlpha(presence)
+        }
+        displayedGlassPresence = presence
+        shadowView.alpha = presence
 
         ambientShadowLayer.frame = shadowView.bounds
         contactShadowLayer.frame = shadowView.bounds
@@ -2613,6 +2699,15 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 blurRadius: Self.lerp(state.sourceContentSample.blurRadius, 0.0, t)
             )
         }
+        if !sourceHasGlassSurface, sharedSourceRegions.isEmpty {
+            // A bare glyph is not carried by a lobe: it leaves as soon as the
+            // lens starts and fades back in place once the lens has dissolved.
+            if animationDirection >= 0 {
+                return .init(opacity: 1 - contextMenuBloomSmoothRange(rawT, start: 0.0, end: 0.05), blurRadius: 0)
+            }
+            let elapsed = opticalElapsed(rawT: rawT)
+            return .init(opacity: contextMenuBloomSmoothRange(elapsed, start: 0.45, end: 0.75), blurRadius: 0)
+        }
         let sample = contextMenuSourceMaterializationSample(
             rawProgress: animationDirection >= 0 ? rawT : 1 - opticalElapsed(rawT: rawT),
             direction: animationDirection >= 0 ? .opening : .closing,
@@ -2825,7 +2920,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             }
             // Share the absolute clock with the pear. A second acceleration
             // of this phase squeezed the whole optical transfer into a burst.
-            return contextMenuBloomNormalize(t, start: 0.14, end: 0.90)
+            return contextMenuBloomNormalize(t, start: 0.06, end: 0.86)
         }
         return contextMenuClosingContentProgress(rawProgress: 1 - opticalElapsed(rawT: t), menuHeight: targetMenuFrameInOverlay.height)
     }
@@ -2904,7 +2999,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             let finalDecay = 1.0 - Self.smootherstep(0.58, 0.96, t)
             let sourceFade = Self.smootherstep(0.04, 0.20, t)
             let intensity = max(0, lensBell * visibleIn * max(finalDecay, 0.0) * sourceFade)
-            apply(displacement: 30.0 * intensity, blur: 1.8 * intensity)
+            apply(displacement: 40.0 * intensity, blur: 1.4 * intensity)
         }
     }
 
@@ -2959,11 +3054,13 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
             let intensity = t > 0 && t < 1 ? lensBell * sqrt(visibility) : 0
             let size = finalMenuGlassSurfaceView.bounds.size
             let minimumSide = min(size.width, size.height)
+            // A thick, soft lens: strong bending at the rim with little blur,
+            // so lensed rows stay legible while the glass is still moving.
             let peakDisplacement = animationDirection >= 0
-                ? min(60.0, max(44.0, minimumSide * 0.23))
-                : min(48.0, max(36.0, minimumSide * 0.18))
+                ? min(72.0, max(52.0, minimumSide * 0.28))
+                : min(52.0, max(40.0, minimumSide * 0.20))
 
-            apply(displacement: peakDisplacement * intensity, blur: (animationDirection >= 0 ? 1.6 : 2.7) * intensity)
+            apply(displacement: peakDisplacement * intensity, blur: (animationDirection >= 0 ? 1.0 : 2.2) * intensity)
         }
     }
 
@@ -3074,7 +3171,50 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     private func currentGlassmorphicSample(metrics: Metrics, rawT: CGFloat) -> ContextMenuGlassmorphicGeometrySample {
         let base = baseGlassmorphicSample(metrics: metrics, rawT: rawT)
-        return base.applying(surfaceReboundTransform(rawT: rawT, headFrame: base.headFrame))
+        return condensed(base.applying(surfaceReboundTransform(rawT: rawT, headFrame: base.headFrame)), rawT: rawT)
+    }
+
+    /// Native glass ignores ancestor alpha, so a bare glyph's lens cannot be
+    /// faded in. It condenses from a drop at the glyph centre instead and
+    /// evaporates back into that drop; an empty field is not drawn at all.
+    private func condensed(
+        _ sample: ContextMenuGlassmorphicGeometrySample,
+        rawT: CGFloat
+    ) -> ContextMenuGlassmorphicGeometrySample {
+        let presence = glassPresence(rawT: rawT)
+        guard presence < 0.999 else { return sample }
+        let visible: CGFloat = presence > 0.02 ? 1 : 0
+        let scale = 0.6 + 0.4 * presence
+        let center = CGPoint(x: sourceFrameInOverlay.midX, y: sourceFrameInOverlay.midY)
+        func shrink(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: center.x + (point.x - center.x) * scale, y: center.y + (point.y - center.y) * scale)
+        }
+        func shrink(_ rect: CGRect) -> CGRect {
+            let c = shrink(CGPoint(x: rect.midX, y: rect.midY))
+            return CGRect(x: c.x - rect.width * scale / 2, y: c.y - rect.height * scale / 2,
+                          width: rect.width * scale, height: rect.height * scale)
+        }
+        let radii = sample.bodyCornerRadii
+        var result = ContextMenuGlassmorphicGeometrySample(
+            headFrame: shrink(sample.headFrame),
+            bodyFrame: shrink(sample.bodyFrame),
+            headRotation: sample.headRotation,
+            bodyRotation: sample.bodyRotation,
+            headRadius: sample.headRadius * scale,
+            bodyCornerRadii: ContextMenuBloomCornerRadii(
+                topLeft: radii.topLeft * scale, topRight: radii.topRight * scale,
+                bottomLeft: radii.bottomLeft * scale, bottomRight: radii.bottomRight * scale
+            ),
+            bridgeStart: shrink(sample.bridgeStart),
+            bridgeEnd: sample.bridgeEnd,
+            bridgeRadius: sample.bridgeRadius * scale * visible,
+            neckBulbCenter: sample.neckBulbCenter,
+            neckBulbRadius: sample.neckBulbRadius,
+            headAlpha: sample.headAlpha * visible,
+            bodyAlpha: sample.bodyAlpha * visible
+        )
+        result.bridgeEllipticity = sample.bridgeEllipticity
+        return result
     }
 
     private func baseGlassmorphicSample(
@@ -3221,6 +3361,29 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         return Self.nearestPoint(on: insetTarget, to: sourceCenter)
     }
 
+    /// Opacity of the whole glass field. A glass source already shows its
+    /// capsule, so the field is opaque throughout. A bare glyph has none: the
+    /// reference lens appears as a faint drop ~50 ms after the glyph leaves
+    /// and dissolves into the backdrop over the last third of closing.
+    private func glassPresence(rawT: CGFloat) -> CGFloat {
+        guard !sourceHasGlassSurface, !UIAccessibility.isReduceMotionEnabled else { return 1 }
+        let t = max(0, min(1, rawT))
+        if animationDirection >= 0 {
+            return Self.smootherstep(0.05, 0.30, t)
+        }
+        // The reference lens evaporates while still near the menu: it is a
+        // faint ghost within ~100 ms and never lands on the glyph as a drop.
+        let closing = Self.smootherstep(0.40, 0.90, t)
+        if let state = interruptedCollapse {
+            return Self.lerp(state.glassPresence, closing,
+                Self.smootherstep(0.0, 0.35, interruptedCollapseRunProgress(rawT: rawT, startProgress: state.rawProgress)))
+        }
+        return closing
+    }
+
+    internal var glassPresenceForTesting: CGFloat { displayedGlassPresence }
+    internal var debugGlassSampleForTesting: ContextMenuGlassmorphicGeometrySample? { displayedGlassmorphicSample }
+
     private func materialProgress(_ rawT: CGFloat) -> CGFloat {
         let t = max(0, min(1, rawT))
         return Self.smootherstep(0.08, 0.70, t)
@@ -3282,6 +3445,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
                 surfaceDistortion: displayedSurfaceDistortion,
                 glassSpacing: displayedGlassSpacing,
                 renderedHeadAlpha: sourceSeedGlassSurfaceView.alpha,
+                glassPresence: displayedGlassPresence,
                 sourceContentSample: sampledSourceContent,
                 sharedSourceContentSamples: sampledSharedSourceContent,
                 sharedSourceContentFrames: sampledSharedSourceFrames,
@@ -3339,6 +3503,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     @objc
     private func handleDisplayLink(_ link: CADisplayLink) {
+        // The first callback already belongs to a displayed frame. Starting
+        // the clock there, instead of only recording it, draws the first
+        // movement one frame (8–17 ms) sooner after touch-down.
+        if animationTimestamp == nil {
+            animationTimestamp = link.timestamp
+        }
         advanceAnimation(to: link.targetTimestamp)
     }
 
@@ -3400,6 +3570,7 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         let surfaceDistortion: OpticalDistortion
         let glassSpacing: CGFloat
         let renderedHeadAlpha: CGFloat
+        let glassPresence: CGFloat
         let sourceContentSample: ContextMenuSourceMaterializationSample
         let sharedSourceContentSamples: [ContextMenuSourceMaterializationSample]
         let sharedSourceContentFrames: [CGRect]
@@ -3444,8 +3615,12 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
 
     private static func renderImage(from view: UIView) -> UIImage {
         let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
-        return renderer.image { _ in
-            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        // Menu rows are plain layers whose Texture contents were displayed
+        // synchronously just before. Rendering the layer tree avoids the
+        // forced screen update of drawHierarchy(afterScreenUpdates: true),
+        // which held the touch-down frame for 60–150 ms.
+        return renderer.image { context in
+            view.layer.render(in: context.cgContext)
         }
     }
 
@@ -3466,6 +3641,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         }
     }
 
+    private static let blurContext = CIContext(options: nil)
+
     private static func blurredImage(from image: UIImage, radius: CGFloat) -> UIImage? {
         guard let input = CIImage(image: image) else { return nil }
         let clamped = input.clampedToExtent()
@@ -3473,8 +3650,8 @@ final class ContextMenuGlassmorphicTransitionView: UIView {
         filter.setValue(clamped, forKey: kCIInputImageKey)
         filter.setValue(radius, forKey: kCIInputRadiusKey)
         guard let output = filter.outputImage?.cropped(to: input.extent) else { return nil }
-        let context = CIContext(options: nil)
-        guard let cgImage = context.createCGImage(output, from: input.extent) else { return nil }
+        // A new CIContext per menu cost tens of milliseconds.
+        guard let cgImage = blurContext.createCGImage(output, from: input.extent) else { return nil }
         return UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
     }
 

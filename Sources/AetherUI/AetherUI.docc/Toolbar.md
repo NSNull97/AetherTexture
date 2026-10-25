@@ -264,7 +264,7 @@ override var floatingToolbarHeight: CGFloat {
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationBar>
 - <doc:Glass>
 - <doc:TabBar>

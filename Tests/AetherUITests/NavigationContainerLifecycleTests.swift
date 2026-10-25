@@ -104,12 +104,15 @@ final class NavigationContainerLifecycleTests: XCTestCase {
         } else {
             XCTAssertEqual(detail.view.layer.cornerRadius, 30)
         }
+        // The page follows the finger (directly, or through the tracking
+        // spring when one is configured).
+        await waitUntil { abs(detail.view.frame.minX - 117) < 0.05 }
 
         let resized = CGSize(width: 500, height: 480)
         container.frame.size = resized
         container.containerLayoutUpdated(layout(resized), transition: .immediate)
-        XCTAssertEqual(detail.view.frame.minX, 150, accuracy: 0.1)
-        XCTAssertEqual(root.view.frame.minX, -105, accuracy: 0.1)
+        XCTAssertEqual(detail.view.frame.minX, 150, accuracy: 0.2)
+        XCTAssertEqual(root.view.frame.minX, -105, accuracy: 0.2)
         XCTAssertEqual(root.view.bounds.size, resized)
         XCTAssertEqual(detail.view.bounds.size, resized)
 

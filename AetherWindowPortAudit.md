@@ -2,8 +2,8 @@
 
 Source discovery was run against:
 
-- `/Users/nsnull/Documents/Telegram-iOS/submodules/Display/Source`
-- `/Users/nsnull/Documents/Telegram-iOS/submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils`
+- Telegram-iOS `submodules/Display/Source`
+- Telegram-iOS `submodules/UIKitRuntimeUtils/Source/UIKitRuntimeUtils`
 - local AetherUI sources under `Sources/AetherUI` and `Sources/AetherUIBridging`
 
 Telegram is used as a behavioral reference only. AetherUI must keep the window runtime framework-native, UIKit-only, and independent of Telegram modules, ASDK/Texture, SwiftSignalKit, and UIKitRuntimeUtils.

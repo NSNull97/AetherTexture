@@ -238,6 +238,24 @@ final class ContextMenuGlassmorphicTests: XCTestCase {
         assertRestored(menu, source: source)
     }
 
+    func testLowerHalfTriggerGrowsItsMenuUpwardFromItsBottomEdge() {
+        let fixture = makeFixture()
+        defer { fixture.window.isHidden = true }
+        for (y, upward) in [(64.0, false), (600.0, true)] {
+            fixture.source.frame.origin.y = y
+            let menu = makeMenu(source: fixture.source, appearance: .liquidGlassV1)
+            menu.present()
+            let frame = menu.menuFrameForTesting
+            let source = fixture.source.convert(fixture.source.bounds, to: nil)
+            if upward {
+                XCTAssertEqual(frame.maxY, source.maxY, accuracy: 0.5)
+            } else {
+                XCTAssertEqual(frame.minY, source.minY, accuracy: 0.5)
+            }
+            menu.dismiss(animated: false)
+        }
+    }
+
     private func makeMenu(
         source: UIView,
         appearance: AetherAppearanceStyle? = nil,

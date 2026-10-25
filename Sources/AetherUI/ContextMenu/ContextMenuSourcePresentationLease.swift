@@ -313,7 +313,11 @@ extension ContextMenuSourceDescriptor {
         }
         self.suppressOriginal = { [weak visualView] suppressed in
             guard let visualView else { return }
-            visualView.alpha = suppressed ? 0.0 : 1.0
+            if let button = visualView as? GlassButton {
+                button.isSuppressedForContextMenu = suppressed
+            } else {
+                visualView.alpha = suppressed ? 0.0 : 1.0
+            }
         }
         self.setOriginalInteractionEnabled = { [weak hitView, weak visualView] enabled in
             visualView?.isUserInteractionEnabled = enabled

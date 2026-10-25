@@ -31,8 +31,8 @@
 
 ## Checkpoint — 2026-07-13
 
-Work is intentionally paused after simulator comparison with the Messages
-reference (`/Users/nullptr/Downloads/ScreenRecording_07-10-2026 23-09-12_1.MP4`).
+Work is intentionally paused after simulator comparison with a Messages
+reference recording kept outside this repository.
 
 ### Accepted direction
 

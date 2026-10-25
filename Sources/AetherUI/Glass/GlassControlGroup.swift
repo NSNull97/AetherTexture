@@ -440,12 +440,21 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
         // outgoing button's right edge while the replacement fades in; otherwise
         // a narrower target group makes the old right button look like it moves.
         let nextNaturalWidth = items.isEmpty ? (naturalSize.width > 0.0 ? naturalSize.width : availableHeight) : max(availableHeight, contentsWidth)
+        // All outgoing items shift together so they keep their order and
+        // spacing; aligning each one to the trailing edge stacked a
+        // multi-item group onto its last slot in the first frame.
+        let staleRightEdge = itemViews.map(\.itemFrame.maxX).max() ?? 0.0
+        let trailingShift = nextNaturalWidth - staleRightEdge
         for stale in itemViews {
             didChangeVisualItems = true
             if transitionContentAlignment == .trailing {
                 var staleFrame = stale.itemFrame
-                staleFrame.origin.x = nextNaturalWidth - staleFrame.width
-                ContainedViewLayoutTransition.immediate.updateFrame(view: stale.button, frame: staleFrame)
+                staleFrame.origin.x += trailingShift
+                // The group's width changes on the same transition while its
+                // trailing edge stays put; shifting with it keeps the
+                // outgoing glyphs still on screen instead of jumping by the
+                // whole width difference in the first frame.
+                transition.updateFrame(view: stale.button, frame: staleFrame)
             }
             let materializesCustomContent: Bool
             if case .customView = stale.contentId { materializesCustomContent = true } else { materializesCustomContent = false }
@@ -485,6 +494,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
                     to: previousSize,
                     transition: exitTransition
                 )
+                backgroundView.animateNativeMaterialization(appearing: false, duration: exitTransition.duration)
                 exitTransition.updateAlpha(view: backgroundView, alpha: 0.0) { [weak self] _ in
                     guard let self, self.updateGeneration == generation else {
                         return
@@ -598,8 +608,8 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             return .immediate
         }
         let requestedDuration = appearing
-            ? AetherMotion.navigationChrome.contentAppearanceDuration
-            : AetherMotion.navigationChrome.contentDisappearanceDuration
+            ? AetherMotion.navigationChrome.buttonMaterializationDuration
+            : AetherMotion.navigationChrome.buttonDematerializationDuration
         return .animated(
             duration: min(transition.duration, requestedDuration),
             curve: .easeInOut
@@ -624,7 +634,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             button,
             targetAlpha: targetAlpha,
             appearing: true,
-            duration: min(transition.duration, AetherMotion.navigationChrome.contentAppearanceDuration),
+            duration: min(transition.duration, AetherMotion.navigationChrome.buttonMaterializationDuration),
             generation: updateGeneration,
             materializesCustomContent: materializesCustomContent
         )
@@ -638,13 +648,19 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             return
         }
 
+        let duration = min(transition.duration, AetherMotion.navigationChrome.buttonMaterializationDuration)
+        if backgroundView.animateNativeMaterialization(appearing: true, duration: duration) {
+            backgroundView.alpha = 1.0
+            return
+        }
+
         // Keep the material separate from the blurred glyph layer. Applying a
         // filter to a native effect view would also blur its sampled backdrop.
         let samples = AetherMotion.navigationChromeMaterializationSamples(appearing: true)
         let animation = CAKeyframeAnimation(keyPath: "opacity")
         animation.values = samples.map { NSNumber(value: Float($0.opacity)) }
         animation.keyTimes = samples.indices.map { NSNumber(value: Double($0) / Double(samples.count - 1)) }
-        animation.duration = min(transition.duration, AetherMotion.navigationChrome.contentAppearanceDuration)
+        animation.duration = min(transition.duration, AetherMotion.navigationChrome.buttonMaterializationDuration)
         animation.calculationMode = .linear
         animation.isRemovedOnCompletion = true
         animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - (1.0 / 120.0)
@@ -687,7 +703,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             button,
             targetAlpha: button.alpha,
             appearing: false,
-            duration: min(transition.duration, AetherMotion.navigationChrome.contentDisappearanceDuration),
+            duration: min(transition.duration, AetherMotion.navigationChrome.buttonDematerializationDuration),
             generation: updateGeneration,
             materializesCustomContent: materializesCustomContent
         ) { [weak button] in button?.removeFromSuperview() }
@@ -751,7 +767,9 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             repeating: CAMediaTimingFunction(name: .linear),
             count: samples.count - 1
         )
-        opacity.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - (1.0 / 120.0)
+        let delay = appearing ? AetherMotion.navigationChrome.buttonAppearanceDelay : 0.0
+        opacity.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - (1.0 / 120.0) + delay
+        opacity.fillMode = .backwards
         opacity.isRemovedOnCompletion = true
         let delegate = NavigationChromeMaterializationDelegate { [weak self, weak button] _ in
             guard let button else { return }
@@ -788,6 +806,7 @@ public final class GlassControlGroup: UIView, AetherAppearanceConsumer {
             blur.calculationMode = .linear
             blur.timingFunctions = opacity.timingFunctions
             blur.beginTime = opacity.beginTime
+            blur.fillMode = .backwards
             blur.isRemovedOnCompletion = true
             blur.aetherPreferHighFrameRate()
             layer.add(blur, forKey: Self.contentMaterializationBlurKey)

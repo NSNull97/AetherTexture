@@ -275,6 +275,6 @@ window.debugAction = { [weak self] in
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationController>
 - <doc:TabBar>

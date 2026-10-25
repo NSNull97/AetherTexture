@@ -371,7 +371,7 @@ override func tabBarDeactivateSearch() {
 
 ## See Also
 
-- <doc:ViewController>
+- <doc:AetherViewController>
 - <doc:NavigationBar>
 - <doc:TabBar>
 - <doc:Glass>

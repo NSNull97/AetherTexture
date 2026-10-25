@@ -7,7 +7,9 @@ final class AetherMotionTests: XCTestCase {
         // Source optics use elapsed time, independently of eased geometry.
         let duration = CGFloat(AetherMotion.contextMenu.dismissal.duration)
         let early = contextMenuSourceMaterializationSample(
-            rawProgress: 1 - 0.140 / duration, direction: .closing, menuHeight: 160
+            // The call-screen reference shows the glyph inside the drop on
+            // its 5th closing frame (~85 ms).
+            rawProgress: 1 - 0.085 / duration, direction: .closing, menuHeight: 160
         )
         XCTAssertGreaterThan(early.opacity, 0.001)
         XCTAssertGreaterThan(early.blurRadius, 0)
@@ -292,8 +294,8 @@ final class AetherMotionTests: XCTestCase {
 
     func testContextMenuGlassmorphicUsesReferenceTimingProfile() {
         let timing = ContextMenuController.glassmorphicTiming
-        XCTAssertEqual(timing.openDuration, 0.60, accuracy: 0.001)
-        XCTAssertEqual(timing.closeDuration, 0.44, accuracy: 0.001)
+        XCTAssertEqual(timing.openDuration, 0.72, accuracy: 0.001)
+        XCTAssertEqual(timing.closeDuration, 0.50, accuracy: 0.001)
         XCTAssertLessThan(timing.closeDuration, timing.openDuration)
         XCTAssertEqual(AetherSourceMorphController.Configuration().openDuration, 0.44, accuracy: 0.001,
             "The context-menu settling tail must not retime the separate attachment renderer")
@@ -305,22 +307,24 @@ final class AetherMotionTests: XCTestCase {
         XCTAssertEqual(start.sharp, 0.0, accuracy: 0.001)
         XCTAssertEqual(start.live, 0.0, accuracy: 0.001)
 
-        let heldSeed = contextMenuBloomContentWeights(at: 0.20)
+        let heldSeed = contextMenuBloomContentWeights(at: 0.06)
         XCTAssertEqual(heldSeed.blurred, 0.0, accuracy: 0.001)
         XCTAssertEqual(heldSeed.sharp, 0.0, accuracy: 0.001)
         XCTAssertEqual(heldSeed.live, 0.0, accuracy: 0.001)
 
-        let lensFirst = contextMenuBloomContentWeights(at: 0.36)
+        // Rows show through the moving lens early (reference: ~2 frames after
+        // the drop leaves the trigger), then sharpen and hand off to live.
+        let lensFirst = contextMenuBloomContentWeights(at: 0.30)
         XCTAssertGreaterThan(lensFirst.blurred, 0.10)
         XCTAssertEqual(lensFirst.sharp, 0.0, accuracy: 0.001)
         XCTAssertEqual(lensFirst.live, 0.0, accuracy: 0.001)
 
-        let snapshotHandoff = contextMenuBloomContentWeights(at: 0.49)
+        let snapshotHandoff = contextMenuBloomContentWeights(at: 0.41)
         XCTAssertGreaterThan(snapshotHandoff.blurred, 0.0)
         XCTAssertGreaterThan(snapshotHandoff.sharp, 0.0)
         XCTAssertEqual(snapshotHandoff.live, 0.0, accuracy: 0.001)
 
-        let liveHandoff = contextMenuBloomContentWeights(at: 0.70)
+        let liveHandoff = contextMenuBloomContentWeights(at: 0.60)
         XCTAssertLessThan(liveHandoff.blurred, liveHandoff.sharp)
         XCTAssertGreaterThan(liveHandoff.sharp, 0.0)
         XCTAssertGreaterThan(liveHandoff.live, 0.0)

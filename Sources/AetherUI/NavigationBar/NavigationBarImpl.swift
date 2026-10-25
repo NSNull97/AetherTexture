@@ -481,6 +481,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     private var titleTransitionMode: Bool = false
     private var titleContentHiddenForTransition: Bool = false
     private var buttonsOnlyTransitionMode: Bool = false
+    /// Hides the hosted glass title view while `NavigationGlassTitleMorph`
+    /// draws its liquid stand-in.
+    private var glassTitleMorphHidesTitleView: Bool = false
+    private var glassTitleMorphAnchorScale: (scale: CGPoint, isTrailing: Bool)?
+    private var buttonChromeScale: (left: CGFloat, right: CGFloat) = (1.0, 1.0)
     private var buttonContentHiddenForTransition: Bool = false
     private var buttonMorphTransitionOverride: ContainedViewLayoutTransition?
     private var leftSeparatedButtonGlueAnimator: NavigationSeparatedButtonGlueAnimator?
@@ -1678,6 +1683,72 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         applyTransitionVisibilityState()
     }
 
+    // MARK: - Glass title morph
+
+    internal func setGlassTitleMorphHidesTitleView(_ hidden: Bool, transition: ContainedViewLayoutTransition = .immediate) {
+        glassTitleMorphHidesTitleView = hidden
+        if let titleContentView {
+            let alpha: CGFloat = (titleContentHiddenForTransition || buttonsOnlyTransitionMode || hidden) ? 0.0 : 1.0
+            updateButtonLayerHostedView(view: titleContentView, alpha: alpha, transition: transition)
+        }
+    }
+
+    /// The hosted custom title view, if this bar currently hosts one.
+    internal var glassTitleMorphTitleView: UIView? {
+        titleContentView
+    }
+
+    /// The layer that hosts the title view and the buttons. A title
+    /// stand-in placed directly below it is composited exactly like the
+    /// real title: above the bar's own backdrop, below its buttons.
+    internal var glassTitleMorphChromeLayer: UIView {
+        usesSeparatedButtonHosting ? buttonLayer : self
+    }
+
+    /// The glass button the title capsule flows out of (and back into): the
+    /// button of the trailing group closest to the title, or of the leading
+    /// group when there is no trailing one.
+    internal func glassTitleMorphAnchor(in view: UIView) -> (frame: CGRect, isTrailing: Bool)? {
+        let candidates: [(UIView, ButtonAlignment)] = [(rightButtonContainer, .right), (leftButtonContainer, .left)]
+        for (container, alignment) in candidates {
+            guard let frame = buttonChromeFrame(container: container, groups: glassButtonGroups(for: alignment)),
+                  let superview = container.superview else {
+                continue
+            }
+            let chrome = superview.convert(frame, to: view)
+            let side = min(chrome.height, chrome.width)
+            switch alignment {
+            case .right:
+                return (CGRect(x: chrome.minX, y: chrome.minY, width: side, height: chrome.height), true)
+            case .left:
+                return (CGRect(x: chrome.maxX - side, y: chrome.minY, width: side, height: chrome.height), false)
+            }
+        }
+        return nil
+    }
+
+    /// Elastic response of the anchor button while the title capsule leaves
+    /// or merges into it. Composed with the chrome scale the navigation
+    /// transition drives, so neither overrides the other.
+    internal func setGlassTitleMorphAnchorScale(_ scale: CGPoint, isTrailing: Bool) {
+        glassTitleMorphAnchorScale = (scale, isTrailing)
+        let chrome = isTrailing ? buttonChromeScale.right : buttonChromeScale.left
+        let container = isTrailing ? rightButtonContainer : leftButtonContainer
+        updateButtonLayerHostedView(
+            view: container,
+            transform: CGAffineTransform(scaleX: chrome, y: chrome)
+                .concatenating(glassTitleMorphAnchorTransform(isTrailing: isTrailing)),
+            transition: .immediate
+        )
+    }
+
+    private func glassTitleMorphAnchorTransform(isTrailing: Bool) -> CGAffineTransform {
+        guard let anchor = glassTitleMorphAnchorScale, anchor.isTrailing == isTrailing else {
+            return .identity
+        }
+        return CGAffineTransform(scaleX: anchor.scale.x, y: anchor.scale.y)
+    }
+
     public func setButtonsOnlyTransitionMode(_ enabled: Bool) {
         buttonsOnlyTransitionMode = enabled
         isUserInteractionEnabled = !enabled
@@ -1694,10 +1765,19 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     }
 
     public func setButtonChromeScale(left: CGFloat, right: CGFloat, transition: ContainedViewLayoutTransition) {
+        buttonChromeScale = (left, right)
         let leftTransform = CGAffineTransform(scaleX: left, y: left)
         let rightTransform = CGAffineTransform(scaleX: right, y: right)
-        updateButtonLayerHostedView(view: leftButtonContainer, transform: leftTransform, transition: transition)
-        updateButtonLayerHostedView(view: rightButtonContainer, transform: rightTransform, transition: transition)
+        updateButtonLayerHostedView(
+            view: leftButtonContainer,
+            transform: leftTransform.concatenating(glassTitleMorphAnchorTransform(isTrailing: false)),
+            transition: transition
+        )
+        updateButtonLayerHostedView(
+            view: rightButtonContainer,
+            transform: rightTransform.concatenating(glassTitleMorphAnchorTransform(isTrailing: true)),
+            transition: transition
+        )
         updateButtonLayerHostedView(view: backButtonView, transform: leftTransform, transition: transition)
         updateButtonLayerHostedView(view: backArrowView, transform: leftTransform, transition: transition)
         updateButtonLayerHostedView(view: badgeView, transform: leftTransform, transition: transition)
@@ -2652,7 +2732,10 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
     private func layoutButtons(width: CGFloat, height: CGFloat, leftInset: CGFloat, rightInset: CGFloat, defaultHeight: CGFloat, transition: ContainedViewLayoutTransition) {
         let buttonHeight: CGFloat = min(defaultHeight, height)
         let legacyBackSideInset: CGFloat = 8.0
-        let legacyBarButtonSideInset: CGFloat = 16.0
+        // Compact 320pt bars keep the button capsule closer to the edge so
+        // its final morph endpoint remains inside the 8pt touch-safe margin;
+        // wider Figma layouts retain the classic 16pt inset.
+        let legacyBarButtonSideInset: CGFloat = width <= 360.0 ? 8.0 : 16.0
         let usesGlassStyle = presentationData.theme.style == .glass
         let geometryTransition: ContainedViewLayoutTransition = buttonMorphTransitionOverride == nil ? transition : .immediate
         let buttonContainerTransition = buttonMorphTransitionOverride ?? geometryTransition
@@ -3973,7 +4056,11 @@ public final class NavigationBarImpl: UIView, NavigationBarView {
         titleNode.alpha = titleAlpha
         subtitleNode.alpha = titleAlpha
         if let titleContentView {
-            updateButtonLayerHostedView(view: titleContentView, alpha: titleAlpha, transition: .immediate)
+            updateButtonLayerHostedView(
+                view: titleContentView,
+                alpha: glassTitleMorphHidesTitleView ? 0.0 : titleAlpha,
+                transition: .immediate
+            )
         }
         ownedContentView?.alpha = contentAlpha
     }

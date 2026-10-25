@@ -140,7 +140,46 @@ public final class MenuGlassSurfaceView: UIView {
     }
 
     func resetGlassInteractionTransform() {
+        elasticStretchIsActive = false
         setGlassInteractionTransform(.identity)
+    }
+
+    private var elasticStretchIsActive = false
+
+    /// iOS 27 menus lean toward a held finger: a slight swell while it rests
+    /// on the platter, and a rubber-band pull of the nearest edge once it
+    /// leaves. `point` is in this view's untransformed coordinates.
+    func updateElasticStretch(toward point: CGPoint) {
+        let size = bounds.size
+        guard size.width > 1, size.height > 1 else { return }
+        func band(_ overflow: CGFloat, _ dimension: CGFloat) -> CGFloat {
+            guard overflow != 0 else { return 0 }
+            let limit = dimension * 0.22
+            let pull = limit * (1 - 1 / (abs(overflow) * 0.55 / limit + 1))
+            return overflow < 0 ? -pull : pull
+        }
+        let extendX = band(point.x < 0 ? point.x : max(0, point.x - size.width), size.width)
+        let extendY = band(point.y < 0 ? point.y : max(0, point.y - size.height), size.height)
+        let swell: CGFloat = 0.015
+        // Scaling about the centre and shifting by half the extension keeps
+        // the far edge in place while the near edge follows the finger.
+        let transform = CGAffineTransform(translationX: extendX / 2, y: extendY / 2)
+            .scaledBy(x: 1 + swell + abs(extendX) / size.width, y: 1 + swell + abs(extendY) / size.height)
+        elasticStretchIsActive = true
+        UIView.animate(withDuration: 0.14, delay: 0,
+                       options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+            self.setGlassInteractionTransform(transform)
+        }
+    }
+
+    /// Springs back with a visible overshoot, as the platter does on lift-off.
+    func releaseElasticStretch() {
+        guard elasticStretchIsActive else { return }
+        elasticStretchIsActive = false
+        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.52, initialSpringVelocity: 0,
+                       options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.setGlassInteractionTransform(.identity)
+        }
     }
 
     func setSurfaceCornerRadius(_ radius: CGFloat) {
@@ -233,6 +272,14 @@ public final class MenuGlassSurfaceView: UIView {
         scatteringView.backgroundColor = UIColor.white.withAlphaComponent(
             baseAlpha + (peakAlpha - baseAlpha) * t
         )
+    }
+
+    /// Opacity of the glass material alone; hosted content is unaffected.
+    /// Unlike view alpha, the native renderer honours this per frame.
+    func setTransitionMaterialAlpha(_ alpha: CGFloat) {
+        guard let surfaceView, abs(surfaceView.transitionMaterialAlpha - alpha) > 0.001 else { return }
+        surfaceView.transitionMaterialAlpha = alpha
+        scatteringView.alpha = alpha
     }
 
     func setSupplementalScatteringEnabled(_ enabled: Bool) {

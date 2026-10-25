@@ -26,10 +26,9 @@ toolbar.
   ``AetherViewController/floatingToolbar``,
   ``AetherViewController/aetherContentUnavailableConfiguration`` — типовые
   компоненты, размещаемые в фиксированных позициях иерархии.
-- **Утилиты.** ``AetherViewController/push(_:animated:)``,
-  ``AetherViewController/pop(animated:)``,
-  ``AetherViewController/navigationController``,
-  ``AetherViewController/tabBarController`` — поднимаются по родительской
+- **Утилиты.** ``AetherViewController/pop(animated:)``,
+  ``AetherViewController/aetherTabBarController`` и
+  ``AetherViewController/searchController`` — поднимаются по родительской
   цепочке, что устраняет необходимость передачи ссылок через всю иерархию.
 
 > Tip: Все перечисленные возможности являются **опциональными**. Минимальный

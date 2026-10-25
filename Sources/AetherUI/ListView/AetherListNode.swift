@@ -404,6 +404,8 @@ open class AetherListNode: AetherMainActorDisplayNode {
     private var boundaryTriggerSignatures: [AetherListBoundaryEdge: BoundaryTriggerSignature] = [:]
     private var accessibilityNodeOrder: [ObjectIdentifier] = []
     private weak var refreshControl: UIRefreshControl?
+    /// Top inset the list itself last asked for, without any refresh-control extension.
+    private var lastAppliedBaseTopInset: CGFloat?
     private weak var customScrollIndicatorView: UIView?
     private weak var debugOverlayLabel: AetherTextNodeOverlayView?
     private weak var _particleDissolveOverlayHostNode: ASDisplayNode?
@@ -570,6 +572,14 @@ open class AetherListNode: AetherMainActorDisplayNode {
     public var dynamicTypeInvalidated: (() -> Void)?
 
     public var preloadPages: CGFloat = 1.0
+
+    /// When `true`, pooled nodes stay in the content node (hidden) instead of
+    /// being removed and re-added on every reuse. Removing and re-inserting
+    /// a deep node tree walks every subview through window/hierarchy
+    /// notifications, which dominated scrolling cost for rich rows such as
+    /// chat bubbles. Off by default: rows that rely on leaving the hierarchy
+    /// (e.g. to stop media playback) keep the old behaviour.
+    public var keepsRecycledNodesInHierarchy: Bool = false
 
     /// Optional preload window used only for materializing item nodes. When
     /// nil, node creation follows `preloadPages` for legacy behaviour.
@@ -1264,15 +1274,18 @@ open class AetherListNode: AetherMainActorDisplayNode {
             applySizeAndInsetsUpdate(updateSizeAndInsets)
         }
 
-        let beforeIntermediateState = AetherListIntermediateState(
-            stableIds: items.map(\.stableId),
-            heights: itemHeights,
-            itemOffsetInsets: AetherListContentMetricsPlanner.effectiveOffsetInsets(
-                itemOffsetInsets: _itemOffsetInsets,
-                virtualContentInsets: _virtualContentInsets
-            )
-        )
-        let stationaryAnchor = beforeIntermediateState.stationaryAnchor(in: stationaryItemRange)
+        // Snapshotting every item is only needed to anchor a stationary range; most
+        // transactions (likes, appends) pass none and should not pay O(items) for it.
+        let stationaryAnchor = stationaryItemRange.flatMap { range in
+            AetherListIntermediateState(
+                stableIds: items.map(\.stableId),
+                heights: itemHeights,
+                itemOffsetInsets: AetherListContentMetricsPlanner.effectiveOffsetInsets(
+                    itemOffsetInsets: _itemOffsetInsets,
+                    virtualContentInsets: _virtualContentInsets
+                )
+            ).stationaryAnchor(in: range)
+        }
         let preFrames = Dictionary(uniqueKeysWithValues: itemNodes.map { (ObjectIdentifier($0), $0.frame) })
         let insertedItemIds = Set(insertIndicesAndItems.map { $0.item.stableId })
         let hasForcedInsertionAnimation = insertIndicesAndItems.contains { $0.forceAnimateInsertion }
@@ -1708,10 +1721,28 @@ open class AetherListNode: AetherMainActorDisplayNode {
     }
 
     private func reindexLoadedNodes() {
+        // One pass over `items` instead of a linear search per loaded node: transactions on
+        // long lists otherwise cost O(loaded × items) stable-id comparisons on the main thread.
+        var indexByLoadedId: [AnyHashable: Int] = [:]
+        for node in itemNodes {
+            if let item = node.item {
+                indexByLoadedId[item.stableId] = -1
+            }
+        }
+        var unresolvedCount = indexByLoadedId.count
+        if unresolvedCount > 0 {
+            for (index, item) in items.enumerated() {
+                let id = item.stableId
+                guard indexByLoadedId[id] == -1 else { continue }
+                indexByLoadedId[id] = index
+                unresolvedCount -= 1
+                if unresolvedCount == 0 { break }
+            }
+        }
         var nodesToRecycle: [AetherListItemNode] = []
         for node in itemNodes {
             guard let item = node.item,
-                  let index = items.firstIndex(where: { $0.stableId == item.stableId }) else {
+                  let index = indexByLoadedId[item.stableId], index >= 0 else {
                 nodesToRecycle.append(node)
                 continue
             }
@@ -2066,7 +2097,11 @@ open class AetherListNode: AetherMainActorDisplayNode {
         }
         let reuseIdentifier = node.item?.reuseIdentifier
         node.prepareForReuse()
-        node.removeFromSupernode()
+        let staysAttached = keepsRecycledNodesInHierarchy
+            && reuseIdentifier.map { (reusePool[$0]?.count ?? 0) < maxReusableNodesPerIdentifier } == true
+        if !staysAttached {
+            node.removeFromSupernode()
+        }
         node.index = nil
         node.item = nil
         node.pendingSelectionAnimated = false
@@ -2076,7 +2111,7 @@ open class AetherListNode: AetherMainActorDisplayNode {
         node.updateStickyHeaderState(.none, animated: false)
         node.layer.removeAllAnimations()
         node.layer.zPosition = 0.0
-        node.isHidden = false
+        node.isHidden = staysAttached
         removeSwipeActionsNode(for: node)
 
         guard let reuseIdentifier else { return }
@@ -3308,12 +3343,12 @@ open class AetherListNode: AetherMainActorDisplayNode {
                 }
 
                 guard abs(self.layoutParams().width - requestedWidth) < 0.5,
-                      self.items.contains(where: { $0.stableId == item.stableId }) else {
+                      let currentIndex = self.currentIndex(of: item, near: index) else {
                     return
                 }
                 self.preparedLayoutCache[item.stableId] = prepared
                 self.recordLayout(prepared.layout, for: item)
-                self.applyPreparedLayoutIfVisible(prepared, for: item)
+                self.applyPreparedLayoutIfVisible(prepared, for: item, at: currentIndex)
             }
         }
         taskBox.task = task
@@ -3324,14 +3359,28 @@ open class AetherListNode: AetherMainActorDisplayNode {
         }
     }
 
-    private func applyPreparedLayoutIfVisible(_ prepared: AetherListPreparedItemLayout, for item: AetherListItem) {
-        guard let currentIndex = items.firstIndex(where: { $0.stableId == item.stableId }),
-              currentIndex < itemHeights.count else {
+    /// Index of `item` in `items`, checking the index it had when work was scheduled first.
+    private func currentIndex(of item: AetherListItem, near expectedIndex: Int) -> Int? {
+        let id = item.stableId
+        if expectedIndex >= 0, expectedIndex < items.count, items[expectedIndex].stableId == id {
+            return expectedIndex
+        }
+        return items.firstIndex(where: { $0.stableId == id })
+    }
+
+    private func applyPreparedLayoutIfVisible(
+        _ prepared: AetherListPreparedItemLayout,
+        for item: AetherListItem,
+        at currentIndex: Int
+    ) {
+        guard currentIndex < itemHeights.count else {
             return
         }
 
+        let heightChanged = abs(itemHeights[currentIndex] - prepared.layout.totalHeight) > 0.5
         itemHeights[currentIndex] = prepared.layout.totalHeight
-        if let node = nodeForItem(at: currentIndex) {
+        let node = nodeForItem(at: currentIndex)
+        if let node {
             debugInstrumentation.measurePreparedLayoutApplication {
                 prepared.apply(node)
             }
@@ -3340,6 +3389,9 @@ open class AetherListNode: AetherMainActorDisplayNode {
             }
             syncAccessories(for: node, item: item)
         }
+        // Most prepared layouts confirm the estimate; re-running offsets and visibility for
+        // every completion makes prefetch O(items) per row on long lists.
+        guard heightChanged else { return }
         rebuildOffsets()
         updateContentSize()
         positionLoadedNodes()
@@ -3377,8 +3429,20 @@ open class AetherListNode: AetherMainActorDisplayNode {
         additionalContentOffsetDeltaY: CGFloat? = nil
     ) -> Bool {
         guard isNodeLoaded else { return false }
-        let effectiveInsets = effectiveScrollInsets()
+        let baseInsets = effectiveScrollInsets()
+        var effectiveInsets = baseInsets
         let scrollView = scrollNode.view
+        // UIRefreshControl grows contentInset.top while refreshing and shrinks the current value
+        // by the same amount in endRefreshing. Overwriting it from a transaction that lands
+        // mid-refresh left the list short by the control height (content under the navigation
+        // bar) until the next layout snapped it back.
+        if let refreshControl, refreshControl.isRefreshing, let lastAppliedTop = lastAppliedBaseTopInset {
+            let refreshControlInset = scrollView.contentInset.top - lastAppliedTop
+            if refreshControlInset > 0.5 {
+                effectiveInsets.top += refreshControlInset
+            }
+        }
+        lastAppliedBaseTopInset = baseInsets.top
         let previousTopInset = scrollView.contentInset.top
         let previousOffsetY = scrollView.contentOffset.y
         let wasPinnedToTop = previousOffsetY <= -previousTopInset + 0.5

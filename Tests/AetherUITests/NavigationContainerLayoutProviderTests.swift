@@ -40,12 +40,14 @@ final class NavigationContainerLayoutProviderTests: XCTestCase {
         }
     }
 
-    func testNavigationTransitionDurationsMatchLiquidGlassV1Storyboard() {
+    func testNavigationTransitionDurationsFollowMeasuredUIKitSprings() {
+        // UINavigationController on iOS 27 is at rest after ~0.45 s; the
+        // stack runs ~16% faster by request (~0.37 s).
         let pushTransition = NavigationTransitionCoordinator.nonInteractiveCompletionTransition(direction: .push)
         let popTransition = NavigationTransitionCoordinator.nonInteractiveCompletionTransition(direction: .pop)
-
-        XCTAssertEqual(pushTransition.duration, AetherMotion.navigation.duration, accuracy: 0.001)
-        XCTAssertEqual(popTransition.duration, AetherMotion.navigation.duration, accuracy: 0.001)
+        XCTAssertEqual(pushTransition.duration, popTransition.duration, accuracy: 0.001)
+        XCTAssertGreaterThan(pushTransition.duration, 0.3)
+        XCTAssertLessThan(pushTransition.duration, 0.44)
 
         let container = UIView(frame: CGRect(x: 0.0, y: 0.0, width: 320.0, height: 640.0))
         let topView = UIView(frame: container.bounds)
@@ -60,23 +62,55 @@ final class NavigationContainerLayoutProviderTests: XCTestCase {
             isInteractive: true
         )
 
+        // Released swipes settle on the release spring (UIKit: within 0.5 pt
+        // after ~0.25 s; the transition ends at 0.25 pt, ~0.4 s); a
+        // throw toward the destination arrives sooner than a stationary
+        // release, a throw away from it makes the settle longer.
         coordinator.updateProgress(0.5, transition: .immediate, completion: {})
-        XCTAssertEqual(coordinator.cancelTransition.duration, AetherMotion.navigation.duration, accuracy: 0.001)
-        XCTAssertLessThan(coordinator.cancelTransition(velocity: -1200.0).duration, AetherMotion.navigation.duration)
-        XCTAssertEqual(coordinator.cancelTransition(velocity: 1200.0).duration, AetherMotion.navigation.duration, accuracy: 0.001)
-        XCTAssertEqual(coordinator.completionTransition(velocity: 0.0).duration, AetherMotion.navigation.duration, accuracy: 0.001)
-        XCTAssertLessThan(coordinator.completionTransition(velocity: 1200.0).duration, AetherMotion.navigation.duration)
+        let stationaryCancel = coordinator.cancelTransition.duration
+        XCTAssertGreaterThan(stationaryCancel, 0.2)
+        XCTAssertLessThan(stationaryCancel, 0.46)
+        XCTAssertLessThan(coordinator.cancelTransition(velocity: -1200.0).duration, coordinator.cancelTransition(velocity: 1200.0).duration)
+        let stationaryCompletion = coordinator.completionTransition(velocity: 0.0).duration
+        XCTAssertGreaterThan(stationaryCompletion, 0.2)
+        XCTAssertLessThan(stationaryCompletion, 0.46)
 
-        coordinator.updateProgress(0.85, transition: .immediate, completion: {})
-        let lightReleaseDuration = coordinator.completionTransition(velocity: 1000.0).duration
-        XCTAssertGreaterThanOrEqual(lightReleaseDuration, 0.20)
-        XCTAssertLessThan(lightReleaseDuration, AetherMotion.navigation.duration)
+        // Thresholds measured on UIKit: stationary release completes from
+        // half way, a throw of ~600 pt/s completes from a fifth.
+        XCTAssertTrue(coordinator.shouldCompleteInteractivePop(progress: 0.54, velocity: 0.0))
+        XCTAssertFalse(coordinator.shouldCompleteInteractivePop(progress: 0.48, velocity: 0.0))
+        XCTAssertTrue(coordinator.shouldCompleteInteractivePop(progress: 0.19, velocity: 600.0))
+        XCTAssertFalse(coordinator.shouldCompleteInteractivePop(progress: 0.19, velocity: 400.0))
+        XCTAssertFalse(coordinator.shouldCompleteInteractivePop(progress: 0.8, velocity: -300.0))
+    }
 
-        coordinator.updateProgress(0.85, transition: .immediate, completion: {})
-        let strongReleaseDuration = coordinator.completionTransition(velocity: 1600.0).duration
-        XCTAssertGreaterThanOrEqual(strongReleaseDuration, 0.20)
-        XCTAssertLessThanOrEqual(strongReleaseDuration, lightReleaseDuration)
-        XCTAssertLessThan(strongReleaseDuration, AetherMotion.navigation.duration)
+    func testStackSpringMatchesMeasuredUIKitPush() {
+        // Same critically damped shape as the frame-by-frame UIKit push
+        // (49% / 89% / 99% after 67 / 167 / 300 ms), ~16% faster.
+        let step = NavigationSpringStep(spring: AetherMotion.navigationStack.transition)
+        func progress(at time: CGFloat) -> CGFloat {
+            1.0 - step.advance(displacement: 1.0, velocity: 0.0, by: time).displacement
+        }
+        XCTAssertEqual(progress(at: 0.0667), 0.52, accuracy: 0.05)
+        XCTAssertEqual(progress(at: 0.1667), 0.93, accuracy: 0.03)
+        XCTAssertEqual(progress(at: 0.25), 0.99, accuracy: 0.01)
+
+        // The analytic step is exact: advancing in frames equals one jump.
+        var state = (displacement: CGFloat(1.0), velocity: CGFloat(0.0))
+        for _ in 0 ..< 12 {
+            state = step.advance(displacement: state.displacement, velocity: state.velocity, by: 1.0 / 120.0)
+        }
+        XCTAssertEqual(state.displacement, step.advance(displacement: 1.0, velocity: 0.0, by: 0.1).displacement, accuracy: 1e-5)
+
+        // Telegram reference: a released swipe settles in ~0.25 s without a
+        // bounce (UIKit iOS 27 overshoots by ~1 pt instead).
+        let release = NavigationSpringStep(spring: AetherMotion.navigationStack.release)
+        var minimum: CGFloat = .greatestFiniteMagnitude
+        for index in 1 ... 120 {
+            minimum = min(minimum, release.advance(displacement: 186.0, velocity: 0.0, by: CGFloat(index) / 240.0).displacement)
+        }
+        XCTAssertGreaterThanOrEqual(minimum, -0.01)
+        XCTAssertLessThan(release.settleDuration(distance: 186.0, velocity: 0.0, tolerance: 0.5), 0.3)
     }
 
     func testAnimatedNavigationTransitionRestoresSharedBarAndAccessoryOwnership() {
@@ -474,7 +508,11 @@ final class NavigationContainerLayoutProviderTests: XCTestCase {
             return
         }
         XCTAssertEqual(firstTargetLayout.additionalInsets.bottom, 0.0, accuracy: 0.5)
-        XCTAssertEqual(target.view.frame.minX, baseLayout.size.width, accuracy: 0.5)
+        // The page's model frame is already final; the render-server spring
+        // carries it from just off the trailing edge.
+        let slide = target.view.layer.animation(forKey: "aether.navigation.stack.position.x") as? CASpringAnimation
+        let startOffset = CGFloat((slide?.fromValue as? NSNumber)?.doubleValue ?? 0.0)
+        XCTAssertEqual(target.view.frame.minX + startOffset, baseLayout.size.width, accuracy: 0.5)
     }
 
     func testNonInteractivePushUsesTargetBottomBarSafeAreaImmediately() {
