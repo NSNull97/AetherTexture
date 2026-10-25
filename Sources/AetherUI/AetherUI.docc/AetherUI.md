@@ -43,7 +43,7 @@ semantic surface renderer выбирает system surface либо Liquid Glass 
   `Display.ListView` из Telegram-iOS с виртуализацией, transactions, sticky
   headers, swipe actions, reorder и Metal-частицами. Старый UIKit list engine
   удалён из текущей package target; миграция выполняется через
-  `AetherNodeMigrationMap.md`.
+  `Documentation/Internal/AetherNodeMigrationMap.md`.
 - Node wrappers для оставшихся reusable surfaces: `AetherNavigationBarNode`,
   `AetherToolbarNode`, `AetherSliderNode`, `AetherContentUnavailableNode`,
   `AetherSkeletonNode`. Их анимационно-критичные UIKit/CoreAnimation internals

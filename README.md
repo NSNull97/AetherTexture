@@ -19,6 +19,10 @@ control-ноды задают node-first API без публичной прив�
 
 📖 **[Документация](https://nsnull97.github.io/AetherTexture/documentation/aetherui/)** — DocC, обновляется на каждом push автоматически.
 
+Локальная карта документации: [Documentation/README.md](Documentation/README.md).
+Публичные интеграционные гайды находятся в [Documentation/Guides](Documentation/Guides),
+а инженерные заметки сохранены отдельно в [Documentation/Internal](Documentation/Internal).
+
 ---
 
 ## Скриншоты
@@ -333,6 +337,8 @@ glass-morph переход между двумя барами.
 ## Example app
 
 Интерактивный showcase каждого компонента — открой `Example/Example.xcodeproj` в Xcode 26+.
+Это единственный канонический и собираемый пример проекта; небольшие standalone-сниппеты
+собраны в [Examples/README.md](Examples/README.md).
 
 Вкладки:
 - **Components** — navigation surfaces, controls, modal/state probes и Texture list/chat demos

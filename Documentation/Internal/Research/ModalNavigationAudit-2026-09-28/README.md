@@ -31,9 +31,9 @@
 
 **Наблюдение подтверждено видео; конкретная первопричина пока гипотеза.** На время drag/settle весь `contentView` принудительно получает `shouldRasterize = true`. Внутри находятся навигационный chrome и потенциально другие живые glass/blur views. Начало и конец этой оптимизации совпадают по смыслу с фазами, в которых на видео резко меняется изображение фона.
 
-Код: [beginInteractiveResize](../../Sources/AetherUI/Modal/AetherModalController.swift#L955), [начало drag](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L320).
+Код: [beginInteractiveResize](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L955), [начало drag](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L320).
 
-Приоритетная проверка: записать тот же сценарий с отключённой rasterization; затем отдельно убрать масштабирование material вместе с контентом. Логировать активный backend. Проверки разделить, чтобы установить причину. Native `GlassBackgroundView` сам по себе не создаёт копию presenter: он создаёт `UIVisualEffectView(UIGlassEffect)` ([код](../../Sources/AetherUI/Glass/GlassBackgroundView.swift#L1171)).
+Приоритетная проверка: записать тот же сценарий с отключённой rasterization; затем отдельно убрать масштабирование material вместе с контентом. Логировать активный backend. Проверки разделить, чтобы установить причину. Native `GlassBackgroundView` сам по себе не создаёт копию presenter: он создаёт `UIVisualEffectView(UIGlassEffect)` ([код](../../../../Sources/AetherUI/Glass/GlassBackgroundView.swift#L1171)).
 
 Apple отдельно описывает зависимость visual effects от окна/compositor и ограничения снимков поддерева, прозрачности предков и масок. Это аргумент против обращения с живым материалом как с обычной кэшируемой картинкой, но документация не доказывает причину именно этого артефакта. [UIVisualEffectView](https://developer.apple.com/documentation/uikit/uivisualeffectview).
 
@@ -43,7 +43,7 @@ Apple отдельно описывает зависимость visual effects 
 
 Это отдельный реальный механизм оставшихся слоёв после `setViewControllers`, replacement и неанимированного pop через внешний navigation controller. Он не доказан как причина повторного изображения presenter на видео. У прямого `NavigationContainer.popController(animated: false)` есть собственное удаление view; проблема относится к пути через `setControllers`.
 
-Код: [сопоставление view со стеком](../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L260), [очистка children](../../Sources/AetherUI/NavigationController/NavigationController.swift#L1846).
+Код: [сопоставление view со стеком](../../../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L260), [очистка children](../../../../Sources/AetherUI/NavigationController/NavigationController.swift#L1846).
 
 Исправление: хранить фактически смонтированные страницы и удалять все, не входящие в разрешённый набор текущего состояния. В покое — одна страница либо ни одной; при переходе — только source и target. Проверять отдельно view hierarchy и controller containment.
 
@@ -53,11 +53,11 @@ Apple отдельно описывает зависимость visual effects 
 
 Первый: в покое footer стоит у видимого низа шторки с учётом масштаба и клавиатуры. При push/pop его переносят в страницу и ставят на `screen.bounds.height - height`. Страница имеет полную высоту stage2 даже в коротком stage1. Поэтому footer может уйти за нижний clip; при клавиатуре также теряется компенсация. Фон/fade footer остаётся в прежнем host, а сама кнопка двигается со страницей.
 
-Код: [видимый низ footer](../../Sources/AetherUI/Modal/AetherModalController.swift#L771), [перенос в страницу](../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L206).
+Код: [видимый низ footer](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L771), [перенос в страницу](../../../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L206).
 
 Второй: после отменённого interactive pop текущему `footerView` присваивают тот же объект. Setter возвращает его в `footerHost` только при изменении identity. Footer остаётся внутри страницы и теряет sticky-позиционирование. Cleanup специально пропускает текущий footer. Аналогичный случай возможен, если две страницы возвращают один экземпляр footer.
 
-Код: [setter](../../Sources/AetherUI/Modal/AetherModalController.swift#L167), [повторное применение и cleanup](../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L175), [ветка отмены](../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L491).
+Код: [setter](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L167), [повторное применение и cleanup](../../../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L175), [ветка отмены](../../../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L491).
 
 Исправление: постоянный modal footer host; source/target footer анимируются внутри него вместе со своими фонами. Завершение и отмена явно восстанавливают владельца, frame, видимость и bottom inset. Footer не должен менять модель координат ради перехода.
 
@@ -65,7 +65,7 @@ Apple отдельно описывает зависимость visual effects 
 
 **Модель подтверждена кодом; степень её участия в каждом артефакте требует визуальной проверки.** Сейчас glass и контент имеют размер максимального detent. Изменение ширины масштабирует всю поверхность, а внешний root отрезает лишнюю высоту. В результате видимая граница шторки и граница самого материала не совпадают; в compact-состоянии оптический нижний край материала находится за пределами viewport. Текст, controls и внутренние радиусы масштабируются вместе с ним.
 
-Код: [установка stage2 canvas](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L126), [scale и layout](../../Sources/AetherUI/Modal/AetherModalController.swift#L715), [внешний clip](../../Sources/AetherUI/Modal/AetherModalController.swift#L1015).
+Код: [установка stage2 canvas](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L126), [scale и layout](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L715), [внешний clip](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L1015).
 
 Исправление: material соответствует реальным bounds шторки; navigation content имеет явно определённый viewport. Если для производительности сохраняется большой canvas, видимый rect и obstruction должны передаваться всем потребителям, включая scroll, footer, hit testing и navigation transitions. Оптимизировать это после корректной базовой реализации и измерений.
 
@@ -73,9 +73,9 @@ Apple отдельно описывает зависимость visual effects 
 
 **Подтверждено кодом.** `AetherModalPresentationController.deviceCornerRadius` всегда возвращает `0`, поэтому низ шторки всегда получает `topCornerRadius`, обычно 34. `NavigationContainer.screenCornerRadius` также всегда возвращает `0`, поэтому ветка скругления движущейся страницы не выполняется. Комментарии о согласовании с устройством не соответствуют реализации.
 
-Код: [внешний радиус](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L54), [выбор углов modal](../../Sources/AetherUI/Modal/AetherModalController.swift#L1003), [радиус страницы](../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L70), [неиспользуемая ветка coordinator](../../Sources/AetherUI/NavigationController/NavigationTransitionCoordinator.swift#L271).
+Код: [внешний радиус](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L54), [выбор углов modal](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L1003), [радиус страницы](../../../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L70), [неиспользуемая ветка coordinator](../../../../Sources/AetherUI/NavigationController/NavigationTransitionCoordinator.swift#L271).
 
-Дополнительно при замене Legacy на Liquid пересоздаётся renderer, но `lastCornerSignature` не сбрасывается. При тех же числах новый native material может не получить custom corners: [смена appearance](../../Sources/AetherUI/Modal/AetherModalController.swift#L451), [ранний выход](../../Sources/AetherUI/Modal/AetherModalController.swift#L1038), [замена renderer](../../Sources/AetherUI/Glass/GlassBackgroundView.swift#L1136).
+Дополнительно при замене Legacy на Liquid пересоздаётся renderer, но `lastCornerSignature` не сбрасывается. При тех же числах новый native material может не получить custom corners: [смена appearance](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L451), [ранний выход](../../../../Sources/AetherUI/Modal/AetherModalController.swift#L1038), [замена renderer](../../../../Sources/AetherUI/Glass/GlassBackgroundView.swift#L1136).
 
 Исправление: явно задать форму compact/expanded modal и правила для движущейся страницы; использовать эту геометрию в root clip, материале и source morph. Не подставлять радиус физического экрана во вложенную шторку автоматически. При замене renderer переустанавливать форму независимо от совпадения чисел.
 
@@ -83,9 +83,9 @@ Apple отдельно описывает зависимость visual effects 
 
 **Подтверждено кодом.** При захвате шторки в середине settle сохраняется текущий `dragStartFrame`, но `applyDrag` фактически строит следующий frame от точного stage1 или stage2. Первый новый шаг может перескочить от промежуточной позиции к позиции, вычисленной от конечного detent.
 
-Код: [захват текущей позиции](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L207), [расчёт drag](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L320).
+Код: [захват текущей позиции](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L207), [расчёт drag](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L320).
 
-Ещё один дефект: для единственного разрешённого `.stage1` движение вверх внутри scroll забирается шторкой; scroll recognizer отменяется, contentOffset сбрасывается вверх, а сама шторка лишь делает rubber-band. Длинный контент нормально не прокручивается. [Арбитраж](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L299), [отмена scroll](../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L232).
+Ещё один дефект: для единственного разрешённого `.stage1` движение вверх внутри scroll забирается шторкой; scroll recognizer отменяется, contentOffset сбрасывается вверх, а сама шторка лишь делает rubber-band. Длинный контент нормально не прокручивается. [Арбитраж](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L299), [отмена scroll](../../../../Sources/AetherUI/Modal/AetherModalPresentationController.swift#L232).
 
 Исправление: продолжать движение от фактического progress/frame и скорости прерванной анимации. Передавать жест scroll, когда дальнейшее расширение недоступно. Явно определить совместимость вертикального drag, горизонтального pop и клавиатурных изменений.
 
@@ -93,7 +93,7 @@ Apple отдельно описывает зависимость visual effects 
 
 **Риск, видимый в коде; конкретное проявление требует воспроизведения.** Состояние разделено между навигационным стеком, container, shared navbar, временными bars, modal flags и `DispatchQueue.main.async`. Установка обычного перехода защищена `isInstallingTransition`; интерактивная ветка вызывает layout и добавляет view до назначения coordinator без такой защиты. Реентрантный layout может увидеть переход как ещё не начавшийся.
 
-Код: [защищённая установка](../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L282), [интерактивная установка](../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L432), [отложенное применение footer](../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L148).
+Код: [защищённая установка](../../../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L282), [интерактивная установка](../../../../Sources/AetherUI/NavigationController/NavigationContainer.swift#L432), [отложенное применение footer](../../../../Sources/AetherUI/Modal/AetherModalNavigationController.swift#L148).
 
 Исправление: один transition context с source/target, исходной и целевой геометрией, progress и исходом commit/cancel. Тело, заголовок, кнопки, search accessory и footer получают один progress. Завершение синхронно фиксирует стек и очищает временные view. Операции во время перехода имеют определённый порядок. Сам факт существования временных navbar не является ошибкой; ошибка — нарушение владения, видимости или cleanup.
 
@@ -140,6 +140,6 @@ Gesture arbitration → scroll / detent drag / horizontal pop
 | Поворот/resize и смена Legacy↔Liquid | Материал, clip, corners и viewport остаются согласованными |
 | Поддерживаемые версии iOS и backend | Согласованный результат без привязки корректности к одному renderer |
 
-Существующие [AetherModalNavigationContentTests](../../Tests/AetherUITests/AetherModalNavigationContentTests.swift#L7) проверяют базовые переходы, footer и задержанные display frames. Основной анимированный footer-сценарий использует полную высоту; отсутствуют критические проверки compact viewport, отмены interactive pop, hierarchy после удаления, settle interruption и реального backdrop. Эти пробелы объясняют, почему проверки конечного состояния могут не ловить видимые в ролике нарушения.
+Существующие [AetherModalNavigationContentTests](../../../../Tests/AetherUITests/AetherModalNavigationContentTests.swift#L7) проверяют базовые переходы, footer и задержанные display frames. Основной анимированный footer-сценарий использует полную высоту; отсутствуют критические проверки compact viewport, отмены interactive pop, hierarchy после удаления, settle interruption и реального backdrop. Эти пробелы объясняют, почему проверки конечного состояния могут не ловить видимые в ролике нарушения.
 
 Переделку можно считать завершённой после воспроизведения исходного сценария без артефактов, проверки отмены/прерывания и подтверждения инвариантов hierarchy. Само прохождение текущих тестов для этого недостаточно.

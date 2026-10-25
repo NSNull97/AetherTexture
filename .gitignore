@@ -16,11 +16,11 @@ build/
 Example/build/
 
 # Local research captures and build logs
-Research/**/preview/build/
-Research/**/session.log
-Research/**/build*.log
-Research/**/release-*.log
-Research/**/tests-*.log
+Documentation/Internal/Research/**/preview/build/
+Documentation/Internal/Research/**/session.log
+Documentation/Internal/Research/**/build*.log
+Documentation/Internal/Research/**/release-*.log
+Documentation/Internal/Research/**/tests-*.log
 
 # DocC local builds
 *.doccarchive

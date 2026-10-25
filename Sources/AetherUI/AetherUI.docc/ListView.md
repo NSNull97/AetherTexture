@@ -581,7 +581,7 @@ UIKit escape hatches оставлены только для миграции.
 экранов используйте ``AetherListNode`` и его node-based API:
 `keyboardDismissBehavior`, `topOverscrollBackgroundNode`,
 `bottomOverscrollBackgroundNode` и `panVelocity(relativeTo:)`. Сводка
-заменителей приведена в `AetherNodeMigrationMap.md`.
+заменителей приведена в `Documentation/Internal/AetherNodeMigrationMap.md`.
 
 ### ``AetherListItem`` (протокол)
 

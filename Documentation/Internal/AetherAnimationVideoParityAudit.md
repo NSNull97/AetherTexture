@@ -155,7 +155,7 @@ Navbar получает развитую `.fluidMorph`; обычный `GlassBar
 
 Код: [blur кнопок](https://github.com/NSNull97/AetherTexture/blob/8e528515b91ae57318d5e6aa59236b1a373e7576/Sources/AetherUI/Glass/GlassControlGroup.swift#L691), [общий setBlur](https://github.com/NSNull97/AetherTexture/blob/8e528515b91ae57318d5e6aa59236b1a373e7576/Sources/AetherUI/Core/ContainedViewLayoutTransition.swift#L573).
 
-В текущем [Package.swift](./Package.swift#L33) определения флага закомментированы. Поэтому это нельзя объявлять дефектом именно текущей сборки без проверки её внешних build settings. Также фильтр может быть недоступен в runtime независимо от флага.
+В текущем [Package.swift](../../Package.swift#L33) определения флага закомментированы. Поэтому это нельзя объявлять дефектом именно текущей сборки без проверки её внешних build settings. Также фильтр может быть недоступен в runtime независимо от флага.
 
 **Что нужно изменить:** если паритет нужен в этом режиме, дать содержимому альтернативную реализацию blur/reveal. Не менять поведение accessibility Reduce Motion ради совпадения с обычной записью.
 

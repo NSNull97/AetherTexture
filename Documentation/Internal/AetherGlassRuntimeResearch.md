@@ -153,7 +153,7 @@
 
 Это **наблюдения для одной геометрии и среды**, не предлагаемые дефолты AetherUI. Размер, форма, тема, системная настройка стекла, accessibility и OS build влияют на результат.
 
-В текущем [LensSDFFilter](Sources/AetherUI/ContextMenu/LensTransition/LensSDFFilter.swift) используется `gaussianBlur + displacementMap` и один `CASDFGlassDisplacementEffect`. Это полезная оптическая деформация, но она не включает всю перечисленную систему. Ближайшее расширение — отдельное управление системным material descriptor и foreground lensing, а не замена всех фильтров нашими константами.
+В текущем [LensSDFFilter](../../Sources/AetherUI/ContextMenu/LensTransition/LensSDFFilter.swift) используется `gaussianBlur + displacementMap` и один `CASDFGlassDisplacementEffect`. Это полезная оптическая деформация, но она не включает всю перечисленную систему. Ближайшее расширение — отдельное управление системным material descriptor и foreground lensing, а не замена всех фильтров нашими константами.
 
 У `CAFilter` неизвестный KVC-ключ может возвращать `nil` без исключения. Поэтому «KVC не упал» не доказывает поддержку. Отдельно созданные filters могут также возвращать `nil`, пока UIKit ещё не установил значения. Строки `glass` и `sdf` нельзя автоматически считать именами фильтров только из-за похожих названий классов.
 
@@ -232,7 +232,7 @@ _UIMultiLayer                         ← view.layer.superlayer
 3. Исследовать native foreground lensing как альтернативу части snapshot distortion.
 4. Выносить прямое использование AnimationKit в отдельный эксперимент, не делать его обязательным для показа меню.
 
-Текущие [AetherContentMaterialization](Sources/AetherUI/Glass/AetherContentMaterialization.swift) и [ContextMenuGlassmorphicTransitionView](Sources/AetherUI/ContextMenu/ContextMenuGlassmorphicTransitionView.swift) сохраняют ценность: они решают подготовку содержимого, геометрию, прерывание и reversal. Новые находки относятся прежде всего к оптике материала.
+Текущие [AetherContentMaterialization](../../Sources/AetherUI/Glass/AetherContentMaterialization.swift) и [ContextMenuGlassmorphicTransitionView](../../Sources/AetherUI/ContextMenu/ContextMenuGlassmorphicTransitionView.swift) сохраняют ценность: они решают подготовку содержимого, геометрию, прерывание и reversal. Новые находки относятся прежде всего к оптике материала.
 
 ## 6. Касание, lift, drag, glow
 
@@ -249,13 +249,13 @@ _UIMultiLayer                         ← view.layer.superlayer
 
 Простой `setLifted:` не следует предполагать: в таблице этого класса есть основной метод с четырьмя аргументами и `set_lifted:`. Наш fallback уже проверяет `responds(to:)`; расширяя его, нужно сохранять эту проверку и фактический ABI.
 
-Наш [GlassTouchEffect](Sources/AetherUI/Glass/GlassTouchEffect.swift) реализует собственные spring/translation/glow. Кандидат улучшения — управляемый native flex для отдельных controls. Числовые значения activation modes и variants пока не восстановлены, а конфликт с текущим tracking ещё не исследован.
+Наш [GlassTouchEffect](../../Sources/AetherUI/Glass/GlassTouchEffect.swift) реализует собственные spring/translation/glow. Кандидат улучшения — управляемый native flex для отдельных controls. Числовые значения activation modes и variants пока не восстановлены, а конфликт с текущим tracking ещё не исследован.
 
 ## 7. Яркость, адаптация и monochrome
 
 ### Подтверждённая проблема AetherUI: luma-контейнер
 
-В [GlassUtils.swift](Sources/AetherUI/Glass/GlassUtils.swift) `EffectSettingsContainerView` содержит только два обычных Swift stored properties:
+В [GlassUtils.swift](../../Sources/AetherUI/Glass/GlassUtils.swift) `EffectSettingsContainerView` содержит только два обычных Swift stored properties:
 
 ```swift
 public var lumaMin: Double = 0.0
@@ -344,14 +344,14 @@ Apple описывает обновления материала iOS 27 как �
 ## Повторить исследование
 
 ```sh
-python3 Research/GlassRuntime/run.py --device <booted-device-udid> --label ios27 --appearance light
-python3 Research/GlassRuntime/run.py --device <booted-device-udid> --label ios27-dark --appearance dark
-python3 Research/GlassRuntime/analyze.py ios27 ios27-dark
-python3 Research/GlassRuntime/run.py --device <ios26-device-udid> --label ios26 --appearance light
-python3 Research/GlassRuntime/run.py --device <ios26-device-udid> --label ios26-dark --appearance dark
-python3 Research/GlassRuntime/analyze.py ios26 ios26-dark
-python3 Research/GlassRuntime/compare.py ios26 ios27
-python3 Research/GlassRuntime/compare.py ios26-dark ios27-dark
+python3 Documentation/Internal/Research/GlassRuntime/run.py --device <booted-device-udid> --label ios27 --appearance light
+python3 Documentation/Internal/Research/GlassRuntime/run.py --device <booted-device-udid> --label ios27-dark --appearance dark
+python3 Documentation/Internal/Research/GlassRuntime/analyze.py ios27 ios27-dark
+python3 Documentation/Internal/Research/GlassRuntime/run.py --device <ios26-device-udid> --label ios26 --appearance light
+python3 Documentation/Internal/Research/GlassRuntime/run.py --device <ios26-device-udid> --label ios26-dark --appearance dark
+python3 Documentation/Internal/Research/GlassRuntime/analyze.py ios26 ios26-dark
+python3 Documentation/Internal/Research/GlassRuntime/compare.py ios26 ios27
+python3 Documentation/Internal/Research/GlassRuntime/compare.py ios26-dark ios27-dark
 ```
 
 Стенд устанавливает только `local.aether.glassprobe`. Использует scene lifecycle. Перед запуском удаляет только собственные старые JSON из своего app container, чтобы сбой не выдавался за новое исследование. Результаты копируются после появления всех файлов; screenshot делается после завершения materialization demo. Приложение завершается после сбора. SDK / runtime / git SHA / SHA256 исследованных исходников сохраняются рядом.
